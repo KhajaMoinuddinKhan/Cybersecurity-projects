@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MKMK SIEM Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">M</div>
+        <div>
+          <div class="eyebrow">MKMK // SECURITY OPERATIONS</div>
+          <h1>MKMK SIEM Dashboard</h1>
+          <p>Synthetic event monitoring, triage, filtering, and analyst review.</p>
+        </div>
+      </div>
+
+      <div class="status-stack">
+        <div class="status-pill">
+          <span class="pulse"></span>
+          LOCAL LAB ONLINE
+        </div>
+        <div class="view-pill">
+          <span>Current view</span>
+          <strong>{{ current_view }}</strong>
+        </div>
+      </div>
+    </header>
+
+    <section class="stats-grid" aria-label="SIEM event summary">
+      <article class="stat-card stat-total">
+        <div class="stat-head"><span class="stat-icon">Σ</span><span class="stat-label">Total Events</span></div>
+        <div class="stat-value">{{ counts["Total"] }}</div>
+        <div class="stat-caption">Events currently stored in SQLite</div>
+      </article>
+
+      <article class="stat-card stat-high">
+        <div class="stat-head"><span class="stat-icon">!</span><span class="stat-label">High Severity</span></div>
+        <div class="stat-value">{{ counts["High"] }}</div>
+        <div class="stat-caption">Priority events for immediate review</div>
+      </article>
+
+      <article class="stat-card stat-medium">
+        <div class="stat-head"><span class="stat-icon">◆</span><span class="stat-label">Medium Severity</span></div>
+        <div class="stat-value">{{ counts["Medium"] }}</div>
+        <div class="stat-caption">Events requiring analyst validation</div>
+      </article>
+
+      <article class="stat-card stat-low">
+        <div class="stat-head"><span class="stat-icon">●</span><span class="stat-label">Low Severity</span></div>
+        <div class="stat-value">{{ counts["Low"] }}</div>
+        <div class="stat-caption">Routine and lower-risk activity</div>
+      </article>
+    </section>
+
+    <section class="overview-grid">
+      <article class="panel distribution-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="section-kicker">SOC SNAPSHOT</span>
+            <h2>Severity Distribution</h2>
+          </div>
+          <div class="mini-chip">{{ counts["Total"] }} total</div>
+        </div>
+
+        <div class="distribution-list">
+          <div class="distribution-row">
+            <div class="distribution-meta"><span><i class="dot dot-high"></i>High</span><strong>{{ counts["High"] }}</strong></div>
+            <div class="track"><div class="fill fill-high" style="width: {{ '%.1f'|format(high_width) }}%"></div></div>
+          </div>
+          <div class="distribution-row">
+            <div class="distribution-meta"><span><i class="dot dot-medium"></i>Medium</span><strong>{{ counts["Medium"] }}</strong></div>
+            <div class="track"><div class="fill fill-medium" style="width: {{ '%.1f'|format(medium_width) }}%"></div></div>
+          </div>
+          <div class="distribution-row">
+            <div class="distribution-meta"><span><i class="dot dot-low"></i>Low</span><strong>{{ counts["Low"] }}</strong></div>
+            <div class="track"><div class="fill fill-low" style="width: {{ '%.1f'|format(low_width) }}%"></div></div>
+          </div>
+        </div>
+
+        <div class="health-card">
+          <div>
+            <span class="health-label">Data source</span>
+            <strong>Local SQLite Event Store</strong>
+          </div>
+          <span class="health-state">HEALTHY</span>
+        </div>
+      </article>
+
+      <article class="panel analyst-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="section-kicker">ANALYST WORKSPACE</span>
+            <h2>Event Triage</h2>
+          </div>
+          <div class="mini-chip">{{ rows|length }} shown</div>
+        </div>
+
+        <form class="search-form" method="get" action="/">
+          {% if current_severity %}
+          <input type="hidden" name="severity" value="{{ current_severity }}">
+          {% endif %}
+          <div class="search-box">
+            <span class="search-symbol">⌕</span>
+            <input type="text" name="search" value="{{ search }}" placeholder="Search event, source IP, or username" aria-label="Search events">
+          </div>
+          <button type="submit">Search Events</button>
+        </form>
+
+        <nav class="filters" aria-label="Severity filters">
+          <a class="filter-chip {{ 'active' if not current_severity else '' }}" href="{{ build_filter_link(None, search) }}">All Events</a>
+          <a class="filter-chip filter-high {{ 'active' if current_severity == 'High' else '' }}" href="{{ build_filter_link('High', search) }}">High</a>
+          <a class="filter-chip filter-medium {{ 'active' if current_severity == 'Medium' else '' }}" href="{{ build_filter_link('Medium', search) }}">Medium</a>
+          <a class="filter-chip filter-low {{ 'active' if current_severity == 'Low' else '' }}" href="{{ build_filter_link('Low', search) }}">Low</a>
+          {% if search %}
+          <a class="filter-chip clear-chip" href="{{ build_filter_link(current_severity or None, '') }}">Clear Search</a>
+          {% endif %}
+        </nav>
+
+        <div class="analyst-summary">
+          <div><span>Visible events</span><strong>{{ rows|length }}</strong></div>
+          <div><span>Severity filter</span><strong>{{ current_severity or "All" }}</strong></div>
+          <div><span>Search</span><strong>{{ search or "None" }}</strong></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel event-panel">
+      <div class="panel-heading event-heading">
+        <div>
+          <span class="section-kicker">LIVE EVENT FEED</span>
+          <h2>Recent Security Events</h2>
+        </div>
+        <div class="feed-status"><span class="pulse"></span>Monitoring synthetic telemetry</div>
+      </div>
+
+      {% if rows %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Event ID</th>
+              <th>Time</th>
+              <th>Source IP</th>
+              <th>Event</th>
+              <th>Severity</th>
+              <th>User</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            <tr>
+              <td><span class="event-id">EVT-{{ "%04d"|format(row[0]) }}</span></td>
+              <td class="timestamp">{{ row[1] }}</td>
+              <td><span class="ip">{{ row[2] }}</span></td>
+              <td class="event-name">{{ row[3] }}</td>
+              <td><span class="severity severity-{{ row[4]|lower }}">{{ row[4] }}</span></td>
+              <td><span class="user">{{ row[5] }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <div class="empty-icon">⌕</div>
+        <h3>No events matched this view</h3>
+        <p>Adjust the severity filter or clear the current search.</p>
+      </div>
+      {% endif %}
+
+      <footer class="panel-footer">
+        <span>MKMK SIEM • Flask + SQLite</span>
+        <span>Safe synthetic data for local portfolio demonstration</span>
+      </footer>
+    </section>
+  </main>
+</body>
+</html>

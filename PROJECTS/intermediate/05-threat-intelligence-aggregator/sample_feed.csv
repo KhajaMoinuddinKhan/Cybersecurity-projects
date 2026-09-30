@@ -1,0 +1,4 @@
+type,value,source
+ip,198.51.100.23,lab-feed
+domain,bad-domain.example,lab-feed
+hash,44d88612fea8a8f36de82e1278abb02f,lab-feed

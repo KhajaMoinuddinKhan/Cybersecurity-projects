@@ -1,0 +1,29 @@
+{
+  "assets": [
+    {
+      "provider": "AWS",
+      "type": "EC2",
+      "name": "web-server-01",
+      "public": true,
+      "tags": {
+        "Owner": "Security-Lab"
+      }
+    },
+    {
+      "provider": "Azure",
+      "type": "Storage",
+      "name": "student-storage",
+      "public": false,
+      "tags": {}
+    },
+    {
+      "provider": "AWS",
+      "type": "VPC",
+      "name": "lab-network",
+      "public": false,
+      "tags": {
+        "Owner": "Student"
+      }
+    }
+  ]
+}

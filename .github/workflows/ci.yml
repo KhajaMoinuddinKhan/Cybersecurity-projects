@@ -1,0 +1,40 @@
+name: Python checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - PROJECTS/beginner/01-network-traffic-analyzer
+          - PROJECTS/beginner/02-phishing-url-detector
+          - PROJECTS/beginner/03-file-integrity-monitor
+          - PROJECTS/intermediate/04-siem-dashboard
+          - PROJECTS/intermediate/05-threat-intelligence-aggregator
+          - PROJECTS/intermediate/06-ssl-tls-scanner
+          - PROJECTS/intermediate/07-password-policy-auditor
+          - PROJECTS/intermediate/08-docker-security-audit
+          - PROJECTS/moderate/09-web-vulnerability-scanner
+          - PROJECTS/moderate/10-cloud-asset-inventory
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install test runner
+        run: python -m pip install --upgrade pytest
+      - name: Install project dependencies
+        run: |
+          if [ -f "${{ matrix.project }}/requirements.txt" ]; then
+            python -m pip install -r "${{ matrix.project }}/requirements.txt"
+          fi
+      - name: Compile Python source
+        run: python -m compileall -q "${{ matrix.project }}"
+      - name: Run tests
+        working-directory: ${{ matrix.project }}
+        run: PYTHONPATH=. pytest -q tests

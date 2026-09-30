@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="300" viewBox="0 0 1100 300">
+<rect width="1100" height="300" rx="24" fill="#07121d"/>
+<g font-family="Arial,sans-serif" font-weight="700">
+  <rect x="45" y="70" width="160" height="150" rx="18" fill="#0e2231" stroke="#39e7ee"/><text x="82" y="130" fill="#86fbff" font-size="25">NETWORK</text><text x="77" y="165" fill="#b6cad3" font-size="16">PCAP • DNS</text><text x="70" y="190" fill="#b6cad3" font-size="16">PORTS • HOSTS</text>
+  <rect x="265" y="70" width="160" height="150" rx="18" fill="#10221d" stroke="#63f08f"/><text x="297" y="130" fill="#78ff9b" font-size="25">DEFENSE</text><text x="296" y="165" fill="#b6cad3" font-size="16">SIEM • FIM</text><text x="290" y="190" fill="#b6cad3" font-size="16">THREAT INTEL</text>
+  <rect x="485" y="70" width="160" height="150" rx="18" fill="#221b12" stroke="#ffc857"/><text x="520" y="130" fill="#ffd86a" font-size="25">APPSEC</text><text x="518" y="165" fill="#b6cad3" font-size="16">WEB • TLS</text><text x="517" y="190" fill="#b6cad3" font-size="16">DOCKER</text>
+  <rect x="705" y="70" width="160" height="150" rx="18" fill="#20151f" stroke="#ff83d8"/><text x="742" y="130" fill="#ff9be0" font-size="25">CLOUD</text><text x="737" y="165" fill="#b6cad3" font-size="16">ASSETS</text><text x="733" y="190" fill="#b6cad3" font-size="16">VISIBILITY</text>
+</g>
+<path d="M205 145h60M425 145h60M645 145h60" stroke="#7c98a5" stroke-width="3"/>
+<path d="M250 135l12 10-12 10M470 135l12 10-12 10M690 135l12 10-12 10" fill="none" stroke="#7c98a5" stroke-width="3"/>
+<text x="908" y="129" fill="#e7f3f7" font-family="monospace" font-size="18">CODE</text>
+<text x="908" y="158" fill="#8ffcff" font-family="monospace" font-size="18">TEST</text>
+<text x="908" y="187" fill="#78ff9b" font-family="monospace" font-size="18">LEARN</text>
+</svg>

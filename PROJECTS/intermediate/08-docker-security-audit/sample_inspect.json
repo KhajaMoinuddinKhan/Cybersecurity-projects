@@ -1,0 +1,21 @@
+{
+  "Config": {
+    "User": ""
+  },
+  "HostConfig": {
+    "Privileged": false,
+    "NetworkMode": "bridge",
+    "Binds": [
+      "/tmp/app-data:/data"
+    ]
+  },
+  "NetworkSettings": {
+    "Ports": {
+      "8080/tcp": [
+        {
+          "HostPort": "8080"
+        }
+      ]
+    }
+  }
+}
