@@ -1,4 +1,4 @@
-"""Import and search simple IOC feeds in SQLite."""
+"""Import and search IOC data with SQLite."""
 from __future__ import annotations
 
 import argparse
@@ -8,9 +8,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable
 
-
-# [SECTION] IOC types and storage schema
-# Restricting IOC categories keeps the local database predictable and easier to query.
+# Keep the stored indicator types predictable.
 VALID_TYPES = {"ip", "domain", "hash", "url"}
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS iocs (
@@ -20,19 +18,16 @@ value TEXT NOT NULL,
 source TEXT NOT NULL,
 UNIQUE(type,value))"""
 
-
 def get_connection(db_path: Path) -> sqlite3.Connection:
-    """Open the SQLite database and ensure the IOC table exists."""
+    """Open the database and create the table if needed."""
 
     connection = sqlite3.connect(db_path)
     connection.execute(SCHEMA)
     connection.commit()
     return connection
 
-
-# [SECTION] Feed normalization
 def normalise_row(row: dict[str, str]) -> tuple[str, str, str]:
-    """Validate and normalize one feed record before it enters the database."""
+    """Clean one IOC row before saving it."""
 
     kind = row.get("type", "").strip().lower()
     value = row.get("value", "").strip()
@@ -45,32 +40,31 @@ def normalise_row(row: dict[str, str]) -> tuple[str, str, str]:
 
     return kind, value, source
 
-
 def read_feed(path: Path) -> list[tuple[str, str, str]]:
-    """Read IOC rows from either JSON or CSV and normalize every record."""
+    """Read IOC rows from JSON or CSV."""
 
     if path.suffix.lower() == ".json":
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, list):
             raise ValueError("JSON feed must be a list")
-        return [normalise_row(dict(item)) for item in data]
+        if not all(isinstance(item, dict) for item in data):
+            raise ValueError("Every JSON feed item must be an object")
+        return [normalise_row(item) for item in data]
 
     with path.open(newline="", encoding="utf-8") as handle:
         return [normalise_row(row) for row in csv.DictReader(handle)]
 
-
-# [SECTION] IOC ingestion
 def import_iocs(
     db_path: Path,
     rows: Iterable[tuple[str, str, str]],
 ) -> int:
-    """Insert unique IOCs and return how many new database rows were created."""
+    """Insert new indicators and skip duplicates."""
 
     rows = list(rows)
     with get_connection(db_path) as connection:
         before = connection.execute("SELECT COUNT(*) FROM iocs").fetchone()[0]
 
-        # INSERT OR IGNORE works with the UNIQUE(type, value) rule to deduplicate IOCs.
+        # The database uniqueness rule drops duplicate indicators.
         connection.executemany(
             "INSERT OR IGNORE INTO iocs(type,value,source) VALUES (?,?,?)",
             rows,
@@ -79,22 +73,24 @@ def import_iocs(
 
     return after - before
 
+def _escape_like(value: str) -> str:
+    """Escape SQL wildcard characters in search text."""
 
-# [SECTION] IOC lookup
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 def search_iocs(db_path: Path, term: str) -> list[tuple[str, str, str]]:
-    """Search IOC values using a parameterized SQL LIKE query."""
+    """Search stored indicator values."""
 
+    pattern = f"%{_escape_like(term)}%"
     with get_connection(db_path) as connection:
         return connection.execute(
             "SELECT type,value,source FROM iocs "
-            "WHERE value LIKE ? ORDER BY type,value",
-            (f"%{term}%",),
+            "WHERE value LIKE ? ESCAPE '\\' ORDER BY type,value",
+            (pattern,),
         ).fetchall()
 
-
-# [SECTION] Command-line interface
 def main() -> None:
-    """Import a feed, search stored indicators, or perform both operations."""
+    """Import a feed or search the local database."""
 
     parser = argparse.ArgumentParser(description="Import and search local IOC feeds.")
     parser.add_argument("--db", type=Path, default=Path("threat_intel.db"))
@@ -114,7 +110,6 @@ def main() -> None:
             print("No matching IOCs found.")
         for row in results:
             print(f"{row[0]:7} {row[1]:40} {row[2]}")
-
 
 if __name__ == "__main__":
     main()

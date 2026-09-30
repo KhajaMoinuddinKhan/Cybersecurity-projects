@@ -1,4 +1,4 @@
-"""Summarise a PCAP for basic defensive network analysis."""
+"""Small PCAP traffic summary tool."""
 from __future__ import annotations
 
 import argparse
@@ -7,13 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-
-# [SECTION] Normalized packet model
-# Scapy packets contain many protocol-specific fields. This small data class keeps
-# only the fields the analyzer needs so the summarization logic stays easy to test.
 @dataclass(frozen=True)
 class TrafficRecord:
-    """Represent the security-relevant fields extracted from one packet."""
+    """Packet fields used in the summary."""
 
     protocol: str
     source: str | None = None
@@ -21,12 +17,8 @@ class TrafficRecord:
     destination_port: int | None = None
     dns_query: str | None = None
 
-
-# [SECTION] Traffic summarization
-# This function works on TrafficRecord objects rather than raw Scapy packets. That
-# separation lets tests exercise the counting logic without needing a PCAP file.
 def summarize_records(records: Iterable[TrafficRecord]) -> dict[str, Any]:
-    """Aggregate packet records into protocol, host, port, and DNS statistics."""
+    """Count protocols, hosts, ports, and DNS names."""
 
     records = list(records)
     return {
@@ -45,26 +37,23 @@ def summarize_records(records: Iterable[TrafficRecord]) -> dict[str, Any]:
         ],
     }
 
-
-# [SECTION] Packet parsing
-# Scapy is imported inside the function so the pure summarization code can still
-# be imported and tested on systems where Scapy is not installed.
 def packet_to_record(packet: Any) -> TrafficRecord:
-    """Convert a raw Scapy packet into a simplified TrafficRecord."""
+    """Pull the fields we need from one Scapy packet."""
 
+    # Import Scapy here so the summary code can load without it.
     from scapy.layers.dns import DNS, DNSQR
     from scapy.layers.inet import IP, TCP, UDP
     from scapy.layers.inet6 import IPv6
 
     source = destination = None
 
-    # Prefer IPv4 fields when present, otherwise fall back to IPv6.
+    # Use IPv4 first, then fall back to IPv6.
     if IP in packet:
         source, destination = packet[IP].src, packet[IP].dst
     elif IPv6 in packet:
         source, destination = packet[IPv6].src, packet[IPv6].dst
 
-    # Identify the transport protocol and capture a destination port when one exists.
+    # Pick the transport protocol and destination port.
     protocol = "OTHER"
     destination_port = None
     if TCP in packet:
@@ -74,7 +63,7 @@ def packet_to_record(packet: Any) -> TrafficRecord:
     elif source:
         protocol = "IP"
 
-    # DNS queries are useful during incident review because they show requested names.
+    # Keep the DNS name when this packet contains a query.
     dns_query = None
     if DNS in packet and getattr(packet[DNS], "qdcount", 0) and DNSQR in packet:
         raw_query = packet[DNSQR].qname
@@ -92,19 +81,15 @@ def packet_to_record(packet: Any) -> TrafficRecord:
         dns_query,
     )
 
-
-# [SECTION] PCAP loading
 def analyse_pcap(path: Path) -> dict[str, Any]:
-    """Read a PCAP file with Scapy and return its summarized security data."""
+    """Read a PCAP and return its summary."""
 
     from scapy.all import rdpcap
 
     return summarize_records(packet_to_record(packet) for packet in rdpcap(str(path)))
 
-
-# [SECTION] Console reporting
 def print_summary(summary: dict[str, Any]) -> None:
-    """Print a human-readable report from the aggregated traffic summary."""
+    """Print the traffic summary."""
 
     print(f"Packets analysed: {summary['packet_count']}")
 
@@ -125,10 +110,8 @@ def print_summary(summary: dict[str, Any]) -> None:
         for query in summary["dns_queries"][:20]:
             print(f"  {query}")
 
-
-# [SECTION] Command-line interface
 def main() -> None:
-    """Parse CLI arguments, validate the PCAP path, and print the analysis."""
+    """Read the command-line arguments and run the analyzer."""
 
     parser = argparse.ArgumentParser(
         description="Summarise a PCAP for basic defensive network analysis."
@@ -145,7 +128,6 @@ def main() -> None:
         raise SystemExit(
             "Scapy is required. Run: python -m pip install -r requirements.txt"
         ) from exc
-
 
 if __name__ == "__main__":
     main()

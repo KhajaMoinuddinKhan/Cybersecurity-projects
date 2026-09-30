@@ -1,14 +1,11 @@
-"""Check a password-policy configuration against a visible baseline."""
+"""Check a password policy against a small baseline."""
 from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
-
-# [SECTION] Visible baseline
-# The values are intentionally defined in one place so a reviewer can see exactly
-# what the learning tool considers acceptable rather than relying on hidden logic.
+# Baseline values used by this small example.
 RECOMMENDED = {
     "min_length": 12,
     "require_upper": True,
@@ -19,11 +16,9 @@ RECOMMENDED = {
     "reuse_limit": 5,
 }
 
-
-# [SECTION] Audit result model
 @dataclass(frozen=True)
 class PolicyCheck:
-    """Describe the result of checking one password-policy setting."""
+    """Result for one policy setting."""
 
     setting: str
     actual: object | None
@@ -31,10 +26,8 @@ class PolicyCheck:
     passed: bool
     explanation: str
 
-
-# [SECTION] Policy parser
 def parse_policy(path: Path) -> dict[str, object]:
-    """Parse a simple key=value policy file into typed Python values."""
+    """Read a key=value policy file."""
 
     values: dict[str, object] = {}
 
@@ -44,7 +37,7 @@ def parse_policy(path: Path) -> dict[str, object]:
     ):
         stripped = line.strip()
 
-        # Ignore blank lines and comments so the file stays readable for humans.
+        # Blank lines and file comments can be ignored.
         if not stripped or stripped.startswith("#"):
             continue
 
@@ -66,17 +59,15 @@ def parse_policy(path: Path) -> dict[str, object]:
 
     return values
 
-
-# [SECTION] Baseline comparison
 def audit_policy(policy: dict[str, object]) -> list[PolicyCheck]:
-    """Compare each supported policy setting against the visible baseline."""
+    """Compare the policy with the baseline."""
 
     checks: list[PolicyCheck] = []
 
     for key, recommended in RECOMMENDED.items():
         actual = policy.get(key)
 
-        # Minimum length becomes stronger as the configured number increases.
+        # Each numeric setting has a different direction of comparison.
         if key == "min_length":
             passed = (
                 isinstance(actual, int)
@@ -85,7 +76,6 @@ def audit_policy(policy: dict[str, object]) -> list[PolicyCheck]:
             )
             explanation = "The baseline expects a sufficiently long minimum."
 
-        # Maximum age becomes stricter as the allowed number of days decreases.
         elif key == "max_age_days":
             passed = (
                 isinstance(actual, int)
@@ -94,7 +84,6 @@ def audit_policy(policy: dict[str, object]) -> list[PolicyCheck]:
             )
             explanation = "The baseline expects a positive age limit at or below this value."
 
-        # A larger history blocks more previously used passwords from being reused.
         elif key == "reuse_limit":
             passed = (
                 isinstance(actual, int)
@@ -106,7 +95,6 @@ def audit_policy(policy: dict[str, object]) -> list[PolicyCheck]:
                 "to be blocked from reuse."
             )
 
-        # Boolean controls must be explicitly enabled rather than merely truthy.
         else:
             passed = actual is recommended
             explanation = "The baseline expects this control to be enabled."
@@ -123,10 +111,8 @@ def audit_policy(policy: dict[str, object]) -> list[PolicyCheck]:
 
     return checks
 
-
-# [SECTION] Command-line interface
 def main() -> None:
-    """Read a policy file, run the checks, and print PASS/REVIEW results."""
+    """Read a policy file and print the results."""
 
     parser = argparse.ArgumentParser(
         description="Audit a password-policy configuration file."
@@ -150,7 +136,6 @@ def main() -> None:
         )
         if not check.passed:
             print(f"       {check.explanation}")
-
 
 if __name__ == "__main__":
     main()

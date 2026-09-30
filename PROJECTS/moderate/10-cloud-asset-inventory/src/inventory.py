@@ -1,4 +1,4 @@
-"""Review a synthetic cloud-asset export for simple security gaps."""
+"""Review a synthetic cloud inventory."""
 from __future__ import annotations
 
 import argparse
@@ -6,16 +6,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-
-# [SECTION] Required governance metadata
+# Tags checked by this example inventory.
 REQUIRED_TAGS = ("Owner", "Environment")
 
-
-# [SECTION] Asset review rules
 def review_assets(
     assets: list[dict[str, Any]],
 ) -> list[tuple[str, str, str]]:
-    """Review synthetic assets for public exposure and missing metadata."""
+    """Check assets for public exposure and missing metadata."""
 
     findings: list[tuple[str, str, str]] = []
 
@@ -23,13 +20,12 @@ def review_assets(
         name = str(asset.get("name") or "unnamed")
         resource_type = str(asset.get("type") or "unknown")
 
-        # Public exposure is surfaced for analyst review rather than assumed malicious.
+        # Public assets get a review item, not an automatic failure.
         if asset.get("public") is True:
             findings.append(
                 ("MEDIUM", name, f"{resource_type} is marked public.")
             )
 
-        # Ownership and environment tags support accountability and asset governance.
         raw_tags = asset.get("tags")
         if raw_tags is None:
             tags: dict[str, Any] = {}
@@ -49,16 +45,13 @@ def review_assets(
                 ("LOW", name, "Missing metadata: " + ", ".join(missing))
             )
 
-        # Region is useful for inventory, residency, and incident-response context.
         if not asset.get("region"):
             findings.append(("LOW", name, "Region is not recorded."))
 
     return findings
 
-
-# [SECTION] Asset-file validation
 def load_assets(path: Path) -> list[dict[str, Any]]:
-    """Load and validate the expected synthetic cloud inventory JSON structure."""
+    """Load the asset JSON file."""
 
     data = json.loads(path.read_text(encoding="utf-8"))
 
@@ -70,10 +63,8 @@ def load_assets(path: Path) -> list[dict[str, Any]]:
 
     return data["assets"]
 
-
-# [SECTION] Command-line interface
 def main() -> None:
-    """Load the inventory, print assets, and report configured security gaps."""
+    """Load the inventory and print the findings."""
 
     parser = argparse.ArgumentParser(
         description="Inventory synthetic cloud assets and flag simple gaps."
@@ -104,7 +95,6 @@ def main() -> None:
 
     for severity, name, message in findings:
         print(f"[{severity}] {name}: {message}")
-
 
 if __name__ == "__main__":
     main()

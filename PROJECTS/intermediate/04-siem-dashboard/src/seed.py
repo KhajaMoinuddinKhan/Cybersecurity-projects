@@ -1,4 +1,4 @@
-"""Seed the local MKMK SIEM dashboard with synthetic security events."""
+"""Load sample events into the local SIEM database."""
 from __future__ import annotations
 
 import argparse
@@ -6,10 +6,8 @@ from pathlib import Path
 
 from app import SAMPLE_EVENTS, get_connection, reset_events, seed_events
 
-
-# [SECTION] Command-line seed utility
 def main() -> None:
-    """Create the database and insert the shared synthetic analyst dataset."""
+    """Insert the sample event set."""
 
     parser = argparse.ArgumentParser(
         description="Insert synthetic events into the local SIEM database."
@@ -30,7 +28,6 @@ def main() -> None:
 
     inserted = seed_events(args.db, SAMPLE_EVENTS)
     print(f"Inserted {inserted} sample events into {args.db}.")
-
 
 if __name__ == "__main__":
     main()

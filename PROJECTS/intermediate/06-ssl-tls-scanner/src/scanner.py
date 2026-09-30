@@ -1,4 +1,4 @@
-"""Inspect a TLS session and peer certificate."""
+"""Inspect a TLS connection and certificate."""
 from __future__ import annotations
 
 import argparse
@@ -7,19 +7,16 @@ import ssl
 from datetime import datetime, timezone
 from typing import Any
 
-
-# [SECTION] Certificate formatting helpers
 def parse_certificate_time(value: str | None) -> str | None:
-    """Convert OpenSSL-style certificate time text into an ISO-8601 timestamp."""
+    """Convert certificate time text to ISO format."""
 
     if not value:
         return None
     parsed = datetime.strptime(value, "%b %d %H:%M:%S %Y %Z")
     return parsed.replace(tzinfo=timezone.utc).isoformat()
 
-
 def certificate_subject(cert: dict[str, Any]) -> str:
-    """Flatten the nested certificate subject fields into readable text."""
+    """Format the certificate subject."""
 
     parts = [
         f"{key}={value}"
@@ -28,9 +25,8 @@ def certificate_subject(cert: dict[str, Any]) -> str:
     ]
     return ", ".join(parts) or "Unavailable"
 
-
 def certificate_issuer(cert: dict[str, Any]) -> str:
-    """Flatten the nested certificate issuer fields into readable text."""
+    """Format the certificate issuer."""
 
     parts = [
         f"{key}={value}"
@@ -39,15 +35,12 @@ def certificate_issuer(cert: dict[str, Any]) -> str:
     ]
     return ", ".join(parts) or "Unavailable"
 
-
-# [SECTION] TLS connection inspection
 def scan(host: str, port: int = 443, timeout: float = 5.0) -> dict[str, Any]:
-    """Connect with certificate verification enabled and collect TLS metadata."""
+    """Connect with TLS verification and collect session details."""
 
-    # The default SSL context validates the certificate chain and hostname.
+    # The default context checks the certificate and hostname.
     context = ssl.create_default_context()
 
-    # First open a TCP connection, then wrap it in a verified TLS session.
     with socket.create_connection((host, port), timeout=timeout) as raw_socket:
         with context.wrap_socket(raw_socket, server_hostname=host) as tls_socket:
             cert = tls_socket.getpeercert()
@@ -63,10 +56,8 @@ def scan(host: str, port: int = 443, timeout: float = 5.0) -> dict[str, Any]:
                 "certificate_expires": parse_certificate_time(cert.get("notAfter")),
             }
 
-
-# [SECTION] Command-line interface
 def main() -> None:
-    """Inspect a TLS endpoint and print the negotiated security details."""
+    """Inspect a TLS endpoint and print the result."""
 
     parser = argparse.ArgumentParser(description="Inspect a TLS connection safely.")
     parser.add_argument("host")
@@ -81,7 +72,6 @@ def main() -> None:
 
     for key, value in result.items():
         print(f"{key}: {value}")
-
 
 if __name__ == "__main__":
     main()

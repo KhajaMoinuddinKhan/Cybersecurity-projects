@@ -1,4 +1,4 @@
-"""Create and compare SHA-256 file-integrity baselines."""
+"""Track file changes with SHA-256 hashes."""
 from __future__ import annotations
 
 import argparse
@@ -7,14 +7,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-
-# [SECTION] Hashing configuration
-# Reading large files in chunks avoids loading an entire file into memory at once.
+# Read large files in chunks instead of loading them all at once.
 CHUNK_SIZE = 1024 * 1024
 
-
 def sha256_file(path: Path) -> str:
-    """Calculate the SHA-256 digest of a file using memory-friendly chunks."""
+    """Calculate a file's SHA-256 hash."""
 
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -22,15 +19,13 @@ def sha256_file(path: Path) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
-
-# [SECTION] Baseline creation
 def build_baseline(folder: Path) -> dict[str, dict[str, Any]]:
-    """Create a deterministic baseline of file hashes and sizes under a folder."""
+    """Build a baseline for every file in a folder."""
 
     folder = folder.resolve()
     baseline: dict[str, dict[str, Any]] = {}
 
-    # rglob walks the directory recursively; sorting keeps output stable between runs.
+    # Sorting keeps the saved baseline in a stable order.
     for path in sorted(folder.rglob("*")):
         if path.is_file():
             relative_path = path.relative_to(folder).as_posix()
@@ -40,54 +35,46 @@ def build_baseline(folder: Path) -> dict[str, dict[str, Any]]:
             }
     return baseline
 
-
 def save_baseline(
     baseline: dict[str, dict[str, Any]], destination: Path
 ) -> None:
-    """Save the baseline as readable, consistently ordered JSON."""
+    """Save the baseline as JSON."""
 
     destination.write_text(
         json.dumps(baseline, indent=2, sort_keys=True),
         encoding="utf-8",
     )
 
-
 def load_baseline(path: Path) -> dict[str, dict[str, Any]]:
-    """Load a saved JSON baseline and verify its top-level structure."""
+    """Load a saved baseline."""
 
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("Baseline must contain a JSON object.")
     return data
 
-
-# [SECTION] Integrity comparison
 def compare_baseline(
     folder: Path, baseline: dict[str, dict[str, Any]]
 ) -> list[tuple[str, str]]:
-    """Classify files as added, modified, or removed compared with a baseline."""
+    """Find files that were added, changed, or removed."""
 
     current = build_baseline(folder)
     changes: list[tuple[str, str]] = []
 
-    # Files present now may be new or may have changed content.
     for path, metadata in current.items():
         if path not in baseline:
             changes.append(("ADDED", path))
         elif baseline[path].get("sha256") != metadata["sha256"]:
             changes.append(("MODIFIED", path))
 
-    # Files that existed in the baseline but no longer exist are removals.
     for path in baseline:
         if path not in current:
             changes.append(("REMOVED", path))
 
     return sorted(changes)
 
-
-# [SECTION] Command-line interface
 def main() -> None:
-    """Create a baseline or compare a folder against an existing one."""
+    """Create a baseline or compare against one."""
 
     parser = argparse.ArgumentParser(
         description="Monitor files with a SHA-256 baseline."
@@ -116,7 +103,6 @@ def main() -> None:
     print("Integrity changes detected:")
     for kind, path in changes:
         print(f"  {kind:8} {path}")
-
 
 if __name__ == "__main__":
     main()

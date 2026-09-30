@@ -1,4 +1,4 @@
-"""Local MKMK SIEM dashboard for reviewing synthetic security events."""
+"""Local SIEM dashboard using synthetic events."""
 from __future__ import annotations
 
 import argparse
@@ -7,16 +7,11 @@ from pathlib import Path
 from typing import Iterable
 from urllib.parse import urlencode
 
-
-# [SECTION] Event model and supported severities
 EventInput = tuple[str, str, str, str, str]
 EventRow = tuple[int, str, str, str, str, str]
 VALID_SEVERITIES = ("High", "Medium", "Low")
 
-
-# [SECTION] Database schema
-# SQLite keeps this learning project self-contained while still demonstrating
-# structured event storage and parameterized analyst queries.
+# SQLite keeps the demo self-contained.
 SCHEMA = """CREATE TABLE IF NOT EXISTS events (
 id INTEGER PRIMARY KEY AUTOINCREMENT,
 timestamp TEXT NOT NULL,
@@ -25,10 +20,7 @@ event TEXT NOT NULL,
 severity TEXT NOT NULL,
 username TEXT NOT NULL)"""
 
-
-# [SECTION] Shared synthetic analyst data
-# Keeping the demo dataset in one place prevents app.py --seed and seed.py from
-# drifting apart and producing different dashboard results.
+# One shared sample set is used by both entry points.
 SAMPLE_EVENTS: tuple[EventInput, ...] = (
     ("2026-09-30 09:01", "10.0.0.21", "Repeated failed login", "High", "admin"),
     ("2026-09-30 09:05", "10.0.0.18", "New admin login", "Medium", "admin"),
@@ -80,19 +72,16 @@ SAMPLE_EVENTS: tuple[EventInput, ...] = (
     ),
 )
 
-
 def get_connection(db_path: Path) -> sqlite3.Connection:
-    """Open the SQLite database and ensure the events table exists."""
+    """Open the database and create the table if needed."""
 
     connection = sqlite3.connect(db_path)
     connection.execute(SCHEMA)
     connection.commit()
     return connection
 
-
-# [SECTION] Validation helpers
 def normalise_severity(value: str | None) -> str | None:
-    """Return a canonical severity name, or None for unsupported input."""
+    """Normalize a severity value."""
 
     if value is None:
         return None
@@ -100,9 +89,8 @@ def normalise_severity(value: str | None) -> str | None:
     candidate = value.strip().title()
     return candidate if candidate in VALID_SEVERITIES else None
 
-
 def _normalise_event(row: EventInput) -> EventInput:
-    """Validate and normalize one event before it is written to SQLite."""
+    """Clean one event before saving it."""
 
     timestamp, source_ip, event, severity, username = row
     canonical_severity = normalise_severity(severity)
@@ -120,19 +108,16 @@ def _normalise_event(row: EventInput) -> EventInput:
         username.strip(),
     )
 
-
 def _escape_like(value: str) -> str:
-    """Escape SQL LIKE wildcard characters so search text is treated literally."""
+    """Escape wildcard characters in search text."""
 
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
-
-# [SECTION] Event ingestion
 def seed_events(
     db_path: Path,
     events: Iterable[EventInput],
 ) -> int:
-    """Insert validated synthetic security events and return the row count."""
+    """Insert events into the database."""
 
     rows = [_normalise_event(row) for row in events]
     with get_connection(db_path) as connection:
@@ -143,24 +128,20 @@ def seed_events(
         )
     return len(rows)
 
-
 def reset_events(db_path: Path) -> None:
-    """Remove all stored events and reset the local demo event ID sequence."""
+    """Clear the event table and restart IDs."""
 
     with get_connection(db_path) as connection:
         connection.execute("DELETE FROM events")
-        # AUTOINCREMENT creates sqlite_sequence; reset it so a fresh demo begins
-        # again at EVT-0001 rather than continuing from a previous local run.
+        # Start fresh demos at event ID 1.
         connection.execute("DELETE FROM sqlite_sequence WHERE name = 'events'")
 
-
-# [SECTION] Analyst query layer
 def query_events(
     db_path: Path,
     severity: str | None = None,
     search: str | None = None,
 ) -> list[EventRow]:
-    """Return events with optional severity and literal free-text filters."""
+    """Get events using the selected filters."""
 
     query = "SELECT id,timestamp,source_ip,event,severity,username FROM events"
     clauses: list[str] = []
@@ -201,9 +182,8 @@ def query_events(
         for row in rows
     ]
 
-
 def severity_counts(db_path: Path) -> dict[str, int]:
-    """Return dashboard totals for each supported severity and all stored rows."""
+    """Count events by severity."""
 
     counts = {"High": 0, "Medium": 0, "Low": 0}
     with get_connection(db_path) as connection:
@@ -216,14 +196,12 @@ def severity_counts(db_path: Path) -> dict[str, int]:
         if severity in counts:
             counts[str(severity)] = int(count)
 
-    # Count every stored row in Total, even if a database was manually edited with
-    # an unexpected severity value outside the normal validated ingestion path.
+    # Total includes every stored row.
     counts["Total"] = total
     return counts
 
-
 def build_filter_link(severity: str | None, search: str) -> str:
-    """Build a dashboard filter URL while preserving the search term."""
+    """Build a filter link for the dashboard."""
 
     params: dict[str, str] = {}
     canonical_severity = normalise_severity(severity)
@@ -236,10 +214,8 @@ def build_filter_link(severity: str | None, search: str) -> str:
 
     return "/?" + urlencode(params) if params else "/"
 
-
-# [SECTION] Flask dashboard
 def dashboard_app(db_path: Path):
-    """Build and return the local MKMK SIEM Flask application."""
+    """Create the Flask dashboard."""
 
     try:
         from flask import Flask, render_template, request
@@ -257,7 +233,7 @@ def dashboard_app(db_path: Path):
 
     @app.get("/")
     def index():
-        """Render the analyst dashboard with optional filters."""
+        """Render the dashboard."""
 
         severity = normalise_severity(request.args.get("severity"))
         search = request.args.get("search", "").strip()
@@ -285,10 +261,8 @@ def dashboard_app(db_path: Path):
 
     return app
 
-
-# [SECTION] Command-line interface
 def main() -> None:
-    """Optionally reset/seed the database and start the local dashboard server."""
+    """Prepare the database and start the dashboard."""
 
     parser = argparse.ArgumentParser(description="Run the local MKMK SIEM dashboard.")
     parser.add_argument("--db", type=Path, default=Path("siem.db"))
@@ -319,7 +293,6 @@ def main() -> None:
         )
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from exc
-
 
 if __name__ == "__main__":
     main()

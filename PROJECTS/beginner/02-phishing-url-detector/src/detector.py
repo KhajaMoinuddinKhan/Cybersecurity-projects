@@ -1,4 +1,4 @@
-"""Transparent heuristic URL risk scoring for learning."""
+"""Score URLs with a few simple phishing clues."""
 from __future__ import annotations
 
 import argparse
@@ -7,10 +7,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-
-# [SECTION] Detection rules
-# These words are not automatically malicious. They simply increase the score when
-# they appear in a URL because they are common in credential-themed phishing lures.
+# These words only add to the score. A match does not make a URL malicious.
 SUSPICIOUS_TERMS = {
     "account",
     "bank",
@@ -22,27 +19,22 @@ SUSPICIOUS_TERMS = {
     "verify",
 }
 
-
-# [SECTION] Result model
 @dataclass(frozen=True)
 class URLResult:
-    """Store the final score, label, and human-readable reasons for a URL."""
+    """Result returned for one URL."""
 
     score: int
     label: str
     reasons: tuple[str, ...]
 
-
-# [SECTION] URL normalization
 def normalise_url(value: str) -> str:
-    """Add a default scheme when the user supplies only a hostname or path."""
+    """Add http:// when the input has no scheme."""
 
     value = value.strip()
     return value if "://" in value else f"http://{value}"
 
-
 def is_ip_address(host: str) -> bool:
-    """Return True when the hostname is a valid IPv4 or IPv6 address."""
+    """Check whether a host is an IP address."""
 
     try:
         ipaddress.ip_address(host)
@@ -50,10 +42,8 @@ def is_ip_address(host: str) -> bool:
     except ValueError:
         return False
 
-
-# [SECTION] Heuristic scoring engine
 def score_url(url: str) -> URLResult:
-    """Score a URL using simple, explainable phishing indicators."""
+    """Score a URL and keep the reasons."""
 
     parsed = urlparse(normalise_url(url))
     host = (parsed.hostname or "").lower()
@@ -62,13 +52,12 @@ def score_url(url: str) -> URLResult:
     score = 0
     reasons: list[str] = []
 
-    # Plain HTTP does not provide transport encryption or server authentication.
+    # Plain HTTP adds one point.
     if parsed.scheme != "https":
         score += 1
         reasons.append("does not use HTTPS")
 
-    # A missing hostname is malformed; a raw IP is less trustworthy than a named site
-    # for this simple learning heuristic.
+    # Missing hosts and raw IP addresses are harder to trust at a glance.
     if not host:
         score += 2
         reasons.append("hostname is missing")
@@ -76,22 +65,20 @@ def score_url(url: str) -> URLResult:
         score += 2
         reasons.append("host is an IP address instead of a domain")
 
-    # Very long URLs can hide important parts of the destination from a user.
+    # Long URLs can hide the important part of an address.
     if len(url) > 100:
         score += 1
         reasons.append("URL is unusually long")
 
-    # Count subdomain depth only for domain names, not dotted IPv4 addresses.
     if host and not is_ip_address(host) and host.count(".") >= 3:
         score += 1
         reasons.append("contains many subdomain levels")
 
-    # The @ character can make the visible authority section confusing to users.
     if "@" in parsed.netloc:
         score += 2
         reasons.append("contains @ in the authority section")
 
-    # Search both hostname and path/query for credential-themed terms.
+    # Look for credential-themed words in the host and path.
     combined = f"{host} {path_and_query}"
     hits = sorted(
         term
@@ -105,10 +92,8 @@ def score_url(url: str) -> URLResult:
     label = "Potentially suspicious" if score >= 3 else "Lower risk by these rules"
     return URLResult(score, label, tuple(reasons))
 
-
-# [SECTION] Command-line interface
 def main() -> None:
-    """Score one or more URLs supplied from the command line."""
+    """Score URLs passed on the command line."""
 
     parser = argparse.ArgumentParser(
         description="Score URLs using transparent phishing heuristics."
@@ -121,7 +106,6 @@ def main() -> None:
         print(f"\n{raw}\n  Score: {result.score}\n  Result: {result.label}")
         for reason in result.reasons:
             print(f"  - {reason}")
-
 
 if __name__ == "__main__":
     main()
