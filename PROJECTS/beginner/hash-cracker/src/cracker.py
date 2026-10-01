@@ -19,18 +19,25 @@ class CrackResult:
     elapsed_seconds: float
 
 
-def digest_text(candidate: str, algorithm: str) -> str:
-    """Hash one candidate encoded as UTF-8."""
+def require_algorithm(algorithm: str) -> str:
+    """Normalize and validate an algorithm name before it reaches hashlib."""
     algorithm = algorithm.lower()
     if algorithm not in ALGORITHMS:
-        raise ValueError(f"Unsupported algorithm {algorithm!r}")
-    return hashlib.new(algorithm, candidate.encode("utf-8")).hexdigest()
+        raise ValueError(
+            f"Unsupported algorithm {algorithm!r}; choose from {', '.join(sorted(ALGORITHMS))}"
+        )
+    return algorithm
+
+
+def digest_text(candidate: str, algorithm: str) -> str:
+    """Hash one candidate encoded as UTF-8."""
+    return hashlib.new(require_algorithm(algorithm), candidate.encode("utf-8")).hexdigest()
 
 
 def validate_target(target: str, algorithm: str) -> str:
     """Validate and normalize a hexadecimal target digest."""
     target = target.strip().lower()
-    expected_length = hashlib.new(algorithm).digest_size * 2
+    expected_length = hashlib.new(require_algorithm(algorithm)).digest_size * 2
     if len(target) != expected_length or any(character not in "0123456789abcdef" for character in target):
         raise ValueError(f"Target is not a valid {algorithm} hexadecimal digest")
     return target
@@ -47,7 +54,7 @@ def wordlist_candidates(path: Path) -> Iterator[str]:
 
 def crack_hash(target: str, candidates: Iterable[str], algorithm: str = "sha256") -> CrackResult:
     """Try supplied candidates against one offline digest."""
-    algorithm = algorithm.lower()
+    algorithm = require_algorithm(algorithm)
     target = validate_target(target, algorithm)
     started = time.perf_counter()
     attempts = 0

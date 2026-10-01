@@ -1,6 +1,6 @@
 from pathlib import Path
 import pytest
-from src.cracker import crack_hash, digest_text, wordlist_candidates
+from src.cracker import crack_hash, digest_text, require_algorithm, wordlist_candidates
 
 
 def test_finds_candidate_from_supplied_values():
@@ -24,3 +24,9 @@ def test_wordlist_is_streamed_and_blank_lines_are_skipped(tmp_path: Path):
 def test_invalid_digest_is_rejected():
     with pytest.raises(ValueError, match="valid sha256"):
         crack_hash("not-a-digest", [])
+
+
+def test_unsupported_algorithm_names_the_choices():
+    with pytest.raises(ValueError, match="Unsupported algorithm 'crc32'"):
+        require_algorithm("crc32")
+    assert require_algorithm("SHA256") == "sha256"

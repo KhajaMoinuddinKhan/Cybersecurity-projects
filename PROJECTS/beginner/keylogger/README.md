@@ -10,7 +10,7 @@ Open a terminal in this project directory. Do not type passwords or other sensit
 python -m src.keylogger --consent --output key-events.jsonl
 ```
 
-Press **Esc** to stop. Every line contains the UTC time at which the terminal returned the key and a readable key label. The file is appended to, so choose a new filename when you want a separate session.
+Press **Esc** (or **Ctrl+C**) to stop. Every line contains the UTC time at which the terminal returned the key and a readable key label. The file is appended to, so choose a new filename when you want a separate session.
 
 The `--consent` switch is deliberate. Only use this tool on your own terminal or with clear permission from the people involved. If standard input is redirected, the program refuses to run. That prevents a pipeline or password prompt from becoming an accidental recording source.
 

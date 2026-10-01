@@ -43,6 +43,27 @@ def summarize(records: Iterable[PacketRecord]) -> dict[str, Any]:
     }
 
 
+def port_number(value: Any) -> int | None:
+    """Return a usable port number, or None when a truncated packet omits it."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def load_scapy_layers() -> None:
+    """Import the Scapy layers that register capture link types.
+
+    Scapy learns how to map a capture's link type (DLT 1 to ``Ether``, for
+    example) only when the matching layer module is imported. A reader created
+    before that falls back to ``Raw`` packets, which silently reports every
+    packet as OTHER with no addresses, ports, or DNS names.
+    """
+    from scapy.layers.dns import DNS, DNSQR  # noqa: F401  (registration side effect)
+    from scapy.layers.inet import IP, TCP, UDP  # noqa: F401
+    from scapy.layers.inet6 import IPv6  # noqa: F401
+
+
 def packet_record(packet: Any) -> PacketRecord:
     """Extract the fields used by the report from one Scapy packet."""
     from scapy.layers.dns import DNS, DNSQR
@@ -57,24 +78,27 @@ def packet_record(packet: Any) -> PacketRecord:
 
     protocol, port = "OTHER", None
     if TCP in packet:
-        protocol, port = "TCP", int(packet[TCP].dport)
+        protocol, port = "TCP", port_number(packet[TCP].dport)
     elif UDP in packet:
-        protocol, port = "UDP", int(packet[UDP].dport)
+        protocol, port = "UDP", port_number(packet[UDP].dport)
     elif source:
-        protocol = "IP"
+        protocol = "IPv6" if IPv6 in packet else "IP"
 
     query = None
     if DNS in packet and packet[DNS].qr == 0 and DNSQR in packet:
         raw = packet[DNSQR].qname
-        query = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+        if raw is not None:
+            text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+            query = text.strip() or None
     return PacketRecord(protocol, source, destination, port, query)
 
 
 def analyze_pcap(path: Path) -> dict[str, Any]:
     """Read a PCAP incrementally and return its observed report."""
     try:
-        from scapy.utils import PcapReader
         from scapy.error import Scapy_Exception
+        load_scapy_layers()  # must run before the reader is created
+        from scapy.utils import PcapReader
         with PcapReader(str(path)) as reader:
             return summarize(packet_record(packet) for packet in reader)
     except ImportError as exc:
