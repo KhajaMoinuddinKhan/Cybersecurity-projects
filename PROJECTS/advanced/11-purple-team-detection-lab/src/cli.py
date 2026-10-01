@@ -9,6 +9,8 @@ from .dashboard import serve
 from .engine import run_detection
 from .event_io import load_events, load_rules
 from .storage import alert_stats, replace_alerts
+from .feeds import refresh_feeds
+from .live import ingest
 from .website_check import inspect_website
 
 
@@ -30,6 +32,19 @@ def command_detect(args: argparse.Namespace) -> None:
             f"[{alert.severity}] {alert.rule_id} | {alert.title} | "
             f"{alert.technique_id} | {alert.group_value} | events={len(alert.event_ids)}"
         )
+
+
+def command_ingest(args: argparse.Namespace) -> None:
+    payloads=[]
+    for line in args.file.read_text(encoding="utf-8").splitlines():
+        if line.strip(): payloads.append(__import__("json").loads(line))
+    result=ingest(args.db,args.rules,payloads)
+    result.pop("_alerts",None)
+    print(result)
+
+
+def command_feeds(args: argparse.Namespace) -> None:
+    print(refresh_feeds(args.db))
 
 
 def command_summary(args: argparse.Namespace) -> None:
@@ -66,6 +81,16 @@ def build_parser() -> argparse.ArgumentParser:
     detect.add_argument("--rules", type=Path, default=_default_path("rules/detection_rules.json"))
     detect.add_argument("--db", type=Path, default=Path("purple_lab.db"))
     detect.set_defaults(func=command_detect)
+
+    live = subparsers.add_parser("ingest", help="Ingest a JSONL stream of live events")
+    live.add_argument("--file", type=Path, required=True)
+    live.add_argument("--rules", type=Path, default=_default_path("rules/detection_rules.json"))
+    live.add_argument("--db", type=Path, default=Path("purple_lab.db"))
+    live.set_defaults(func=command_ingest)
+
+    feeds = subparsers.add_parser("feeds", help="Refresh configured threat-intelligence feeds")
+    feeds.add_argument("--db", type=Path, default=Path("purple_lab.db"))
+    feeds.set_defaults(func=command_feeds)
 
     summary = subparsers.add_parser("summary", help="Print alert totals")
     summary.add_argument("--db", type=Path, default=Path("purple_lab.db"))

@@ -80,7 +80,7 @@ An empty event queue can mean you have not run `detect`, you selected a differen
 
 Website errors can come from DNS, connectivity, TLS trust, unsupported ports, or the public-address restriction. The checker intentionally rejects localhost; use the repository's [local web checker](../../moderate/09-web-vulnerability-scanner) for that workflow.
 
-The server binds to localhost by default and has no authentication. This is a small local lab, not a hosted multi-user service. The event rules cover selected patterns and can produce false positives or miss activity. Keep the original event file for investigation because the alert database stores evidence IDs, not a complete raw-event archive.
+The server binds to localhost by default. Management and ingestion endpoints require the configured signed session or ingestion token. This is a small local lab, not a hosted multi-user service. The event rules cover selected patterns and can produce false positives or miss activity. Keep the original event file for investigation because the alert database stores evidence IDs, not a complete raw-event archive.
 
 ## Tests
 
@@ -90,3 +90,20 @@ python -m pytest -q tests
 ```
 
 Tests cover matching, correlation, validation, storage, rendering, and website boundary checks. Controlled event fixtures and mocked network behavior make those checks repeatable. They do not demonstrate coverage of every endpoint or public website.
+
+## Live operation
+
+The lab can run as a live local detection service. Set an administrator password and session secret before starting the dashboard; use a separate ingestion token for a collector:
+
+```powershell
+$env:PURPLE_ADMIN_PASSWORD = "use-a-long-password-here"
+$env:PURPLE_SESSION_SECRET = "use-a-random-secret-here"
+$env:PURPLE_INGEST_TOKEN = "collector-token"
+$env:PURPLE_ALERT_WEBHOOK_URL = "https://your-approved-webhook.example/alerts"
+$env:PURPLE_THREAT_FEED_URLS = "https://your-approved-feed.example/indicators.csv"
+python -m src.cli serve --db purple_lab.db
+```
+
+`POST /api/events` accepts one event or a list of events. Authenticate with the dashboard session or `Authorization: Bearer <PURPLE_INGEST_TOKEN>`. Each accepted event is retained in SQLite, evaluated against the current rules, matched against imported indicators, and included in the response. Repeated event IDs are ignored. New alerts are sent to the configured webhook; if no webhook is configured, the response says so instead of inventing a delivery result.
+
+Use `python -m src.cli ingest --file events.jsonl` for a JSONL stream, or refresh configured feeds with `python -m src.cli feeds`. The dashboard management panel can load and validate the rules JSON, save edited rules, refresh feeds, and test the notification configuration. Feed URLs and notification destinations are supplied by you; the repository contains no fake live feed or fake delivery numbers.

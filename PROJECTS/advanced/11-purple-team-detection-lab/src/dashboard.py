@@ -3,11 +3,17 @@ from __future__ import annotations
 
 import html
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .storage import alert_stats, list_alerts
+from .storage import alert_stats, list_alerts, list_events
+from .auth import configured, issue_session, valid_session, verify_configured_password
+from .event_io import load_rules
+from .feeds import refresh_feeds
+from .live import ingest
+from .notify import send_alerts
 from .website_check import inspect_website
 
 
@@ -30,6 +36,13 @@ SCRIPT = """
 let websiteFindings = [];
 let websiteTarget = "";
 let websiteSeverity = "All";
+
+
+async function loginLab(event){event.preventDefault();const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:document.getElementById("admin-password").value})});const d=await r.json();document.getElementById("management-status").textContent=r.ok?"Signed in.":d.error;}
+async function loadRulesLab(){const r=await fetch("/api/rules");const d=await r.json();document.getElementById("rules-editor").value=JSON.stringify(d,null,2);document.getElementById("management-status").textContent=r.ok?"Rules loaded.":d.error;}
+async function saveRulesLab(){let data;try{data=JSON.parse(document.getElementById("rules-editor").value)}catch(e){document.getElementById("management-status").textContent="Rules editor contains invalid JSON.";return}const r=await fetch("/api/rules",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});const d=await r.json();document.getElementById("management-status").textContent=r.ok?"Saved and validated "+d.saved+" rules.":d.error;}
+async function refreshFeedsLab(){const r=await fetch("/api/feeds/refresh",{method:"POST"});const d=await r.json();document.getElementById("management-status").textContent=r.ok?JSON.stringify(d.feeds):d.error;}
+async function testNotificationLab(){const r=await fetch("/api/notifications/test",{method:"POST"});const d=await r.json();document.getElementById("management-status").textContent=r.ok?JSON.stringify(d):d.error;}
 
 function esc(value){
   return String(value ?? "").replace(/[&<>"']/g, function(ch){
@@ -191,8 +204,13 @@ def render_dashboard(db_path: Path) -> str:
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Purple Team Detection Lab</title><style>{CSS}</style></head>
 <body><main class="shell">
-<section class="top"><div><div class="eyebrow">Purple team security console</div><h1 class="title">Purple Team Detection Lab</h1><p class="sub">Scan a public website and turn its passive security findings into live dashboard alerts. The original synthetic event-correlation lab is still available below.</p></div><div class="status">LOCAL LAB ONLINE</div></section>
-<nav class="nav"><a href="#website-check">Website scan</a><a href="#website-alerts">Website alerts</a><a href="#event-lab">Event lab</a></nav>
+<section class="top"><div><div class="eyebrow">Purple team security console</div><h1 class="title">Purple Team Detection Lab</h1><p class="sub">Ingest live events, run editable detection rules, retain history in SQLite, match configured threat-intelligence feeds, and notify your webhook when new alerts arrive.</p></div><div class="status">LOCAL LAB ONLINE</div></section>
+<nav class="nav"><a href="#website-check">Website scan</a><a href="#website-alerts">Website alerts</a><a href="#event-lab">Event lab</a><a href="#live">Live ingestion</a></nav>
+
+<section class="panel" id="live"><h2>Live event pipeline</h2><p class="small">POST real events to <code>/api/events</code> with a dashboard session or <code>Bearer PURPLE_INGEST_TOKEN</code>. Events and alerts are stored in SQLite; no generated counters are inserted.</p><p class="small">Set <code>PURPLE_ADMIN_PASSWORD</code>, <code>PURPLE_SESSION_SECRET</code>, and optionally <code>PURPLE_ALERT_WEBHOOK_URL</code> before using management actions. Configure feeds with <code>PURPLE_THREAT_FEED_URLS</code>.</p></section>
+
+
+<section class="panel" id="management"><h2>Authenticated management</h2><p class="small">Set the environment variables described above, then sign in. Rule changes are validated before the configured rules file is replaced.</p><form class="site-form" onsubmit="loginLab(event)"><input id="admin-password" type="password" placeholder="Admin password"><button type="submit">Sign in</button></form><div class="alert-tools" style="margin-top:12px"><button type="button" onclick="loadRulesLab()">Load rules</button><button type="button" onclick="saveRulesLab()">Save rules</button><button type="button" onclick="refreshFeedsLab()">Refresh threat feeds</button><button type="button" onclick="testNotificationLab()">Test notification</button></div><textarea id="rules-editor" style="width:100%;min-height:260px;background:#09090b;color:#f4f4f5;border:1px solid #472026;border-radius:9px;padding:12px;font-family:Consolas,monospace" placeholder="Authenticated rule JSON appears here"></textarea><p class="small" id="management-status"></p></section>
 
 <section class="panel" id="website-check"><h2>Website security check</h2><p class="small">Paste a public website. The lab checks HTTP status, HTTPS/TLS, certificate expiry and common security headers. The alert counters and queue below are generated from this website scan.</p><form class="site-form" onsubmit="runWebsiteCheck(event)"><input id="website-url" type="text" placeholder="https://example.com" autocomplete="off"><button type="submit">Scan website</button></form><div id="scan-result" class="scan-result"></div></section>
 
@@ -214,16 +232,36 @@ def render_dashboard(db_path: Path) -> str:
 
 <section class="panel section-gap"><h2>Website alert queue</h2><div style="overflow:auto"><table><thead><tr><th>Severity</th><th>Alert ID</th><th>Finding</th><th>Website</th></tr></thead><tbody id="website-alert-body"><tr><td colspan="4" class="empty">Scan a website to generate alerts.</td></tr></tbody></table></div></section>
 
-<details class="panel lab" id="event-lab"><summary>Synthetic event detection lab</summary><div style="padding:18px">
-<div class="lab-grid"><div><h2>ATT&CK coverage</h2>{techniques}</div><div><h2>About this section</h2><p class="small">This is the original event-correlation side of the project. It uses the sample endpoint, authentication and network events from the repository. These alerts are separate from the website alerts above.</p></div></div>
+<details class="panel lab" id="event-lab"><summary>Detection rules and live event history</summary><div style="padding:18px">
+<div class="lab-grid"><div><h2>ATT&CK coverage</h2>{techniques}</div><div><h2>About this section</h2><p class="small">The sample file remains available for repeatable testing, but live API events use the same rules and are retained in SQLite. Edit and validate the JSON rules through the authenticated API; refresh configured feeds with the authenticated feed endpoint.</p></div></div>
 <div style="overflow:auto;margin-top:16px"><table><thead><tr><th>Severity</th><th>Detection</th><th>ATT&CK</th><th>Matched events</th></tr></thead><tbody>{lab_rows}</tbody></table></div>
 </div></details>
 
 </main><script>{SCRIPT}</script></body></html>"""
 
 
+def _json_body(handler):
+    length=int(handler.headers.get("Content-Length", "0"))
+    if length > 5_000_000: raise ValueError("Request body is too large")
+    raw=handler.rfile.read(length)
+    data=json.loads(raw or b"{}")
+    return data
+
+
+def _authorized(handler, ingest=False):
+    cookie=handler.headers.get("Cookie", "")
+    session=next((part.split("=",1)[1] for part in cookie.split("; ") if part.startswith("purple_session=")), None)
+    if valid_session(session): return True
+    if ingest:
+        expected=os.getenv("PURPLE_INGEST_TOKEN")
+        supplied=handler.headers.get("Authorization", "")
+        return bool(expected) and supplied == "Bearer " + expected
+    return False
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     db_path = Path("purple_lab.db")
+    rules_path = Path(__file__).resolve().parent.parent / "rules" / "detection_rules.json"
 
     def _send(self, body: bytes, content_type: str, status: int = 200) -> None:
         self.send_response(status)
@@ -252,6 +290,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._json(alert_stats(self.db_path))
             return
 
+        if parsed.path == "/api/auth":
+            self._json({"configured": configured(), "authenticated": _authorized(self)})
+            return
+
+        if parsed.path == "/api/events":
+            self._json(list_events(self.db_path, int(query.get("limit", [500])[0])))
+            return
+
+        if parsed.path == "/api/rules":
+            self._json([rule.__dict__ | {"conditions": list(rule.conditions)} for rule in load_rules(self.rules_path)])
+            return
+
         if parsed.path == "/api/website-check":
             target = query.get("url", [""])[0]
             try:
@@ -267,12 +317,47 @@ class DashboardHandler(BaseHTTPRequestHandler):
         body = render_dashboard(self.db_path).encode("utf-8")
         self._send(body, "text/html; charset=utf-8")
 
+    def do_POST(self) -> None:
+        parsed=urlparse(self.path)
+        try:
+            if parsed.path == "/api/login":
+                data=_json_body(self)
+                if not configured(): self._json({"error":"Set PURPLE_ADMIN_PASSWORD and PURPLE_SESSION_SECRET before login."},503); return
+                if not verify_configured_password(str(data.get("password", ""))): self._json({"error":"Invalid password"},401); return
+                body=json.dumps({"authenticated":True}).encode()
+                self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Set-Cookie",f"purple_session={issue_session()}; HttpOnly; SameSite=Strict; Max-Age=43200"); self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body); return
+            if parsed.path == "/api/logout": self._json({"authenticated":False}); return
+            if parsed.path == "/api/events":
+                if not _authorized(self, ingest=True): self._json({"error":"Authentication required. Use the dashboard session or Bearer PURPLE_INGEST_TOKEN."},401); return
+                data=_json_body(self); payloads=data if isinstance(data,list) else [data]
+                result=ingest(self.db_path,self.rules_path,payloads)
+                alerts=result.pop("_alerts",[])
+                result["notification"] = send_alerts(alerts if result.get("accepted", 0) else [])
+                self._json(result,201); return
+            if parsed.path == "/api/feeds/refresh":
+                if not _authorized(self): self._json({"error":"Login required"},401); return
+                self._json({"feeds":refresh_feeds(self.db_path)}); return
+            if parsed.path == "/api/notifications/test":
+                if not _authorized(self): self._json({"error":"Login required"},401); return
+                self._json(send_alerts([])); return
+            if parsed.path == "/api/rules":
+                if not _authorized(self): self._json({"error":"Login required"},401); return
+                data=_json_body(self)
+                if not isinstance(data,list): raise ValueError("Rules must be a JSON list")
+                text=json.dumps(data,indent=2)+"\n"
+                temp=self.rules_path.with_suffix(".pending.json"); temp.write_text(text,encoding="utf-8")
+                load_rules(temp); temp.replace(self.rules_path)
+                self._json({"saved":len(data)}); return
+            self._send(b"Not found","text/plain",404)
+        except (ValueError, json.JSONDecodeError, OSError, RuntimeError) as exc:
+            self._json({"error":str(exc)},400)
+
     def log_message(self, format: str, *args: object) -> None:
         return
 
 
-def serve(db_path: Path, host: str = "127.0.0.1", port: int = 8000) -> None:
-    handler = type("ConfiguredDashboardHandler", (DashboardHandler,), {"db_path": db_path})
+def serve(db_path: Path, host: str = "127.0.0.1", port: int = 8000, rules_path: Path | None = None) -> None:
+    handler = type("ConfiguredDashboardHandler", (DashboardHandler,), {"db_path": db_path, "rules_path": rules_path or DashboardHandler.rules_path})
     server = ThreadingHTTPServer((host, port), handler)
     print(f"Dashboard: http://{host}:{port}")
     try:
