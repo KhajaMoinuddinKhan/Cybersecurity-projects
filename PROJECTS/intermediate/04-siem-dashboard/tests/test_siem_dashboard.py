@@ -60,7 +60,7 @@ def test_search_and_filtered_counts(tmp_path: Path):
             {"event":"Malware blocked","severity":"Medium","source_ip":"10.0.0.3","username":"analyst","source":"edr","event_type":"endpoint_alert"},
         ],
     )
-    assert len(query_events(db, search="VPN")) == 1
+    assert len(query_events(db, search="VPN")) == 2
     assert len(query_events(db, source="edr")) == 1
     assert severity_counts(db, source="vpn") == {
         "High": 1, "Medium": 0, "Low": 1, "Total": 2
