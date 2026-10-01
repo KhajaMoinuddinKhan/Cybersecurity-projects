@@ -8,6 +8,7 @@ from .dashboard import serve
 from .engine import run_detection
 from .event_io import load_events, load_rules
 from .storage import alert_stats, replace_alerts
+from .website_check import inspect_website
 
 
 def _default_path(relative: str) -> Path:
@@ -41,6 +42,16 @@ def command_summary(args: argparse.Namespace) -> None:
         print(f"  {item['technique_id']} {item['technique_name']}: {item['count']}")
 
 
+def command_website(args: argparse.Namespace) -> None:
+    result = inspect_website(args.url)
+    print(f"URL: {result['final_url']}")
+    print(f"HTTP status: {result['status']}")
+    print(f"Passive score: {result['score']}/100")
+    print(f"HTTPS: {'yes' if result['https'] else 'no'}")
+    for finding in result["findings"]:
+        print(f"[{finding['severity']}] {finding['message']}")
+
+
 def command_serve(args: argparse.Namespace) -> None:
     serve(args.db, args.host, args.port)
 
@@ -59,10 +70,14 @@ def build_parser() -> argparse.ArgumentParser:
     summary.add_argument("--db", type=Path, default=Path("purple_lab.db"))
     summary.set_defaults(func=command_summary)
 
+    website = subparsers.add_parser("website", help="Run passive checks against a public website")
+    website.add_argument("url")
+    website.set_defaults(func=command_website)
+
     dashboard = subparsers.add_parser("serve", help="Start the local analyst dashboard")
     dashboard.add_argument("--db", type=Path, default=Path("purple_lab.db"))
     dashboard.add_argument("--host", default="127.0.0.1")
-    dashboard.add_argument("--port", type=int, default=8080)
+    dashboard.add_argument("--port", type=int, default=8000)
     dashboard.set_defaults(func=command_serve)
 
     return parser

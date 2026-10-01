@@ -14,4 +14,4 @@ A collection of practical cybersecurity projects built mainly in Python. The pro
 | [Docker Security Audit](PROJECTS/intermediate/08-docker-security-audit) | Reviews Docker inspect data for risky settings such as privileged mode, host namespaces, sensitive mounts, and published ports. |
 | [Web Vulnerability Scanner](PROJECTS/moderate/09-web-vulnerability-scanner) | Runs passive checks against localhost pages for missing security headers and risky form settings. |
 | [Cloud Asset Inventory](PROJECTS/moderate/10-cloud-asset-inventory) | Reads a synthetic cloud inventory and flags public assets, missing tags, malformed metadata, and missing regions. |
-| [Purple Team Detection Lab](PROJECTS/advanced/11-purple-team-detection-lab) | Correlates synthetic security events with JSON detection rules, MITRE ATT&CK mappings, SQLite alert storage, and a local analyst dashboard. |
+| [Purple Team Detection Lab](PROJECTS/advanced/11-purple-team-detection-lab) | Correlates security events into ATT&CK-mapped alerts and includes a passive public-website security check in the analyst dashboard. |
