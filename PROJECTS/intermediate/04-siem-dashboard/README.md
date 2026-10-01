@@ -59,8 +59,14 @@ python -m pytest -q tests
 
 The JavaScript control test runs with Node.js when installed and uses a temporary event store. These test fixtures never populate the normal live database. Native Windows Event Log collection must be checked on Windows with the necessary channel permissions.
 
-## Interface preview
+## Output
 
-![Live SIEM interface](assets/live-console.jpg)
+### Dashboard overview
 
-This preview was captured with an empty event store on a Linux test machine. The zeros are empty database counts, and server-health percentages are measured values. Windows channels are marked unavailable because the preview machine cannot run Windows Event Log collection.
+![Live SIEM dashboard overview](assets/siem-dashboard-overview.png)
+
+### Event stream
+
+![Live SIEM event stream](assets/siem-dashboard-event-stream.png)
+
+These screenshots show the dashboard running on Windows with collected events, measured system health, provider activity, and event triage.
