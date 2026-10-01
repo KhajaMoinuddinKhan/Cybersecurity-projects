@@ -1,5 +1,0 @@
-[
-  "tests/test_keylogger.py::test_interactive_input_is_required",
-  "tests/test_keylogger.py::test_record_session_writes_real_timestamps_and_keys",
-  "tests/test_keylogger.py::test_special_keys_are_readable"
-]
