@@ -1,0 +1,4 @@
+[
+  "tests/test_analyzer.py::test_empty_capture_has_empty_observed_sections",
+  "tests/test_analyzer.py::test_summary_is_based_on_observed_records"
+]

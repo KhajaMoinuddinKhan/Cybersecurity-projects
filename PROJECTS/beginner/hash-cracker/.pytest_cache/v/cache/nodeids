@@ -1,0 +1,6 @@
+[
+  "tests/test_cracker.py::test_finds_candidate_from_supplied_values",
+  "tests/test_cracker.py::test_invalid_digest_is_rejected",
+  "tests/test_cracker.py::test_reports_no_match_without_inventing_a_value",
+  "tests/test_cracker.py::test_wordlist_is_streamed_and_blank_lines_are_skipped"
+]
