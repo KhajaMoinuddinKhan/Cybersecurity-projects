@@ -36,7 +36,13 @@ def audit_container(info: dict[str, Any]) -> list[tuple[str, str]]:
         bindings = []
     if not isinstance(bindings, list) or not all(isinstance(item, str) for item in bindings):
         raise ValueError("HostConfig.Binds must be a list of strings")
-    sources = {binding.split(":", 1)[0].rstrip("/") or "/" for binding in bindings}
+    sources: set[str] = set()
+    for binding in bindings:
+        source = binding.split(":", 1)[0]
+        if not source:
+            # An empty host path is not a bind and must not be read as "/".
+            continue
+        sources.add(source.rstrip("/") or "/")
 
     # Docker records --mount bind mounts here even when HostConfig.Binds is empty.
     mounts = info.get("Mounts")

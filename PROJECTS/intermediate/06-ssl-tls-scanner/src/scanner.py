@@ -66,7 +66,7 @@ def main() -> None:
 
     try:
         result = scan(args.host, args.port, args.timeout)
-    except (OSError, ssl.SSLError, ValueError) as exc:
+    except (OSError, ssl.SSLError, ValueError, OverflowError) as exc:
         raise SystemExit(f"TLS inspection failed: {exc}") from exc
 
     for key, value in result.items():

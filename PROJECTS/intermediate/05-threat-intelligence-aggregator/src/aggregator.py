@@ -48,15 +48,24 @@ def read_feed(path: Path) -> list[tuple[str, str, str]]:
     """Read IOC rows from JSON or CSV."""
 
     if path.suffix.lower() == ".json":
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         if not isinstance(data, list):
             raise ValueError("JSON feed must be a list")
         if not all(isinstance(item, dict) for item in data):
             raise ValueError("Every JSON feed item must be an object")
         return [normalise_row(item) for item in data]
 
-    with path.open(newline="", encoding="utf-8") as handle:
-        return [normalise_row(row) for row in csv.DictReader(handle)]
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        missing = [
+            name for name in ("type", "value")
+            if name not in (reader.fieldnames or ())
+        ]
+        if missing:
+            raise ValueError(
+                f"CSV feed is missing required column(s): {', '.join(missing)}"
+            )
+        return [normalise_row(row) for row in reader]
 
 def import_iocs(
     db_path: Path,
@@ -118,5 +127,5 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, sqlite3.Error) as exc:
+    except (OSError, ValueError, sqlite3.Error, csv.Error, RecursionError) as exc:
         raise SystemExit(f"Feed operation failed: {exc}") from exc

@@ -48,7 +48,8 @@ def review_assets(
                 ("LOW", name, "Missing metadata: " + ", ".join(missing))
             )
 
-        if not asset.get("region"):
+        region = asset.get("region")
+        if not region or (isinstance(region, str) and not region.strip()):
             findings.append(("LOW", name, "Region is not recorded."))
 
     return findings
@@ -56,7 +57,7 @@ def review_assets(
 def load_assets(path: Path) -> list[dict[str, Any]]:
     """Load the asset JSON file."""
 
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
 
     if not isinstance(data, dict) or not isinstance(data.get("assets"), list):
         raise ValueError("Expected JSON object with an assets list.")

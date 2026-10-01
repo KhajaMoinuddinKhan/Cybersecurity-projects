@@ -29,3 +29,13 @@ def test_all_containers_are_reviewed(tmp_path):
 def test_invalid_inspect_shapes_are_rejected(payload):
     with pytest.raises(ValueError):
         audit_container(payload)
+
+
+def test_empty_bind_source_is_not_treated_as_host_root():
+    findings = audit_container({"Config": {"User": "1000"}, "HostConfig": {"Binds": [""]}})
+    assert not any("Host root" in message for _, message in findings)
+
+
+def test_host_root_bind_is_still_reported():
+    findings = audit_container({"Config": {"User": "1000"}, "HostConfig": {"Binds": ["/:/host"]}})
+    assert any("Host root" in message for _, message in findings)

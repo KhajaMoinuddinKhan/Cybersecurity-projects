@@ -46,6 +46,30 @@ def port_number(value: Any) -> int | None:
         return None
 
 
+def packet_transport(packet: Any) -> Any:
+    """Return the packet's own transport layer, or None.
+
+    A capture can nest IP headers (a tunnel) or quote one inside an ICMP
+    error. Those inner headers are payload rather than live traffic, so only
+    the outer transport should decide the protocol, port, and DNS name.
+    """
+
+    from scapy.layers.inet import IP, TCP, UDP
+    from scapy.layers.inet6 import IPv6
+
+    network = packet[IP] if IP in packet else (packet[IPv6] if IPv6 in packet else None)
+    layer = network.payload if network is not None else None
+    while layer is not None:
+        if isinstance(layer, (TCP, UDP)):
+            return layer
+        if isinstance(layer, (IP, IPv6)) or type(layer).__name__.startswith("ICMP"):
+            return None
+        next_layer = getattr(layer, "payload", None)
+        if next_layer is None or next_layer is layer:
+            return None
+        layer = next_layer
+    return None
+
 def packet_to_record(packet: Any) -> TrafficRecord:
     """Pull the fields we need from one Scapy packet."""
 
@@ -62,20 +86,24 @@ def packet_to_record(packet: Any) -> TrafficRecord:
     elif IPv6 in packet:
         source, destination = packet[IPv6].src, packet[IPv6].dst
 
+    # Only the packet's own transport counts; a header quoted by an ICMP error
+    # or carried inside a tunnel belongs to a different packet.
+    transport = packet_transport(packet)
+
     # Pick the transport protocol and destination port.
     protocol = "OTHER"
     destination_port = None
-    if TCP in packet:
-        protocol, destination_port = "TCP", port_number(packet[TCP].dport)
-    elif UDP in packet:
-        protocol, destination_port = "UDP", port_number(packet[UDP].dport)
+    if isinstance(transport, TCP):
+        protocol, destination_port = "TCP", port_number(transport.dport)
+    elif isinstance(transport, UDP):
+        protocol, destination_port = "UDP", port_number(transport.dport)
     elif source:
         protocol = "IPv6" if IPv6 in packet else "IP"
 
-    # Keep the DNS name when this packet contains a query.
+    # Keep the DNS name when the packet's own transport carries a query.
     dns_query = None
-    if DNS in packet and packet[DNS].qr == 0 and DNSQR in packet:
-        raw_query = packet[DNSQR].qname
+    if transport is not None and DNS in transport and transport[DNS].qr == 0 and DNSQR in transport:
+        raw_query = transport[DNSQR].qname
         if raw_query is not None:
             text = (
                 raw_query.decode("utf-8", errors="replace")

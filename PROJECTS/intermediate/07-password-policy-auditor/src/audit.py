@@ -32,7 +32,7 @@ def parse_policy(path: Path) -> dict[str, object]:
     values: dict[str, object] = {}
 
     for line_number, line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(),
+        path.read_text(encoding="utf-8-sig").splitlines(),
         1,
     ):
         stripped = line.strip()

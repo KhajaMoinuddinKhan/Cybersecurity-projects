@@ -162,7 +162,10 @@ def parse_event_file(filename: str, content: bytes) -> list[dict[str, Any]]:
     text = content.decode("utf-8-sig")
 
     if suffix == ".json":
-        data = json.loads(text)
+        try:
+            data = json.loads(text)
+        except RecursionError as exc:
+            raise ValueError("JSON is nested too deeply to import") from exc
         if isinstance(data, dict) and "events" in data:
             data = data["events"]
         elif isinstance(data, dict):
@@ -176,18 +179,27 @@ def parse_event_file(filename: str, content: bytes) -> list[dict[str, Any]]:
         for line_number, line in enumerate(text.splitlines(), 1):
             if not line.strip():
                 continue
-            item = json.loads(line)
+            try:
+                item = json.loads(line)
+            except RecursionError as exc:
+                raise ValueError("JSON is nested too deeply to import") from exc
             if not isinstance(item, dict):
                 raise ValueError(f"Line {line_number} is not a JSON object")
             rows.append(item)
         return rows
 
     if suffix == ".csv":
-        reader = csv.DictReader(io.StringIO(text))
-        fields = reader.fieldnames or []
-        if not fields or any(not field.strip() for field in fields) or len(set(fields)) != len(fields):
-            raise ValueError("CSV needs unique, nonempty column names")
-        rows = [dict(row) for row in reader]
+        # Match the CSV reader's field limit to the request cap so wide message
+        # fields import instead of raising an uncaught csv.Error.
+        csv.field_size_limit(3_000_000)
+        try:
+            reader = csv.DictReader(io.StringIO(text))
+            fields = reader.fieldnames or []
+            if not fields or any(not field.strip() for field in fields) or len(set(fields)) != len(fields):
+                raise ValueError("CSV needs unique, nonempty column names")
+            rows = [dict(row) for row in reader]
+        except csv.Error as exc:
+            raise ValueError(f"CSV could not be read: {exc}") from exc
         if any(None in row or any(value is None for value in row.values()) for row in rows):
             raise ValueError("CSV rows must have the same number of columns as the header")
         for row in rows:
@@ -522,6 +534,10 @@ def dashboard_app(db_path: Path, collector_status: dict[str, Any] | None = None)
     @app.errorhandler(ValueError)
     def invalid_input(error):
         return jsonify({"error": str(error)}), 400
+
+    @app.errorhandler(RecursionError)
+    def excessively_nested(error):
+        return jsonify({"error": "Event data is nested too deeply."}), 400
 
     @app.errorhandler(413)
     def too_large(error):

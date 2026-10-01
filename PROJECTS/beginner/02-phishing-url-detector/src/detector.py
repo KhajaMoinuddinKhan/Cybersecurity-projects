@@ -32,7 +32,12 @@ def normalise_url(value: str) -> str:
     """Add http:// when the input has no scheme."""
 
     value = value.strip()
-    return value if "://" in value else f"http://{value}"
+    # A scheme sits at the start; "://" later in a path or query is not one.
+    if re.match(r"[a-zA-Z][a-zA-Z0-9+.\-]*://", value):
+        return value
+    if value.startswith("//"):
+        return f"http:{value}"
+    return f"http://{value}"
 
 def is_ip_address(host: str) -> bool:
     """Check whether a host is an IP address."""
