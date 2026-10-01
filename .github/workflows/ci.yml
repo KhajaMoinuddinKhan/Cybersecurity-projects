@@ -21,7 +21,6 @@ jobs:
           - PROJECTS/intermediate/08-docker-security-audit
           - PROJECTS/moderate/09-web-vulnerability-scanner
           - PROJECTS/moderate/10-cloud-asset-inventory
-          - PROJECTS/advanced/11-purple-team-detection-lab
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

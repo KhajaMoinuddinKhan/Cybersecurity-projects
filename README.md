@@ -1,6 +1,6 @@
 # Cybersecurity projects
 
-This repository brings together eleven Python projects for learning how security data moves from a raw input to an explanation someone can act on. Some tools answer a small question, such as whether a file changed. Others combine collection, storage, detection, and an analyst interface.
+This repository brings together ten Python projects for learning how security data moves from a raw input to an explanation someone can act on. Some tools answer a small question, such as whether a file changed. Others combine collection, storage, detection, and an analyst interface.
 
 The emphasis is on readable code and results you can trace back to the input. Each project has its own source, tests, run instructions, and learning notes. You can work on one project without starting the others.
 
@@ -18,6 +18,5 @@ The emphasis is on readable code and results you can trace back to the input. Ea
 | [Docker Security Audit](PROJECTS/intermediate/08-docker-security-audit) | Reviews Docker inspect data for risky settings such as privileged mode, host namespaces, sensitive mounts, and published ports. |
 | [Web Vulnerability Scanner](PROJECTS/moderate/09-web-vulnerability-scanner) | Runs passive checks against localhost pages for missing security headers and risky form settings. |
 | [Cloud Asset Inventory](PROJECTS/moderate/10-cloud-asset-inventory) | Reviews a supplied JSON cloud inventory and flags public assets, missing tags, malformed metadata, and missing regions. |
-| [Purple Team Detection Lab](PROJECTS/advanced/11-purple-team-detection-lab) | Correlates security events into ATT&CK-mapped alerts and includes a passive public-website security check in the analyst dashboard. |
 
-For a first run without network access, try the URL detector, file monitor, or one of the supplied configuration-review fixtures. For real Windows telemetry, use the SIEM. For correlation rules and repeatable investigation exercises, use the Purple Team Detection Lab. The [project catalog](PROJECT_CATALOG.md) groups the tools by their inputs and learning goals.
+For a first run without network access, try the URL detector, file monitor, or one of the supplied configuration-review fixtures. For real Windows telemetry, use the SIEM. The [project catalog](PROJECT_CATALOG.md) groups the tools by their inputs and learning goals.

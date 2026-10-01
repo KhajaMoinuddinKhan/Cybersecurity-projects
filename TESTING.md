@@ -30,7 +30,6 @@ To focus on one project, change into its directory and run `python -m pytest -q 
 | TLS | Certificate formatting and session behavior using controlled connection objects. |
 | Policy and Docker review | Baseline comparisons, risky settings, explicit root users, structured mounts, multiple containers, and malformed inputs. |
 | Local web and inventory review | Localhost boundaries, response/form checks, and inventory metadata findings. |
-| Purple Team lab | Matching, thresholds, event validation, timezone handling, SQLite queries, dashboard rendering, and public-website connection boundaries. |
 
 The SIEM control test runs the shipped JavaScript in a small DOM harness against a real local API. It verifies behavior, but it does not replace a visual browser review. Tests create temporary files and databases; they do not seed the normal SIEM store.
 

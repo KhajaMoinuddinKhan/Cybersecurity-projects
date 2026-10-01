@@ -33,10 +33,6 @@ The supplied feed and configuration files are training fixtures. The SIEM instea
 
 The local web checker does not crawl or exploit an application. The inventory tool does not connect to a cloud account. Both are deliberately small enough that you can trace every finding to a specific input field.
 
-## Correlate events and investigate detections
-
-[Purple Team Detection Lab](PROJECTS/advanced/11-purple-team-detection-lab) combines a validated event model, JSON rules, grouped time windows, SQLite alerts, and an analyst dashboard. Start with the bundled synthetic event file, inspect the evidence behind each alert, and then provide your own normalized events. Its separate website tab runs on-demand passive checks against public sites; it is not a continuous event collector.
-
 ## Before running a project
 
-Follow the project's README from its own directory. Keep test fixtures separate from collected evidence, and keep a copy of inputs you need for comparison. The root [setup guide](README.md#get-started-in-vs-code) covers VS Code and virtual environments; [TESTING.md](TESTING.md) explains the automated checks and their boundaries.
+Follow the project's README from its own directory. Keep test fixtures separate from collected evidence, and keep a copy of inputs you need for comparison. The root README covers the repository layout and project links; [TESTING.md](TESTING.md) explains the automated checks and their boundaries.
