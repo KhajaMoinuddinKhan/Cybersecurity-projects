@@ -1,6 +1,6 @@
 # Project catalog
 
-Thirteen projects, grouped by what you have to bring. Pick the row that matches the data in front of you; the last column is what that project is really teaching.
+The projects, grouped by what you have to bring. Pick the row that matches the data in front of you; the last column is what that project is really teaching.
 
 ## You have a file
 
