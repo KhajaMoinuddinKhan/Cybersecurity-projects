@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS alerts (
  first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, group_value TEXT NOT NULL,
  event_ids TEXT NOT NULL, host TEXT NOT NULL, username TEXT NOT NULL,
  source TEXT NOT NULL, created_at TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS ix_alerts_created_at ON alerts(created_at);
 CREATE TABLE IF NOT EXISTS iocs (
  type TEXT NOT NULL, value TEXT NOT NULL, source TEXT NOT NULL,
  imported_at TEXT NOT NULL, PRIMARY KEY(type,value));
@@ -42,6 +41,7 @@ def get_connection(path: Path) -> sqlite3.Connection:
     if "created_at" not in columns:
         connection.execute("ALTER TABLE alerts ADD COLUMN created_at TEXT")
         connection.execute("UPDATE alerts SET created_at = COALESCE(first_seen, datetime('now')) WHERE created_at IS NULL")
+    connection.execute("CREATE INDEX IF NOT EXISTS ix_alerts_created_at ON alerts(created_at)")
     connection.commit()
     return connection
 
