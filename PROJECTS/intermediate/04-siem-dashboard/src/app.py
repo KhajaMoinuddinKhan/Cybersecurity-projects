@@ -1,4 +1,4 @@
-"""Local SIEM dashboard with live event ingestion."""
+"""Local SIEM console backed by live event data."""
 from __future__ import annotations
 
 import argparse
@@ -12,77 +12,67 @@ from typing import Any, Iterable
 
 from .windows_collector import WindowsEventCollector
 
-EventInput = tuple[str, str, str, str, str]
-EventRow = tuple[int, str, str, str, str, str, str, str, str, str, str]
 VALID_SEVERITIES = ("High", "Medium", "Low")
 
-SCHEMA = """CREATE TABLE IF NOT EXISTS events (
+SCHEMA = """CREATE TABLE IF NOT EXISTS live_events (
 id INTEGER PRIMARY KEY AUTOINCREMENT,
 timestamp TEXT NOT NULL,
-source_ip TEXT NOT NULL,
-event TEXT NOT NULL,
+channel TEXT NOT NULL,
+provider TEXT NOT NULL,
+event_id TEXT NOT NULL,
+level TEXT NOT NULL,
 severity TEXT NOT NULL,
 username TEXT NOT NULL,
-host TEXT NOT NULL DEFAULT 'unknown',
-source TEXT NOT NULL DEFAULT 'manual',
-event_type TEXT NOT NULL DEFAULT 'security_event',
+host TEXT NOT NULL,
+source_ip TEXT NOT NULL,
+message TEXT NOT NULL,
+record_id TEXT NOT NULL,
+source TEXT NOT NULL,
+is_alert INTEGER NOT NULL DEFAULT 0,
+rule_name TEXT NOT NULL DEFAULT '',
 raw_log TEXT NOT NULL DEFAULT '',
-created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-external_id TEXT NOT NULL DEFAULT ''
+external_id TEXT NOT NULL DEFAULT '',
+created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )"""
-
-SAMPLE_EVENTS: tuple[EventInput, ...] = (
-    ("2026-09-30 09:01", "10.0.0.21", "Repeated failed login", "High", "admin"),
-    ("2026-09-30 09:05", "10.0.0.18", "New admin login", "Medium", "admin"),
-    ("2026-09-30 09:10", "10.0.0.31", "Large outbound transfer", "High", "analyst"),
-    ("2026-09-30 09:14", "10.0.0.9", "Successful login", "Low", "user1"),
-)
 
 
 def get_connection(db_path: Path) -> sqlite3.Connection:
-    """Open the database and make sure the current schema exists."""
+    """Open the live event store."""
 
-    connection = sqlite3.connect(db_path)
+    connection = sqlite3.connect(db_path, timeout=10)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA synchronous=NORMAL")
     connection.execute(SCHEMA)
-
-    existing = {
-        row["name"] for row in connection.execute("PRAGMA table_info(events)").fetchall()
-    }
-    additions = {
-        "host": "TEXT NOT NULL DEFAULT 'unknown'",
-        "source": "TEXT NOT NULL DEFAULT 'manual'",
-        "event_type": "TEXT NOT NULL DEFAULT 'security_event'",
-        "raw_log": "TEXT NOT NULL DEFAULT ''",
-        "created_at": "TEXT NOT NULL DEFAULT ''",
-        "external_id": "TEXT NOT NULL DEFAULT ''",
-    }
-    for name, definition in additions.items():
-        if name not in existing:
-            connection.execute(f"ALTER TABLE events ADD COLUMN {name} {definition}")
-
     connection.execute(
-        "UPDATE events SET created_at = timestamp WHERE created_at = '' OR created_at IS NULL"
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_live_events_external "
+        "ON live_events(source, external_id) WHERE external_id != ''"
     )
     connection.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_events_external "
-        "ON events(source, external_id) WHERE external_id != ''"
+        "CREATE INDEX IF NOT EXISTS ix_live_events_timestamp "
+        "ON live_events(timestamp)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ix_live_events_alert "
+        "ON live_events(is_alert, severity)"
     )
     connection.commit()
     return connection
 
 
-def normalise_severity(value: str | None) -> str | None:
-    """Return a supported severity name."""
+def normalise_severity(value: str | None) -> str:
+    """Return a supported severity."""
 
-    if value is None:
-        return None
-    candidate = value.strip().title()
-    return candidate if candidate in VALID_SEVERITIES else None
+    candidate = (value or "Low").strip().title()
+    if candidate not in VALID_SEVERITIES:
+        raise ValueError(
+            f"Unsupported severity {value!r}. Expected High, Medium, or Low."
+        )
+    return candidate
 
 
 def normalise_timestamp(value: Any) -> str:
-    """Store timestamps in a consistent UTC-friendly format."""
+    """Store timestamps as UTC without a timezone suffix for SQLite queries."""
 
     if value is None or not str(value).strip():
         return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -98,45 +88,15 @@ def normalise_timestamp(value: Any) -> str:
     return parsed.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _normalise_event(row: EventInput) -> EventInput:
-    """Clean a tuple event before saving it."""
-
-    timestamp, source_ip, event, severity, username = row
-    canonical = normalise_severity(severity)
-    if canonical is None:
-        raise ValueError(
-            f"Unsupported severity {severity!r}. Expected one of: {', '.join(VALID_SEVERITIES)}."
-        )
-
-    message = event.strip()
-    if not message:
-        raise ValueError("Event message cannot be empty")
-
-    return (
-        normalise_timestamp(timestamp),
-        source_ip.strip() or "unknown",
-        message,
-        canonical,
-        username.strip() or "unknown",
-    )
-
-
 def normalise_payload(
     payload: dict[str, Any],
     source_default: str = "api",
-) -> tuple[str, str, str, str, str, str, str, str, str, str]:
-    """Convert an API or imported event into a database row."""
+) -> tuple[Any, ...]:
+    """Convert a collector, API, or imported event into one database row."""
 
-    message = str(payload.get("event") or payload.get("message") or "").strip()
+    message = str(payload.get("message") or payload.get("event") or "").strip()
     if not message:
-        raise ValueError("Event payload needs an 'event' or 'message' value")
-
-    severity_text = str(payload.get("severity") or "Low")
-    severity = normalise_severity(severity_text)
-    if severity is None:
-        raise ValueError(
-            f"Unsupported severity {severity_text!r}. Expected High, Medium, or Low."
-        )
+        raise ValueError("Event payload needs a 'message' or 'event' value")
 
     raw_log = payload.get("raw_log")
     if raw_log is None:
@@ -144,28 +104,22 @@ def normalise_payload(
 
     return (
         normalise_timestamp(payload.get("timestamp")),
-        str(payload.get("source_ip") or payload.get("ip") or "unknown").strip(),
-        message,
-        severity,
+        str(payload.get("channel") or payload.get("source") or source_default).strip(),
+        str(payload.get("provider") or "unknown").strip(),
+        str(payload.get("event_id") or payload.get("id") or "unknown").strip(),
+        str(payload.get("level") or "Information").strip(),
+        normalise_severity(str(payload.get("severity") or "Low")),
         str(payload.get("username") or payload.get("user") or "unknown").strip(),
         str(payload.get("host") or payload.get("hostname") or "unknown").strip(),
+        str(payload.get("source_ip") or payload.get("ip") or "local").strip(),
+        message,
+        str(payload.get("record_id") or "").strip(),
         str(payload.get("source") or source_default).strip(),
-        str(payload.get("event_type") or payload.get("type") or "security_event").strip(),
+        1 if bool(payload.get("is_alert")) else 0,
+        str(payload.get("rule_name") or "").strip(),
         str(raw_log),
         str(payload.get("external_id") or "").strip(),
     )
-
-
-def seed_events(db_path: Path, events: Iterable[EventInput]) -> int:
-    """Insert tuple-based events."""
-
-    rows = [_normalise_event(row) for row in events]
-    with get_connection(db_path) as connection:
-        connection.executemany(
-            "INSERT INTO events(timestamp,source_ip,event,severity,username) VALUES (?,?,?,?,?)",
-            rows,
-        )
-    return len(rows)
 
 
 def ingest_payloads(
@@ -173,7 +127,7 @@ def ingest_payloads(
     payloads: Iterable[dict[str, Any]],
     source_default: str = "api",
 ) -> int:
-    """Insert structured security events."""
+    """Insert structured events and ignore collector duplicates."""
 
     rows = [normalise_payload(payload, source_default) for payload in payloads]
     if not rows:
@@ -182,9 +136,10 @@ def ingest_payloads(
     with get_connection(db_path) as connection:
         before = connection.total_changes
         connection.executemany(
-            """INSERT OR IGNORE INTO events(
-                timestamp,source_ip,event,severity,username,host,source,event_type,raw_log,external_id
-            ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            """INSERT OR IGNORE INTO live_events(
+                timestamp,channel,provider,event_id,level,severity,username,host,
+                source_ip,message,record_id,source,is_alert,rule_name,raw_log,external_id
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             rows,
         )
         inserted = connection.total_changes - before
@@ -192,10 +147,10 @@ def ingest_payloads(
 
 
 def parse_event_file(filename: str, content: bytes) -> list[dict[str, Any]]:
-    """Read JSON, JSONL, NDJSON, or CSV event files."""
+    """Read JSON, JSONL, NDJSON, or CSV event data."""
 
-    if len(content) > 2_000_000:
-        raise ValueError("Import file is too large. Keep it under 2 MB.")
+    if len(content) > 3_000_000:
+        raise ValueError("Import file is too large. Keep it under 3 MB.")
 
     suffix = Path(filename).suffix.lower()
     text = content.decode("utf-8-sig")
@@ -207,7 +162,7 @@ def parse_event_file(filename: str, content: bytes) -> list[dict[str, Any]]:
         elif isinstance(data, dict):
             data = [data]
         if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
-            raise ValueError("JSON import must contain an event object or a list of event objects")
+            raise ValueError("JSON must contain an event object or a list of event objects")
         return data
 
     if suffix in {".jsonl", ".ndjson"}:
@@ -228,152 +183,150 @@ def parse_event_file(filename: str, content: bytes) -> list[dict[str, Any]]:
 
 
 def reset_events(db_path: Path) -> None:
-    """Delete stored events and restart event IDs."""
+    """Clear the live event store."""
 
     with get_connection(db_path) as connection:
-        connection.execute("DELETE FROM events")
-        connection.execute("DELETE FROM sqlite_sequence WHERE name = 'events'")
+        connection.execute("DELETE FROM live_events")
+        connection.execute("DELETE FROM sqlite_sequence WHERE name = 'live_events'")
 
 
 def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _build_filters(
+def _filters(
     severity: str | None = None,
     search: str | None = None,
-    source: str | None = None,
-    event_type: str | None = None,
+    channel: str | None = None,
+    provider: str | None = None,
+    event_id: str | None = None,
     username: str | None = None,
     since_minutes: int | None = None,
+    alerts_only: bool = False,
 ) -> tuple[list[str], list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
 
-    canonical = normalise_severity(severity)
-    if canonical:
+    if severity:
         clauses.append("severity = ?")
-        params.append(canonical)
+        params.append(normalise_severity(severity))
 
     if search and search.strip():
         pattern = f"%{_escape_like(search.strip())}%"
         clauses.append(
-            "(source_ip LIKE ? ESCAPE '\\' OR event LIKE ? ESCAPE '\\' "
-            "OR username LIKE ? ESCAPE '\\' OR host LIKE ? ESCAPE '\\' "
-            "OR source LIKE ? ESCAPE '\\' OR event_type LIKE ? ESCAPE '\\')"
+            "(message LIKE ? ESCAPE '\\' OR provider LIKE ? ESCAPE '\\' "
+            "OR event_id LIKE ? ESCAPE '\\' OR username LIKE ? ESCAPE '\\' "
+            "OR host LIKE ? ESCAPE '\\' OR source_ip LIKE ? ESCAPE '\\' "
+            "OR channel LIKE ? ESCAPE '\\' OR rule_name LIKE ? ESCAPE '\\')"
         )
-        params.extend([pattern] * 6)
+        params.extend([pattern] * 8)
 
-    if source and source.strip():
-        clauses.append("source = ?")
-        params.append(source.strip())
-
-    if event_type and event_type.strip():
-        clauses.append("event_type = ?")
-        params.append(event_type.strip())
-
-    if username and username.strip():
-        clauses.append("username = ?")
-        params.append(username.strip())
+    for column, value in (
+        ("channel", channel),
+        ("provider", provider),
+        ("event_id", event_id),
+        ("username", username),
+    ):
+        if value and value.strip():
+            clauses.append(f"{column} = ?")
+            params.append(value.strip())
 
     if since_minutes is not None:
         clauses.append("datetime(timestamp) >= datetime('now', ?)")
         params.append(f"-{since_minutes} minutes")
 
+    if alerts_only:
+        clauses.append("is_alert = 1")
+
     return clauses, params
+
+
+def _where(clauses: list[str]) -> str:
+    return " WHERE " + " AND ".join(clauses) if clauses else ""
 
 
 def query_events(
     db_path: Path,
+    *,
     severity: str | None = None,
     search: str | None = None,
-    source: str | None = None,
-    event_type: str | None = None,
+    channel: str | None = None,
+    provider: str | None = None,
+    event_id: str | None = None,
     username: str | None = None,
     since_minutes: int | None = None,
-    limit: int = 500,
-) -> list[EventRow]:
-    """Return events matching the current filters."""
+    alerts_only: bool = False,
+    limit: int = 300,
+) -> list[dict[str, Any]]:
+    """Return live events matching the active filters."""
 
-    clauses, params = _build_filters(
-        severity, search, source, event_type, username, since_minutes
+    clauses, params = _filters(
+        severity, search, channel, provider, event_id, username, since_minutes, alerts_only
     )
-    query = (
-        "SELECT id,timestamp,source_ip,event,severity,username,host,source,"
-        "event_type,raw_log,created_at,external_id FROM events"
-    )
-    if clauses:
-        query += " WHERE " + " AND ".join(clauses)
+    query = "SELECT * FROM live_events" + _where(clauses)
     query += " ORDER BY datetime(timestamp) DESC, id DESC LIMIT ?"
     params.append(max(1, min(int(limit), 2000)))
 
     with get_connection(db_path) as connection:
         rows = connection.execute(query, params).fetchall()
-
-    return [
-        (
-            int(row["id"]),
-            str(row["timestamp"]),
-            str(row["source_ip"]),
-            str(row["event"]),
-            str(row["severity"]),
-            str(row["username"]),
-            str(row["host"]),
-            str(row["source"]),
-            str(row["event_type"]),
-            str(row["raw_log"]),
-            str(row["created_at"]),
-            str(row["external_id"]),
-        )
-        for row in rows
-    ]
+    return [dict(row) for row in rows]
 
 
-def severity_counts(
+def _count_rows(
     db_path: Path,
-    search: str | None = None,
-    source: str | None = None,
-    event_type: str | None = None,
-    username: str | None = None,
-    since_minutes: int | None = None,
+    clauses: list[str],
+    params: list[Any],
+) -> int:
+    with get_connection(db_path) as connection:
+        row = connection.execute(
+            "SELECT COUNT(*) AS count FROM live_events" + _where(clauses),
+            params,
+        ).fetchone()
+    return int(row["count"])
+
+
+def _severity_counts(
+    db_path: Path,
+    *,
+    search: str | None,
+    channel: str | None,
+    provider: str | None,
+    event_id: str | None,
+    username: str | None,
+    since_minutes: int | None,
+    alerts_only: bool,
     severity: str | None = None,
 ) -> dict[str, int]:
-    """Count events for the active filters."""
-
-    clauses, params = _build_filters(
-        severity, search, source, event_type, username, since_minutes
+    clauses, params = _filters(
+        severity, search, channel, provider, event_id, username, since_minutes, alerts_only
     )
-    where = " WHERE " + " AND ".join(clauses) if clauses else ""
-
+    where = _where(clauses)
     counts = {"High": 0, "Medium": 0, "Low": 0}
+
     with get_connection(db_path) as connection:
-        grouped = connection.execute(
-            "SELECT severity, COUNT(*) AS count FROM events"
+        rows = connection.execute(
+            "SELECT severity, COUNT(*) AS count FROM live_events"
             + where
             + " GROUP BY severity",
             params,
         ).fetchall()
-        total = int(
-            connection.execute(
-                "SELECT COUNT(*) AS count FROM events" + where,
-                params,
-            ).fetchone()["count"]
-        )
 
-    for row in grouped:
+    for row in rows:
         if row["severity"] in counts:
             counts[str(row["severity"])] = int(row["count"])
-    counts["Total"] = total
+    counts["Total"] = sum(counts.values())
     return counts
 
 
 def _dimension_values(db_path: Path, column: str) -> list[str]:
-    if column not in {"source", "event_type", "username"}:
+    allowed = {"channel", "provider", "event_id", "username"}
+    if column not in allowed:
         raise ValueError("Unsupported dimension")
+
     with get_connection(db_path) as connection:
         rows = connection.execute(
-            f"SELECT DISTINCT {column} AS value FROM events "
-            f"WHERE {column} != '' ORDER BY {column} LIMIT 100"
+            f"SELECT DISTINCT {column} AS value FROM live_events "
+            f"WHERE {column} NOT IN ('', 'unknown') ORDER BY {column} LIMIT 150"
         ).fetchall()
     return [str(row["value"]) for row in rows]
 
@@ -383,15 +336,15 @@ def _top_values(
     column: str,
     clauses: list[str],
     params: list[Any],
-    limit: int = 6,
+    limit: int = 7,
 ) -> list[dict[str, Any]]:
-    if column not in {"source_ip", "username", "event_type", "source"}:
-        raise ValueError("Unsupported top-value column")
-    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    if column not in {"provider", "event_id", "username", "channel"}:
+        raise ValueError("Unsupported ranking field")
+
     with get_connection(db_path) as connection:
         rows = connection.execute(
-            f"SELECT {column} AS label, COUNT(*) AS count FROM events"
-            + where
+            f"SELECT {column} AS label, COUNT(*) AS count FROM live_events"
+            + _where(clauses)
             + f" GROUP BY {column} ORDER BY count DESC, {column} LIMIT ?",
             [*params, limit],
         ).fetchall()
@@ -402,103 +355,114 @@ def _timeline(
     db_path: Path,
     clauses: list[str],
     params: list[Any],
-    points: int = 12,
+    points: int = 20,
 ) -> list[dict[str, Any]]:
-    where = " WHERE " + " AND ".join(clauses) if clauses else ""
     with get_connection(db_path) as connection:
         rows = connection.execute(
-            "SELECT substr(timestamp,1,13) AS bucket, COUNT(*) AS count FROM events"
-            + where
+            "SELECT substr(timestamp,1,16) AS bucket, COUNT(*) AS count "
+            "FROM live_events"
+            + _where(clauses)
             + " GROUP BY bucket ORDER BY bucket DESC LIMIT ?",
             [*params, points],
         ).fetchall()
 
     return [
-        {"label": str(row["bucket"]).replace("T", " "), "count": int(row["count"])}
+        {"label": str(row["bucket"]), "count": int(row["count"])}
         for row in reversed(rows)
     ]
 
 
 def dashboard_snapshot(
     db_path: Path,
+    *,
     severity: str | None = None,
     search: str | None = None,
-    source: str | None = None,
-    event_type: str | None = None,
+    channel: str | None = None,
+    provider: str | None = None,
+    event_id: str | None = None,
     username: str | None = None,
     since_minutes: int | None = None,
-    limit: int = 250,
+    alerts_only: bool = False,
 ) -> dict[str, Any]:
-    """Build the JSON payload used by the live dashboard."""
+    """Build one live dashboard response from current SQLite data."""
 
-    rows = query_events(
+    events = query_events(
         db_path,
         severity=severity,
         search=search,
-        source=source,
-        event_type=event_type,
+        channel=channel,
+        provider=provider,
+        event_id=event_id,
         username=username,
         since_minutes=since_minutes,
-        limit=limit,
+        alerts_only=alerts_only,
     )
-    counts = severity_counts(
+    counts = _severity_counts(
         db_path,
         search=search,
-        source=source,
-        event_type=event_type,
+        channel=channel,
+        provider=provider,
+        event_id=event_id,
         username=username,
         since_minutes=since_minutes,
+        alerts_only=alerts_only,
         severity=severity,
     )
-    filter_counts = severity_counts(
+    filter_counts = _severity_counts(
         db_path,
         search=search,
-        source=source,
-        event_type=event_type,
+        channel=channel,
+        provider=provider,
+        event_id=event_id,
         username=username,
         since_minutes=since_minutes,
-    )
-    clauses, params = _build_filters(
-        severity, search, source, event_type, username, since_minutes
+        alerts_only=alerts_only,
     )
 
-    events = [
-        {
-            "id": row[0],
-            "timestamp": row[1],
-            "source_ip": row[2],
-            "event": row[3],
-            "severity": row[4],
-            "username": row[5],
-            "host": row[6],
-            "source": row[7],
-            "event_type": row[8],
-            "raw_log": row[9],
-            "created_at": row[10],
-            "external_id": row[11],
-        }
-        for row in rows
-    ]
+    clauses, params = _filters(
+        severity, search, channel, provider, event_id, username, since_minutes, alerts_only
+    )
+    alert_clauses = [*clauses, "is_alert = 1"]
+    alert_params = list(params)
+
+    recent_clauses, recent_params = _filters(
+        severity, search, channel, provider, event_id, username, 1, alerts_only
+    )
 
     return {
         "counts": counts,
         "filter_counts": filter_counts,
+        "alerts": query_events(
+            db_path,
+            severity=severity,
+            search=search,
+            channel=channel,
+            provider=provider,
+            event_id=event_id,
+            username=username,
+            since_minutes=since_minutes,
+            alerts_only=True,
+            limit=30,
+        ),
+        "alert_count": _count_rows(db_path, alert_clauses, alert_params),
+        "events_per_minute": _count_rows(db_path, recent_clauses, recent_params),
         "events": events,
         "visible": len(events),
         "dimensions": {
-            "sources": _dimension_values(db_path, "source"),
-            "event_types": _dimension_values(db_path, "event_type"),
+            "channels": _dimension_values(db_path, "channel"),
+            "providers": _dimension_values(db_path, "provider"),
+            "event_ids": _dimension_values(db_path, "event_id"),
             "usernames": _dimension_values(db_path, "username"),
         },
-        "top_sources": _top_values(db_path, "source_ip", clauses, params),
-        "top_event_types": _top_values(db_path, "event_type", clauses, params),
+        "top_providers": _top_values(db_path, "provider", clauses, params),
+        "top_event_ids": _top_values(db_path, "event_id", clauses, params),
         "timeline": _timeline(db_path, clauses, params),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
 def dashboard_app(db_path: Path, collector_status: dict[str, Any] | None = None):
-    """Create the Flask SIEM application."""
+    """Create the Flask application."""
 
     try:
         from flask import Flask, jsonify, render_template, request
@@ -513,7 +477,7 @@ def dashboard_app(db_path: Path, collector_status: dict[str, Any] | None = None)
         template_folder=str(source_dir / "templates"),
         static_folder=str(source_dir / "static"),
     )
-    app.config["MAX_CONTENT_LENGTH"] = 2_000_000
+    app.config["MAX_CONTENT_LENGTH"] = 3_000_000
 
     @app.get("/")
     def index():
@@ -521,27 +485,31 @@ def dashboard_app(db_path: Path, collector_status: dict[str, Any] | None = None)
 
     @app.get("/health")
     def health():
-        return jsonify({"status": "ok"})
+        return jsonify({"status": "ok", "database": str(db_path)})
 
     @app.get("/api/dashboard")
     def api_dashboard():
         since_text = request.args.get("since", "").strip()
         since_minutes = int(since_text) if since_text.isdigit() else None
         snapshot = dashboard_snapshot(
-                db_path,
-                severity=request.args.get("severity") or None,
-                search=request.args.get("search") or None,
-                source=request.args.get("source") or None,
-                event_type=request.args.get("event_type") or None,
-                username=request.args.get("username") or None,
-                since_minutes=since_minutes,
-            )
+            db_path,
+            severity=request.args.get("severity") or None,
+            search=request.args.get("search") or None,
+            channel=request.args.get("channel") or None,
+            provider=request.args.get("provider") or None,
+            event_id=request.args.get("event_id") or None,
+            username=request.args.get("username") or None,
+            since_minutes=since_minutes,
+            alerts_only=request.args.get("alerts") == "1",
+        )
         snapshot["collector"] = collector_status or {
             "enabled": False,
             "running": False,
             "ingested": 0,
-            "logs": {},
+            "backfilled": 0,
+            "channels": {},
             "last_error": "",
+            "last_poll": "",
         }
         return jsonify(snapshot)
 
@@ -569,7 +537,11 @@ def dashboard_app(db_path: Path, collector_status: dict[str, Any] | None = None)
 
         try:
             payloads = parse_event_file(uploaded.filename, uploaded.read())
-            inserted = ingest_payloads(db_path, payloads, f"import:{uploaded.filename}")
+            inserted = ingest_payloads(
+                db_path,
+                payloads,
+                f"import:{uploaded.filename}",
+            )
         except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             return jsonify({"error": str(exc)}), 400
         return jsonify({"inserted": inserted}), 201
@@ -583,32 +555,29 @@ def dashboard_app(db_path: Path, collector_status: dict[str, Any] | None = None)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the local MKMK SIEM dashboard.")
-    parser.add_argument("--db", type=Path, default=Path("siem.db"))
-    parser.add_argument("--seed", action="store_true")
+    parser = argparse.ArgumentParser(description="Run the live MKMK SIEM console.")
+    parser.add_argument("--db", type=Path, default=Path("siem_live.db"))
     parser.add_argument("--reset", action="store_true")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument(
         "--no-windows-events",
         action="store_true",
-        help="Do not collect new local Windows Event Log entries.",
+        help="Run without the Windows Event Log collector.",
     )
     args = parser.parse_args()
 
     get_connection(args.db).close()
-
     if args.reset:
         reset_events(args.db)
-        print("Cleared existing events.")
-    if args.seed:
-        print(f"Seeded {seed_events(args.db, SAMPLE_EVENTS)} optional lab events.")
+        print("Cleared the live event store.")
 
     collector = WindowsEventCollector(args.db, ingest_payloads)
     if not args.no_windows_events:
         collector.start()
 
     try:
+        print(f"SIEM database: {args.db}")
         dashboard_app(args.db, collector.status).run(
             host=args.host,
             port=args.port,

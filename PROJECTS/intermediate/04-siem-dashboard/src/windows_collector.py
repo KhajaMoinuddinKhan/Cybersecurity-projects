@@ -1,21 +1,58 @@
-"""Collect new Windows Event Log entries while the SIEM is running."""
+"""Live Windows Event Log collection and event-based security rules."""
 from __future__ import annotations
 
 import json
 import os
 import subprocess
 import threading
-import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
-
+from xml.etree import ElementTree
 
 PayloadIngestor = Callable[[Path, Iterable[dict[str, Any]], str], int]
-DEFAULT_LOGS = ("System", "Application", "Security")
+
+CHANNELS = (
+    "Security",
+    "System",
+    "Application",
+    "Microsoft-Windows-Windows Defender/Operational",
+    "Microsoft-Windows-PowerShell/Operational",
+)
+
+RULES: dict[tuple[str, str], tuple[str, str]] = {
+    ("Security", "1102"): ("High", "Windows audit log cleared"),
+    ("Security", "4625"): ("Medium", "Failed Windows logon"),
+    ("Security", "4720"): ("Medium", "User account created"),
+    ("Security", "4726"): ("Medium", "User account deleted"),
+    ("Security", "4728"): ("High", "Member added to a privileged group"),
+    ("Security", "4732"): ("High", "Member added to a local privileged group"),
+    ("Security", "4756"): ("High", "Member added to a universal group"),
+    ("Security", "4740"): ("High", "User account locked out"),
+    ("System", "7045"): ("High", "Windows service installed"),
+    ("Microsoft-Windows-Windows Defender/Operational", "1116"): (
+        "High",
+        "Windows Defender detected malware",
+    ),
+    ("Microsoft-Windows-Windows Defender/Operational", "1117"): (
+        "Medium",
+        "Windows Defender remediation action",
+    ),
+}
+
+SUSPICIOUS_POWERSHELL = (
+    "-enc",
+    "-encodedcommand",
+    "downloadstring",
+    "invoke-webrequest",
+    "invoke-expression",
+    "frombase64string",
+    "iex ",
+)
 
 
 def severity_from_windows_level(level: str | None) -> str:
-    """Map Windows event levels to the dashboard severity model."""
+    """Map Windows operational levels to dashboard severity."""
 
     value = (level or "").strip().lower()
     if value in {"critical", "error"}:
@@ -25,44 +62,124 @@ def severity_from_windows_level(level: str | None) -> str:
     return "Low"
 
 
+def _event_data(xml_text: str | None) -> dict[str, str]:
+    """Extract named EventData fields from Windows event XML."""
+
+    if not xml_text:
+        return {}
+
+    try:
+        root = ElementTree.fromstring(xml_text)
+    except ElementTree.ParseError:
+        return {}
+
+    fields: dict[str, str] = {}
+    for element in root.iter():
+        if not element.tag.endswith("Data"):
+            continue
+        name = element.attrib.get("Name")
+        if name:
+            fields[name] = element.text or ""
+    return fields
+
+
+def classify_event(
+    channel: str,
+    event_id: str,
+    level: str,
+    message: str,
+) -> tuple[str, bool, str]:
+    """Apply small explainable rules to real Windows events."""
+
+    key = (channel, event_id)
+    if key in RULES:
+        severity, rule_name = RULES[key]
+        return severity, True, rule_name
+
+    if (
+        channel == "Microsoft-Windows-PowerShell/Operational"
+        and event_id == "4104"
+    ):
+        lowered = message.lower()
+        if any(term in lowered for term in SUSPICIOUS_POWERSHELL):
+            return "High", True, "Suspicious PowerShell script block"
+
+    return severity_from_windows_level(level), False, ""
+
+
 def windows_event_to_payload(log_name: str, item: dict[str, Any]) -> dict[str, Any]:
-    """Convert one PowerShell event record into the SIEM event format."""
+    """Convert one actual Windows event record into the SIEM format."""
 
     event_id = str(item.get("Id") or "unknown")
     provider = str(item.get("Provider") or "Windows")
+    level = str(item.get("Level") or "Information")
     message = str(item.get("Message") or "").strip()
     if not message:
         message = f"{provider} event {event_id}"
 
+    data = _event_data(str(item.get("Xml") or ""))
+    username = (
+        data.get("TargetUserName")
+        or data.get("SubjectUserName")
+        or data.get("AccountName")
+        or str(item.get("User") or "unknown")
+    )
+    source_ip = (
+        data.get("IpAddress")
+        or data.get("SourceNetworkAddress")
+        or data.get("ClientAddress")
+        or "local"
+    )
+    if source_ip in {"-", "::1", "127.0.0.1"}:
+        source_ip = "local"
+
+    severity, is_alert, rule_name = classify_event(
+        log_name,
+        event_id,
+        level,
+        message,
+    )
+
     record_id = str(item.get("RecordId") or "")
+    raw = {key: value for key, value in item.items() if key != "Xml"}
+    raw["EventData"] = data
+
     return {
         "timestamp": item.get("TimeCreated"),
-        "source_ip": "local",
-        "event": message,
-        "severity": severity_from_windows_level(str(item.get("Level") or "")),
-        "username": str(item.get("User") or "unknown"),
+        "channel": log_name,
+        "provider": provider,
+        "event_id": event_id,
+        "level": level,
+        "severity": severity,
+        "username": username or "unknown",
         "host": str(item.get("Machine") or "localhost"),
-        "source": f"Windows:{log_name}",
-        "event_type": f"windows_event_{event_id}",
+        "source_ip": source_ip,
+        "message": message,
+        "record_id": record_id,
+        "source": "windows-event-log",
+        "is_alert": is_alert,
+        "rule_name": rule_name,
         "external_id": f"{log_name}:{record_id}" if record_id else "",
-        "raw_log": json.dumps(item, ensure_ascii=False, sort_keys=True),
+        "raw_log": json.dumps(raw, ensure_ascii=False, sort_keys=True),
     }
 
 
 class WindowsEventCollector:
-    """Poll Windows Event Logs and ingest only records created after startup."""
+    """Backfill recent Windows records, then continue collecting new ones."""
 
     def __init__(
         self,
         db_path: Path,
         ingest: PayloadIngestor,
-        logs: tuple[str, ...] = DEFAULT_LOGS,
-        interval: float = 3.0,
+        channels: tuple[str, ...] = CHANNELS,
+        interval: float = 2.0,
+        backfill_per_channel: int = 25,
     ) -> None:
         self.db_path = db_path
         self.ingest = ingest
-        self.logs = logs
+        self.channels = channels
         self.interval = interval
+        self.backfill_per_channel = backfill_per_channel
         self.stop_event = threading.Event()
         self.thread: threading.Thread | None = None
         self.cursors: dict[str, int] = {}
@@ -70,8 +187,10 @@ class WindowsEventCollector:
             "enabled": os.name == "nt",
             "running": False,
             "ingested": 0,
-            "logs": {name: "waiting" for name in logs},
+            "backfilled": 0,
+            "channels": {name: {"state": "waiting", "last_record": 0} for name in channels},
             "last_error": "",
+            "last_poll": "",
         }
 
     def start(self) -> None:
@@ -92,7 +211,7 @@ class WindowsEventCollector:
     def stop(self) -> None:
         self.stop_event.set()
         if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=2)
+            self.thread.join(timeout=3)
 
     def _powershell(self, script: str) -> str:
         prefix = (
@@ -113,7 +232,7 @@ class WindowsEventCollector:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=12,
+            timeout=18,
             check=False,
         )
         if result.returncode != 0:
@@ -121,30 +240,19 @@ class WindowsEventCollector:
             raise RuntimeError(error)
         return result.stdout.strip()
 
-    def _latest_record_id(self, log_name: str) -> int:
-        script = (
-            f"$e=Get-WinEvent -LogName '{log_name}' -MaxEvents 1 -ErrorAction Stop;"
-            "if($null -eq $e){'0'}else{[string]$e.RecordId}"
-        )
-        text = self._powershell(script)
-        return int(text or "0")
-
-    def _new_records(self, log_name: str, after_record_id: int) -> list[dict[str, Any]]:
-        script = (
-            f"$items=@(Get-WinEvent -FilterHashtable @{{LogName='{log_name}';"
-            "StartTime=(Get-Date).AddMinutes(-5)}} -ErrorAction Stop | "
-            f"Where-Object {{$_.RecordId -gt {after_record_id}}} | "
-            "Sort-Object RecordId | Select-Object "
-            "RecordId,Id,"
+    @staticmethod
+    def _projection() -> str:
+        return (
+            "Select-Object RecordId,Id,"
             "@{N='TimeCreated';E={$_.TimeCreated.ToUniversalTime().ToString('o')}},"
             "@{N='Level';E={$_.LevelDisplayName}},"
             "@{N='Provider';E={$_.ProviderName}},"
             "@{N='Machine';E={$_.MachineName}},"
             "@{N='User';E={if($_.UserId){$_.UserId.Value}else{'unknown'}}},"
-            "Message);"
-            "$items | ConvertTo-Json -Depth 4 -Compress"
+            "Message,@{N='Xml';E={$_.ToXml()}}"
         )
-        text = self._powershell(script)
+
+    def _decode_records(self, text: str) -> list[dict[str, Any]]:
         if not text:
             return []
         data = json.loads(text)
@@ -152,40 +260,83 @@ class WindowsEventCollector:
             return [data]
         return data if isinstance(data, list) else []
 
+    def _recent_records(self, channel: str) -> list[dict[str, Any]]:
+        script = (
+            f"@(Get-WinEvent -LogName '{channel}' -MaxEvents {self.backfill_per_channel} "
+            "-ErrorAction Stop | Sort-Object RecordId | "
+            + self._projection()
+            + ") | ConvertTo-Json -Depth 5 -Compress"
+        )
+        return self._decode_records(self._powershell(script))
+
+    def _new_records(self, channel: str, after_record_id: int) -> list[dict[str, Any]]:
+        script = (
+            f"@(Get-WinEvent -FilterHashtable @{{LogName='{channel}';"
+            "StartTime=(Get-Date).AddMinutes(-10)}} -ErrorAction Stop | "
+            f"Where-Object {{$_.RecordId -gt {after_record_id}}} | "
+            "Sort-Object RecordId | Select-Object -First 100 | "
+            + self._projection()
+            + ") | ConvertTo-Json -Depth 5 -Compress"
+        )
+        return self._decode_records(self._powershell(script))
+
+    def _ingest_records(
+        self,
+        channel: str,
+        records: list[dict[str, Any]],
+        *,
+        backfill: bool,
+    ) -> None:
+        if not records:
+            return
+
+        payloads = [windows_event_to_payload(channel, item) for item in records]
+        inserted = self.ingest(self.db_path, payloads, "windows-event-log")
+        if backfill:
+            self.status["backfilled"] += inserted
+        else:
+            self.status["ingested"] += inserted
+
+        record_ids = [
+            int(item["RecordId"])
+            for item in records
+            if str(item.get("RecordId") or "").isdigit()
+        ]
+        if record_ids:
+            latest = max(record_ids)
+            self.cursors[channel] = latest
+            self.status["channels"][channel]["last_record"] = latest
+
     def _initialise(self) -> None:
-        for log_name in self.logs:
+        for channel in self.channels:
             try:
-                self.cursors[log_name] = self._latest_record_id(log_name)
-                self.status["logs"][log_name] = "connected"
-            except (RuntimeError, ValueError, subprocess.SubprocessError) as exc:
-                self.status["logs"][log_name] = "unavailable"
-                self.status["last_error"] = f"{log_name}: {exc}"
+                records = self._recent_records(channel)
+                self._ingest_records(channel, records, backfill=True)
+                if channel not in self.cursors:
+                    self.cursors[channel] = 0
+                self.status["channels"][channel]["state"] = "connected"
+            except (
+                RuntimeError,
+                ValueError,
+                json.JSONDecodeError,
+                subprocess.SubprocessError,
+                OSError,
+            ) as exc:
+                self.status["channels"][channel]["state"] = "unavailable"
+                self.status["last_error"] = f"{channel}: {exc}"
 
     def _run(self) -> None:
         self.status["running"] = True
         self._initialise()
 
         while not self.stop_event.is_set():
-            for log_name in self.logs:
-                if log_name not in self.cursors:
+            for channel in self.channels:
+                if self.status["channels"][channel]["state"] != "connected":
                     continue
+
                 try:
-                    records = self._new_records(log_name, self.cursors[log_name])
-                    if not records:
-                        continue
-
-                    payloads = [windows_event_to_payload(log_name, item) for item in records]
-                    inserted = self.ingest(self.db_path, payloads, f"Windows:{log_name}")
-                    self.status["ingested"] += inserted
-                    self.status["logs"][log_name] = "connected"
-
-                    record_ids = [
-                        int(item["RecordId"])
-                        for item in records
-                        if str(item.get("RecordId") or "").isdigit()
-                    ]
-                    if record_ids:
-                        self.cursors[log_name] = max(record_ids)
+                    records = self._new_records(channel, self.cursors.get(channel, 0))
+                    self._ingest_records(channel, records, backfill=False)
                 except (
                     RuntimeError,
                     ValueError,
@@ -193,9 +344,10 @@ class WindowsEventCollector:
                     subprocess.SubprocessError,
                     OSError,
                 ) as exc:
-                    self.status["logs"][log_name] = "error"
-                    self.status["last_error"] = f"{log_name}: {exc}"
+                    self.status["channels"][channel]["state"] = "error"
+                    self.status["last_error"] = f"{channel}: {exc}"
 
+            self.status["last_poll"] = datetime.now(timezone.utc).isoformat()
             self.stop_event.wait(self.interval)
 
         self.status["running"] = False

@@ -2,126 +2,137 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MKMK SIEM Console</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MKMK Live SIEM</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
 </head>
 <body>
-  <main class="shell">
-    <header class="topbar">
-      <div>
-        <div class="eyebrow">MKMK // SECURITY OPERATIONS</div>
-        <h1>MKMK SIEM Console</h1>
-        <p>Live local event ingestion, triage, filtering, timelines, and source analysis.</p>
-      </div>
-      <div class="top-actions">
-        <button id="live-toggle" class="live-button active" type="button"><span class="pulse"></span><span id="live-label">LIVE</span></button>
-        <div class="updated">Windows collector <strong id="collector-state">starting...</strong></div><div class="updated">Last update <strong id="last-updated">--</strong></div>
-      </div>
-    </header>
+<main class="shell">
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">MKMK // LIVE SECURITY OPERATIONS</div>
+      <h1>Live SIEM Console</h1>
+      <p>Windows Event Log telemetry, security-rule alerts, filtering, provider activity, and event triage from the local machine.</p>
+    </div>
+    <div class="status-area">
+      <button id="live-toggle" class="live-toggle active" type="button"><span class="pulse"></span><span id="live-label">LIVE</span></button>
+      <div class="status-box"><span>Collector</span><strong id="collector-state">Starting...</strong></div>
+      <div class="status-box"><span>Updated</span><strong id="last-updated">--</strong></div>
+    </div>
+  </header>
 
-    <section class="stats-grid">
-      <article class="stat-card total"><span>Total events</span><strong id="count-total">0</strong><small>Matching current filters</small></article>
-      <article class="stat-card high"><span>High severity</span><strong id="count-high">0</strong><small>Immediate review</small></article>
-      <article class="stat-card medium"><span>Medium severity</span><strong id="count-medium">0</strong><small>Needs validation</small></article>
-      <article class="stat-card low"><span>Low severity</span><strong id="count-low">0</strong><small>Routine activity</small></article>
-    </section>
+  <section class="stats-grid">
+    <article class="stat-card"><span>Total events</span><strong id="count-total">--</strong><small>Current filtered event set</small></article>
+    <article class="stat-card alert"><span>Security alerts</span><strong id="count-alerts">--</strong><small>Events matching security rules</small></article>
+    <article class="stat-card high"><span>High severity</span><strong id="count-high">--</strong><small>High-severity matching events</small></article>
+    <article class="stat-card rate"><span>Events / minute</span><strong id="count-rate">--</strong><small>Events received in the last minute</small></article>
+  </section>
 
-    <section class="panel filters-panel">
-      <div class="panel-heading">
-        <div><span class="kicker">LIVE FILTERS</span><h2>Investigation workspace</h2></div>
-        <button id="reset-filters" class="ghost-button" type="button">Reset filters</button>
-      </div>
-      <div class="filter-grid">
-        <label class="wide"><span>Search</span><input id="filter-search" type="search" placeholder="Event, IP, user, host, source or type"></label>
-        <label><span>Time</span><select id="filter-since"><option value="">All time</option><option value="15">Last 15 min</option><option value="60">Last hour</option><option value="360">Last 6 hours</option><option value="1440">Last 24 hours</option></select></label>
-        <label><span>Source</span><select id="filter-source"><option value="">All sources</option></select></label>
-        <label><span>Event type</span><select id="filter-type"><option value="">All event types</option></select></label>
-        <label><span>User</span><select id="filter-user"><option value="">All users</option></select></label>
-      </div>
+  <section class="panel collector-panel">
+    <div class="panel-heading">
+      <div><span class="kicker">COLLECTOR HEALTH</span><h2>Windows Event Log channels</h2></div>
+      <div class="collector-total"><span>Collector activity</span><strong id="collector-ingested">0</strong></div>
+    </div>
+    <div id="channel-status" class="channel-grid"><div class="empty-inline">Connecting to Windows Event Logs...</div></div>
+    <p id="collector-error" class="collector-error"></p>
+  </section>
+
+  <section class="panel filters-panel">
+    <div class="panel-heading">
+      <div><span class="kicker">LIVE FILTERS</span><h2>Investigation workspace</h2></div>
+      <button id="reset-filters" class="ghost-button" type="button">Reset filters</button>
+    </div>
+    <div class="filter-grid">
+      <label class="wide"><span>Search</span><input id="filter-search" type="search" placeholder="Message, provider, event ID, user, host, IP or rule"></label>
+      <label><span>Time</span><select id="filter-since"><option value="">All collected</option><option value="5">Last 5 min</option><option value="15">Last 15 min</option><option value="60">Last hour</option><option value="360">Last 6 hours</option><option value="1440">Last 24 hours</option></select></label>
+      <label><span>Channel</span><select id="filter-channel"><option value="">All channels</option></select></label>
+      <label><span>Provider</span><select id="filter-provider"><option value="">All providers</option></select></label>
+      <label><span>Event ID</span><select id="filter-event-id"><option value="">All event IDs</option></select></label>
+      <label><span>User</span><select id="filter-user"><option value="">All users</option></select></label>
+    </div>
+    <div class="filter-row">
       <div class="severity-filters">
-        <button type="button" class="severity-filter active" data-severity="">All <b id="filter-count-all">0</b></button>
-        <button type="button" class="severity-filter high" data-severity="High">High <b id="filter-count-high">0</b></button>
-        <button type="button" class="severity-filter medium" data-severity="Medium">Medium <b id="filter-count-medium">0</b></button>
-        <button type="button" class="severity-filter low" data-severity="Low">Low <b id="filter-count-low">0</b></button>
+        <button type="button" class="severity-filter active" data-severity="">All <b id="filter-count-all">--</b></button>
+        <button type="button" class="severity-filter high" data-severity="High">High <b id="filter-count-high">--</b></button>
+        <button type="button" class="severity-filter medium" data-severity="Medium">Medium <b id="filter-count-medium">--</b></button>
+        <button type="button" class="severity-filter low" data-severity="Low">Low <b id="filter-count-low">--</b></button>
       </div>
-    </section>
+      <label class="alert-switch"><input id="alerts-only" type="checkbox"><span>Security alerts only</span></label>
+    </div>
+  </section>
 
-    <section class="analytics-grid">
-      <article class="panel">
-        <div class="panel-heading"><div><span class="kicker">EVENT VOLUME</span><h2>Activity timeline</h2></div><span class="mini-chip" id="visible-count">0 visible</span></div>
-        <div id="timeline" class="timeline"><div class="empty-inline">Waiting for events</div></div>
-      </article>
-      <article class="panel">
-        <div class="panel-heading"><div><span class="kicker">TOP SOURCES</span><h2>Source IP activity</h2></div></div>
-        <div id="top-sources" class="rank-list"><div class="empty-inline">No source data</div></div>
-      </article>
-      <article class="panel">
-        <div class="panel-heading"><div><span class="kicker">EVENT TYPES</span><h2>Telemetry mix</h2></div></div>
-        <div id="top-types" class="rank-list"><div class="empty-inline">No event types</div></div>
-      </article>
-    </section>
+  <section class="analytics-grid">
+    <article class="panel timeline-panel">
+      <div class="panel-heading"><div><span class="kicker">EVENT VOLUME</span><h2>Live activity timeline</h2></div><span class="mini-chip" id="visible-count">0 visible</span></div>
+      <div id="timeline" class="timeline"><div class="empty-inline">Waiting for live events</div></div>
+    </article>
+    <article class="panel">
+      <div class="panel-heading"><div><span class="kicker">TOP PROVIDERS</span><h2>Windows providers</h2></div></div>
+      <div id="top-providers" class="rank-list"><div class="empty-inline">No provider data yet</div></div>
+    </article>
+    <article class="panel">
+      <div class="panel-heading"><div><span class="kicker">TOP EVENT IDs</span><h2>Event frequency</h2></div></div>
+      <div id="top-event-ids" class="rank-list"><div class="empty-inline">No Event IDs yet</div></div>
+    </article>
+  </section>
 
-    <section class="panel ingest-panel">
-      <details>
-        <summary><span><span class="kicker">DATA INGESTION</span><strong>Add real events to the SIEM</strong></span><span class="summary-hint">API, manual event, or file import</span></summary>
-        <div class="ingest-body">
-          <div class="ingest-grid">
-            <form id="event-form" class="ingest-card">
-              <h3>Add one event</h3>
-              <div class="form-grid">
-                <label><span>Severity</span><select name="severity"><option>High</option><option selected>Medium</option><option>Low</option></select></label>
-                <label><span>Event type</span><input name="event_type" value="authentication"></label>
-                <label><span>Source IP</span><input name="source_ip" placeholder="10.0.0.25"></label>
-                <label><span>User</span><input name="username" placeholder="admin"></label>
-                <label><span>Host</span><input name="host" placeholder="workstation-01"></label>
-                <label><span>Source</span><input name="source" value="manual"></label>
-                <label class="full"><span>Event message</span><input name="event" required placeholder="Multiple failed login attempts"></label>
-              </div>
-              <button class="primary-button" type="submit">Ingest event</button>
-            </form>
+  <section class="panel alert-panel">
+    <div class="panel-heading">
+      <div><span class="kicker">DETECTION QUEUE</span><h2>Security-rule alerts</h2></div>
+      <span class="mini-chip" id="alert-visible">0 alerts</span>
+    </div>
+    <div class="table-wrap alert-table-wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Severity</th><th>Rule</th><th>Event ID</th><th>User / Source IP</th><th>Provider</th><th></th></tr></thead>
+        <tbody id="alert-body"><tr><td colspan="7" class="table-empty">No security-rule alerts in the current view.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
 
-            <form id="file-form" class="ingest-card">
-              <h3>Import event file</h3>
-              <p>Import JSON, JSONL, NDJSON, or CSV. Events are written to SQLite and appear in the feed automatically.</p>
-              <input id="event-file" type="file" name="file" accept=".json,.jsonl,.ndjson,.csv" required>
-              <button class="primary-button" type="submit">Import file</button>
-              <div class="api-note"><span>POST endpoint</span><code>/api/events</code></div>
-            </form>
-          </div>
-          <div class="danger-row">
-            <span id="ingest-message" aria-live="polite"></span>
-            <button id="clear-events" class="danger-button" type="button">Clear event store</button>
-          </div>
+  <section class="panel event-panel">
+    <div class="panel-heading event-heading">
+      <div><span class="kicker">LIVE EVENT STREAM</span><h2>Windows events</h2></div>
+      <div class="feed-state"><span class="pulse"></span><span id="feed-text">Refreshing every 1.5 seconds</span></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Severity</th><th>Channel</th><th>Event ID</th><th>Provider</th><th>Message</th><th>User</th><th>Source IP</th><th></th></tr></thead>
+        <tbody id="event-body"><tr><td colspan="9" class="table-empty">Waiting for Windows events...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel ingest-panel">
+    <details>
+      <summary><span><span class="kicker">EXTERNAL INGESTION</span><strong>API and event-file input</strong></span><span class="summary-hint">Optional additional log sources</span></summary>
+      <div class="ingest-body">
+        <div>
+          <h3>Import an event file</h3>
+          <p>JSON, JSONL, NDJSON and CSV files are accepted and written into the same live event store.</p>
+          <form id="file-form" class="file-form">
+            <input type="file" name="file" accept=".json,.jsonl,.ndjson,.csv" required>
+            <button class="primary-button" type="submit">Import events</button>
+          </form>
         </div>
-      </details>
-    </section>
-
-    <section class="panel event-panel">
-      <div class="panel-heading event-heading">
-        <div><span class="kicker">LIVE EVENT STREAM</span><h2>Security events</h2></div>
-        <div class="feed-state"><span class="pulse"></span><span id="feed-text">Polling SQLite every 2.5 seconds</span></div>
+        <div class="api-card"><span>JSON ingestion endpoint</span><code>POST /api/events</code><p>Use this endpoint for another local collector or log shipper.</p></div>
+        <div class="danger-row"><span id="ingest-message" aria-live="polite"></span><button id="clear-events" class="danger-button" type="button">Clear live event store</button></div>
       </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>ID</th><th>Time</th><th>Severity</th><th>Event</th><th>Type</th><th>Source IP</th><th>User</th><th>Host</th><th>Source</th><th></th></tr></thead>
-          <tbody id="event-body"><tr><td colspan="10" class="table-empty">No events yet. Ingest an event or import a file.</td></tr></tbody>
-        </table>
-      </div>
-    </section>
+    </details>
+  </section>
 
-    <dialog id="event-dialog">
-      <div class="dialog-head"><div><span class="kicker">EVENT DETAILS</span><h2 id="detail-title">Event</h2></div><button id="close-dialog" type="button">Close</button></div>
-      <div id="event-detail" class="detail-grid"></div>
-      <div class="raw-block"><span>Raw event</span><pre id="detail-raw"></pre></div>
-    </dialog>
-  </main>
+  <dialog id="event-dialog">
+    <div class="dialog-head"><div><span class="kicker">EVENT DETAILS</span><h2 id="detail-title">Event</h2></div><button id="close-dialog" type="button">Close</button></div>
+    <div id="event-detail" class="detail-grid"></div>
+    <div class="raw-block"><span>Raw event</span><pre id="detail-raw"></pre></div>
+  </dialog>
+</main>
 
 <script>
 (function () {
   var state = {
-    severity: "", search: "", since: "", source: "", eventType: "", username: "",
-    live: true, timer: null, requestId: 0, events: new Map()
+    severity: "", search: "", since: "", channel: "", provider: "", eventId: "",
+    username: "", alertsOnly: false, live: true, timer: null, requestId: 0,
+    events: new Map()
   };
 
   function el(id) { return document.getElementById(id); }
@@ -130,126 +141,172 @@
       return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch];
     });
   }
-  function setText(id, value) { el(id).textContent = value; }
+  function text(id, value) { el(id).textContent = value; }
+
+  function setCounter(id, value) {
+    var node = el(id);
+    var next = String(value);
+    if (node.textContent !== next) {
+      node.textContent = next;
+      node.classList.remove("counter-change");
+      void node.offsetWidth;
+      node.classList.add("counter-change");
+    }
+  }
 
   function queryString() {
     var params = new URLSearchParams();
     if (state.severity) params.set("severity", state.severity);
     if (state.search) params.set("search", state.search);
     if (state.since) params.set("since", state.since);
-    if (state.source) params.set("source", state.source);
-    if (state.eventType) params.set("event_type", state.eventType);
+    if (state.channel) params.set("channel", state.channel);
+    if (state.provider) params.set("provider", state.provider);
+    if (state.eventId) params.set("event_id", state.eventId);
     if (state.username) params.set("username", state.username);
+    if (state.alertsOnly) params.set("alerts", "1");
     return params.toString();
   }
 
   function updateSelect(id, items, placeholder, selected) {
-    var select = el(id);
+    var node = el(id);
     var html = '<option value="">' + esc(placeholder) + '</option>';
     items.forEach(function (item) {
       html += '<option value="' + esc(item) + '">' + esc(item) + '</option>';
     });
-    select.innerHTML = html;
-    for (var i = 0; i < select.options.length; i += 1) {
-      if (select.options[i].value === selected) {
-        select.value = selected;
-        break;
-      }
-    }
+    node.innerHTML = html;
+    if (items.indexOf(selected) !== -1) node.value = selected;
   }
 
   function renderCounts(data) {
-    setText("count-total", data.counts.Total);
-    setText("count-high", data.counts.High);
-    setText("count-medium", data.counts.Medium);
-    setText("count-low", data.counts.Low);
-    setText("filter-count-all", data.filter_counts.Total);
-    setText("filter-count-high", data.filter_counts.High);
-    setText("filter-count-medium", data.filter_counts.Medium);
-    setText("filter-count-low", data.filter_counts.Low);
-    setText("visible-count", data.visible + " visible");
+    setCounter("count-total", data.counts.Total);
+    setCounter("count-alerts", data.alert_count);
+    setCounter("count-high", data.counts.High);
+    setCounter("count-rate", data.events_per_minute);
+    text("filter-count-all", data.filter_counts.Total);
+    text("filter-count-high", data.filter_counts.High);
+    text("filter-count-medium", data.filter_counts.Medium);
+    text("filter-count-low", data.filter_counts.Low);
+    text("visible-count", data.visible + " visible");
+    text("alert-visible", data.alerts.length + " alerts");
+  }
+
+  function renderCollector(collector) {
+    var channels = collector.channels || {};
+    var names = Object.keys(channels);
+    var connected = names.filter(function (name) { return channels[name].state === "connected"; }).length;
+    var stateText = collector.enabled
+      ? (collector.running ? connected + "/" + names.length + " channels live" : "collector stopped")
+      : "collector unavailable";
+    text("collector-state", stateText);
+    text("collector-ingested", (collector.ingested || 0) + " new · " + (collector.backfilled || 0) + " recent");
+
+    if (!names.length) {
+      el("channel-status").innerHTML = '<div class="empty-inline">No collector channels reported.</div>';
+    } else {
+      el("channel-status").innerHTML = names.map(function (name) {
+        var item = channels[name];
+        return '<div class="channel-card ' + esc(item.state) + '"><div><strong>' + esc(name) + '</strong><span>' + esc(item.state) + '</span></div><code>#' + esc(item.last_record || 0) + '</code></div>';
+      }).join("");
+    }
+    text("collector-error", collector.last_error || "");
   }
 
   function renderTimeline(items) {
     var box = el("timeline");
     if (!items.length) {
-      box.innerHTML = '<div class="empty-inline">No activity for the current filters</div>';
+      box.innerHTML = '<div class="empty-inline">No events for the current filters.</div>';
       return;
     }
     var max = Math.max.apply(null, items.map(function (item) { return item.count; }).concat([1]));
-    var html = "";
-    items.forEach(function (item) {
-      var height = Math.max(8, Math.round((item.count / max) * 100));
-      html += '<div class="timeline-column" title="' + esc(item.label) + ': ' + item.count + '">';
-      html += '<div class="bar-value">' + item.count + '</div>';
-      html += '<div class="bar-shell"><div class="bar-fill" style="height:' + height + '%"></div></div>';
-      html += '<div class="bar-label">' + esc(item.label.slice(5)) + '</div></div>';
-    });
-    box.innerHTML = html;
+    box.innerHTML = items.map(function (item) {
+      var height = Math.max(6, Math.round(item.count / max * 100));
+      return '<div class="timeline-column" title="' + esc(item.label) + ': ' + item.count + '">' +
+        '<span>' + item.count + '</span><div class="bar-shell"><div class="bar-fill" style="height:' + height + '%"></div></div>' +
+        '<small>' + esc(item.label.slice(11)) + '</small></div>';
+    }).join("");
   }
 
   function renderRanking(id, items) {
     var box = el(id);
     if (!items.length) {
-      box.innerHTML = '<div class="empty-inline">No data for current filters</div>';
+      box.innerHTML = '<div class="empty-inline">No data for the current filters.</div>';
       return;
     }
     var max = Math.max.apply(null, items.map(function (item) { return item.count; }).concat([1]));
-    var html = "";
-    items.forEach(function (item, index) {
-      var width = Math.max(4, item.count / max * 100);
-      html += '<div class="rank-row"><span class="rank-index">' + String(index + 1).padStart(2, "0") + '</span>';
-      html += '<div class="rank-main"><div><strong>' + esc(item.label) + '</strong><span>' + item.count + ' event' + (item.count === 1 ? '' : 's') + '</span></div>';
-      html += '<div class="rank-track"><div style="width:' + width + '%"></div></div></div></div>';
-    });
-    box.innerHTML = html;
+    box.innerHTML = items.map(function (item, index) {
+      var width = Math.max(3, item.count / max * 100);
+      return '<div class="rank-row"><span class="rank-index">' + String(index + 1).padStart(2, "0") + '</span>' +
+        '<div class="rank-main"><div><strong>' + esc(item.label) + '</strong><span>' + item.count + '</span></div>' +
+        '<div class="rank-track"><div style="width:' + width + '%"></div></div></div></div>';
+    }).join("");
+  }
+
+  function severityClass(value) {
+    return "severity severity-" + String(value || "Low").toLowerCase();
+  }
+
+  function remember(events) {
+    events.forEach(function (event) { state.events.set(String(event.id), event); });
+  }
+
+  function renderAlerts(alerts) {
+    remember(alerts);
+    var body = el("alert-body");
+    if (!alerts.length) {
+      body.innerHTML = '<tr><td colspan="7" class="table-empty">No security-rule alerts in the current view.</td></tr>';
+      return;
+    }
+    body.innerHTML = alerts.map(function (event) {
+      return '<tr class="alert-row"><td>' + esc(event.timestamp) + '</td>' +
+        '<td><span class="' + severityClass(event.severity) + '">' + esc(event.severity) + '</span></td>' +
+        '<td><strong class="rule-name">' + esc(event.rule_name || "Security rule") + '</strong></td>' +
+        '<td><code>' + esc(event.event_id) + '</code></td>' +
+        '<td>' + esc(event.username) + '<br><span class="muted mono">' + esc(event.source_ip) + '</span></td>' +
+        '<td>' + esc(event.provider) + '</td>' +
+        '<td><button class="detail-button" type="button" data-id="' + event.id + '">Details</button></td></tr>';
+    }).join("");
+    bindDetailButtons(body);
   }
 
   function renderEvents(events) {
+    remember(events);
     var body = el("event-body");
-    state.events.clear();
-    events.forEach(function (event) { state.events.set(String(event.id), event); });
-
     if (!events.length) {
-      body.innerHTML = '<tr><td colspan="10" class="table-empty">No events match the current filters.</td></tr>';
+      body.innerHTML = '<tr><td colspan="9" class="table-empty">No events match the current filters.</td></tr>';
       return;
     }
+    body.innerHTML = events.map(function (event) {
+      var marker = event.is_alert ? '<span class="alert-dot" title="Security rule matched"></span>' : '';
+      return '<tr><td>' + esc(event.timestamp) + '</td>' +
+        '<td>' + marker + '<span class="' + severityClass(event.severity) + '">' + esc(event.severity) + '</span></td>' +
+        '<td>' + esc(event.channel) + '</td><td><code>' + esc(event.event_id) + '</code></td>' +
+        '<td>' + esc(event.provider) + '</td><td class="message-cell">' + esc(event.message) + '</td>' +
+        '<td>' + esc(event.username) + '</td><td class="mono">' + esc(event.source_ip) + '</td>' +
+        '<td><button class="detail-button" type="button" data-id="' + event.id + '">Details</button></td></tr>';
+    }).join("");
+    bindDetailButtons(body);
+  }
 
-    var html = "";
-    events.forEach(function (event) {
-      html += '<tr>';
-      html += '<td><span class="event-id">EVT-' + String(event.id).padStart(5, "0") + '</span></td>';
-      html += '<td class="timestamp">' + esc(event.timestamp) + '</td>';
-      html += '<td><span class="severity severity-' + esc(event.severity.toLowerCase()) + '">' + esc(event.severity) + '</span></td>';
-      html += '<td class="event-message">' + esc(event.event) + '</td>';
-      html += '<td><span class="type-chip">' + esc(event.event_type) + '</span></td>';
-      html += '<td class="mono">' + esc(event.source_ip) + '</td>';
-      html += '<td>' + esc(event.username) + '</td><td>' + esc(event.host) + '</td><td>' + esc(event.source) + '</td>';
-      html += '<td><button class="detail-button" type="button" data-event-id="' + event.id + '">Details</button></td></tr>';
-    });
-    body.innerHTML = html;
-
-    body.querySelectorAll(".detail-button").forEach(function (button) {
-      button.addEventListener("click", function () { openDetails(button.dataset.eventId); });
+  function bindDetailButtons(root) {
+    root.querySelectorAll(".detail-button").forEach(function (button) {
+      button.addEventListener("click", function () { openDetails(button.dataset.id); });
     });
   }
 
   function openDetails(id) {
     var event = state.events.get(String(id));
     if (!event) return;
-    setText("detail-title", event.event);
+    text("detail-title", event.rule_name || event.message);
     var fields = [
-      ["Event ID", "EVT-" + String(event.id).padStart(5, "0")],
-      ["Timestamp", event.timestamp], ["Severity", event.severity],
-      ["Event type", event.event_type], ["Source IP", event.source_ip],
-      ["Username", event.username], ["Host", event.host], ["Source", event.source]
+      ["Time", event.timestamp], ["Severity", event.severity], ["Channel", event.channel],
+      ["Provider", event.provider], ["Event ID", event.event_id], ["Record ID", event.record_id || "-"],
+      ["User", event.username], ["Host", event.host], ["Source IP", event.source_ip],
+      ["Security alert", event.is_alert ? "Yes" : "No"], ["Rule", event.rule_name || "-"]
     ];
-    var html = "";
-    fields.forEach(function (field) {
-      html += '<div><span>' + esc(field[0]) + '</span><strong>' + esc(field[1]) + '</strong></div>';
-    });
-    el("event-detail").innerHTML = html;
-    el("detail-raw").textContent = event.raw_log || "(no raw log stored)";
+    el("event-detail").innerHTML = fields.map(function (field) {
+      return '<div><span>' + esc(field[0]) + '</span><strong>' + esc(field[1]) + '</strong></div>';
+    }).join("");
+    el("detail-raw").textContent = event.raw_log || event.message;
     el("event-dialog").showModal();
   }
 
@@ -261,49 +318,44 @@
       var data = await response.json();
       if (requestId !== state.requestId) return;
 
+      state.events.clear();
       renderCounts(data);
+      renderCollector(data.collector || {});
       renderTimeline(data.timeline);
-      renderRanking("top-sources", data.top_sources);
-      renderRanking("top-types", data.top_event_types);
+      renderRanking("top-providers", data.top_providers);
+      renderRanking("top-event-ids", data.top_event_ids);
+      renderAlerts(data.alerts);
       renderEvents(data.events);
-      updateSelect("filter-source", data.dimensions.sources, "All sources", state.source);
-      updateSelect("filter-type", data.dimensions.event_types, "All event types", state.eventType);
+
+      updateSelect("filter-channel", data.dimensions.channels, "All channels", state.channel);
+      updateSelect("filter-provider", data.dimensions.providers, "All providers", state.provider);
+      updateSelect("filter-event-id", data.dimensions.event_ids, "All event IDs", state.eventId);
       updateSelect("filter-user", data.dimensions.usernames, "All users", state.username);
-      var collector = data.collector || {};
-      var logStates = collector.logs || {};
-      var connected = Object.keys(logStates).filter(function (name) { return logStates[name] === "connected"; });
-      var collectorText = collector.enabled
-        ? (collector.running ? connected.length + " logs live · " + (collector.ingested || 0) + " new" : "stopped")
-        : "not available";
-      setText("collector-state", collectorText);
-      setText("last-updated", new Date(data.generated_at).toLocaleTimeString());
+
+      text("last-updated", new Date(data.generated_at).toLocaleTimeString());
     } catch (error) {
-      setText("last-updated", "connection error");
+      text("collector-state", "connection error");
       console.error(error);
     }
-  }
-
-  function scheduleRefresh() {
-    clearInterval(state.timer);
-    if (state.live) state.timer = setInterval(refresh, 2500);
   }
 
   function applyFilters() {
     state.search = el("filter-search").value.trim();
     state.since = el("filter-since").value;
-    state.source = el("filter-source").value;
-    state.eventType = el("filter-type").value;
+    state.channel = el("filter-channel").value;
+    state.provider = el("filter-provider").value;
+    state.eventId = el("filter-event-id").value;
     state.username = el("filter-user").value;
+    state.alertsOnly = el("alerts-only").checked;
     refresh();
   }
 
   var searchDelay;
   el("filter-search").addEventListener("input", function () {
     clearTimeout(searchDelay);
-    searchDelay = setTimeout(applyFilters, 220);
+    searchDelay = setTimeout(applyFilters, 180);
   });
-
-  ["filter-since","filter-source","filter-type","filter-user"].forEach(function (id) {
+  ["filter-since","filter-channel","filter-provider","filter-event-id","filter-user","alerts-only"].forEach(function (id) {
     el(id).addEventListener("change", applyFilters);
   });
 
@@ -318,14 +370,9 @@
   });
 
   el("reset-filters").addEventListener("click", function () {
-    state.severity = "";
-    state.search = "";
-    state.since = "";
-    state.source = "";
-    state.eventType = "";
-    state.username = "";
-    el("filter-search").value = "";
-    el("filter-since").value = "";
+    state.severity = ""; state.search = ""; state.since = ""; state.channel = "";
+    state.provider = ""; state.eventId = ""; state.username = ""; state.alertsOnly = false;
+    el("filter-search").value = ""; el("filter-since").value = ""; el("alerts-only").checked = false;
     document.querySelectorAll(".severity-filter").forEach(function (button) {
       button.classList.toggle("active", button.dataset.severity === "");
     });
@@ -335,43 +382,28 @@
   el("live-toggle").addEventListener("click", function () {
     state.live = !state.live;
     el("live-toggle").classList.toggle("active", state.live);
-    setText("live-label", state.live ? "LIVE" : "PAUSED");
-    setText("feed-text", state.live ? "Polling SQLite every 2.5 seconds" : "Live refresh paused");
-    scheduleRefresh();
-    if (state.live) refresh();
-  });
-
-  el("event-form").addEventListener("submit", async function (event) {
-    event.preventDefault();
-    var payload = Object.fromEntries(new FormData(event.currentTarget).entries());
-    var response = await fetch("/api/events", {
-      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)
-    });
-    var data = await response.json();
-    setText("ingest-message", response.ok ? "Ingested " + data.inserted + " event." : data.error);
-    if (response.ok) {
-      event.currentTarget.elements.event.value = "";
+    text("live-label", state.live ? "LIVE" : "PAUSED");
+    text("feed-text", state.live ? "Refreshing every 1.5 seconds" : "Live refresh paused");
+    clearInterval(state.timer);
+    if (state.live) {
       refresh();
+      state.timer = setInterval(refresh, 1500);
     }
   });
 
   el("file-form").addEventListener("submit", async function (event) {
     event.preventDefault();
-    var formData = new FormData(event.currentTarget);
-    var response = await fetch("/api/import", {method:"POST", body:formData});
+    var response = await fetch("/api/import", {method:"POST", body:new FormData(event.currentTarget)});
     var data = await response.json();
-    setText("ingest-message", response.ok ? "Imported " + data.inserted + " events." : data.error);
-    if (response.ok) {
-      event.currentTarget.reset();
-      refresh();
-    }
+    text("ingest-message", response.ok ? "Imported " + data.inserted + " events." : data.error);
+    if (response.ok) { event.currentTarget.reset(); refresh(); }
   });
 
   el("clear-events").addEventListener("click", async function () {
-    if (!confirm("Clear every event from the local SIEM database?")) return;
+    if (!confirm("Clear all collected events from siem_live.db? New Windows events will continue arriving.")) return;
     var response = await fetch("/api/events/clear", {method:"POST"});
     var data = await response.json();
-    setText("ingest-message", data.cleared ? "Event store cleared." : "Could not clear event store.");
+    text("ingest-message", data.cleared ? "Live event store cleared." : "Could not clear event store.");
     refresh();
   });
 
@@ -381,7 +413,7 @@
   });
 
   refresh();
-  scheduleRefresh();
+  state.timer = setInterval(refresh, 1500);
 })();
 </script>
 </body>
