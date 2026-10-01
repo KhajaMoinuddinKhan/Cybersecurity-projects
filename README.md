@@ -46,7 +46,7 @@ PROJECTS/<project-name>/     one folder per project, side by side
   src/                       the code
   tests/                     pytest suite for that project
   learn/                     background notes on the concepts and tradeoffs
-  assets/                    diagrams and screenshots
+assets/                      repository banner and logo artwork
 scripts/check_all.py         compiles and tests every project in its own process
 TESTING.md                   what the automated checks cover, and their limits
 PROJECT_CATALOG.md           projects grouped by the input they need
