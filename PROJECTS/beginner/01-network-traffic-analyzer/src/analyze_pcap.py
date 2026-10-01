@@ -37,6 +37,15 @@ def summarize_records(records: Iterable[TrafficRecord]) -> dict[str, Any]:
         ],
     }
 
+def port_number(value: Any) -> int | None:
+    """Return a usable port number, or None when a truncated packet omits it."""
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def packet_to_record(packet: Any) -> TrafficRecord:
     """Pull the fields we need from one Scapy packet."""
 
@@ -57,21 +66,23 @@ def packet_to_record(packet: Any) -> TrafficRecord:
     protocol = "OTHER"
     destination_port = None
     if TCP in packet:
-        protocol, destination_port = "TCP", int(packet[TCP].dport)
+        protocol, destination_port = "TCP", port_number(packet[TCP].dport)
     elif UDP in packet:
-        protocol, destination_port = "UDP", int(packet[UDP].dport)
+        protocol, destination_port = "UDP", port_number(packet[UDP].dport)
     elif source:
-        protocol = "IP"
+        protocol = "IPv6" if IPv6 in packet else "IP"
 
     # Keep the DNS name when this packet contains a query.
     dns_query = None
     if DNS in packet and packet[DNS].qr == 0 and DNSQR in packet:
         raw_query = packet[DNSQR].qname
-        dns_query = (
-            raw_query.decode("utf-8", errors="replace")
-            if isinstance(raw_query, bytes)
-            else str(raw_query)
-        )
+        if raw_query is not None:
+            text = (
+                raw_query.decode("utf-8", errors="replace")
+                if isinstance(raw_query, bytes)
+                else str(raw_query)
+            )
+            dns_query = text.strip() or None
 
     return TrafficRecord(
         protocol,
