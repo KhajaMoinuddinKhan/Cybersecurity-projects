@@ -5,6 +5,7 @@ import argparse
 import csv
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Iterable
 
@@ -29,6 +30,9 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
 def normalise_row(row: dict[str, str]) -> tuple[str, str, str]:
     """Clean one IOC row before saving it."""
 
+    for field in ("type", "value", "source"):
+        if field in row and not isinstance(row[field], str):
+            raise ValueError(f"IOC {field} must be text")
     kind = row.get("type", "").strip().lower()
     value = row.get("value", "").strip()
     source = row.get("source", "local").strip() or "local"
@@ -61,7 +65,7 @@ def import_iocs(
     """Insert new indicators and skip duplicates."""
 
     rows = list(rows)
-    with get_connection(db_path) as connection:
+    with closing(get_connection(db_path)) as connection, connection:
         before = connection.execute("SELECT COUNT(*) FROM iocs").fetchone()[0]
 
         # The database uniqueness rule drops duplicate indicators.
@@ -82,7 +86,7 @@ def search_iocs(db_path: Path, term: str) -> list[tuple[str, str, str]]:
     """Search stored indicator values."""
 
     pattern = f"%{_escape_like(term)}%"
-    with get_connection(db_path) as connection:
+    with closing(get_connection(db_path)) as connection, connection:
         return connection.execute(
             "SELECT type,value,source FROM iocs "
             "WHERE value LIKE ? ESCAPE '\\' ORDER BY type,value",
@@ -112,4 +116,7 @@ def main() -> None:
             print(f"{row[0]:7} {row[1]:40} {row[2]}")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        raise SystemExit(f"Feed operation failed: {exc}") from exc

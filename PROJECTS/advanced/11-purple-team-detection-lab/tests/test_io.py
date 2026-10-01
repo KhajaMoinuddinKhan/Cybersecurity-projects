@@ -19,3 +19,11 @@ def test_repository_rules_load():
     rules = load_rules(path)
     assert len(rules) == 5
     assert {rule.rule_id for rule in rules} == {"DET-001","DET-002","DET-003","DET-004","DET-005"}
+
+
+@pytest.mark.parametrize("operator,value", [("in", "text"), ("in", []), ("greater_or_equal", "no"), ("greater_or_equal", True), ("greater_or_equal", "nan")])
+def test_invalid_condition_values_are_rejected(tmp_path, operator, value):
+    path = tmp_path / "rules.json"
+    path.write_text(json.dumps([dict(rule_id="R", severity="High", type="match", conditions=[dict(field="x", operator=operator, value=value)])]))
+    with pytest.raises(ValueError):
+        load_rules(path)

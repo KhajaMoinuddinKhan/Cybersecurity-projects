@@ -65,7 +65,7 @@ def packet_to_record(packet: Any) -> TrafficRecord:
 
     # Keep the DNS name when this packet contains a query.
     dns_query = None
-    if DNS in packet and getattr(packet[DNS], "qdcount", 0) and DNSQR in packet:
+    if DNS in packet and packet[DNS].qr == 0 and DNSQR in packet:
         raw_query = packet[DNSQR].qname
         dns_query = (
             raw_query.decode("utf-8", errors="replace")
@@ -86,7 +86,13 @@ def analyse_pcap(path: Path) -> dict[str, Any]:
 
     from scapy.all import rdpcap
 
-    return summarize_records(packet_to_record(packet) for packet in rdpcap(str(path)))
+    from scapy.error import Scapy_Exception
+
+    try:
+        packets = rdpcap(str(path))
+    except (Scapy_Exception, OSError, EOFError) as exc:
+        raise ValueError(f"Could not read capture {path}: {exc}") from exc
+    return summarize_records(packet_to_record(packet) for packet in packets)
 
 def print_summary(summary: dict[str, Any]) -> None:
     """Print the traffic summary."""
@@ -128,6 +134,8 @@ def main() -> None:
         raise SystemExit(
             "Scapy is required. Run: python -m pip install -r requirements.txt"
         ) from exc
+    except (ValueError, OSError) as exc:
+        raise SystemExit(str(exc)) from exc
 
 if __name__ == "__main__":
     main()

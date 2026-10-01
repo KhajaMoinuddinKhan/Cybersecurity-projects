@@ -103,8 +103,10 @@ function renderWebsiteAlerts(){
   }).join("");
 }
 
+let websiteRequestId=0;
 async function runWebsiteCheck(event){
   event.preventDefault();
+  const requestId=++websiteRequestId;
   const input=document.getElementById("website-url");
   const box=document.getElementById("scan-result");
   box.className="scan-result show";
@@ -113,6 +115,7 @@ async function runWebsiteCheck(event){
   try{
     const response=await fetch("/api/website-check?url="+encodeURIComponent(input.value));
     const data=await response.json();
+    if(requestId!==websiteRequestId) return;
     if(!response.ok){ throw new Error(data.error || "Website check failed"); }
 
     websiteFindings=data.findings || [];
@@ -141,6 +144,7 @@ async function runWebsiteCheck(event){
 
     document.getElementById("website-alerts").scrollIntoView({behavior:"smooth",block:"start"});
   }catch(error){
+    if(requestId!==websiteRequestId) return;
     websiteFindings=[];
     websiteTarget="";
     updateWebsiteCards();

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -19,7 +19,7 @@ class SecurityEvent:
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "SecurityEvent":
         required = ("event_id", "timestamp", "event_type", "source", "user", "host")
-        missing = [key for key in required if not str(raw.get(key, "")).strip()]
+        missing = [key for key in required if not isinstance(raw.get(key), str) or not raw[key].strip()]
         if missing:
             raise ValueError("Event is missing: " + ", ".join(missing))
 
@@ -27,6 +27,8 @@ class SecurityEvent:
             timestamp = datetime.fromisoformat(str(raw["timestamp"]).replace("Z", "+00:00"))
         except ValueError as exc:
             raise ValueError(f"Invalid timestamp for event {raw.get('event_id', '?')}") from exc
+
+        timestamp = timestamp.replace(tzinfo=timezone.utc) if timestamp.tzinfo is None else timestamp.astimezone(timezone.utc)
 
         data = raw.get("data", {})
         if not isinstance(data, dict):
@@ -43,7 +45,7 @@ class SecurityEvent:
         )
 
     def field(self, name: str) -> Any:
-        if hasattr(self, name):
+        if name in {"event_id", "timestamp", "event_type", "source", "user", "host", "data"}:
             return getattr(self, name)
         return self.data.get(name)
 

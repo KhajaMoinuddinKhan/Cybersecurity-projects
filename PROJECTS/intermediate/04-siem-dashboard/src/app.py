@@ -6,6 +6,7 @@ import csv
 import io
 import json
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -138,7 +139,7 @@ def ingest_payloads(
     if not rows:
         return 0
 
-    with get_connection(db_path) as connection:
+    with closing(get_connection(db_path)) as connection, connection:
         before = connection.total_changes
         connection.executemany(
             """INSERT OR IGNORE INTO live_events(
@@ -182,7 +183,13 @@ def parse_event_file(filename: str, content: bytes) -> list[dict[str, Any]]:
         return rows
 
     if suffix == ".csv":
-        rows = [dict(row) for row in csv.DictReader(io.StringIO(text))]
+        reader = csv.DictReader(io.StringIO(text))
+        fields = reader.fieldnames or []
+        if not fields or any(not field.strip() for field in fields) or len(set(fields)) != len(fields):
+            raise ValueError("CSV needs unique, nonempty column names")
+        rows = [dict(row) for row in reader]
+        if any(None in row or any(value is None for value in row.values()) for row in rows):
+            raise ValueError("CSV rows must have the same number of columns as the header")
         for row in rows:
             if "is_alert" in row:
                 value = str(row["is_alert"]).strip().lower()
@@ -197,7 +204,7 @@ def parse_event_file(filename: str, content: bytes) -> list[dict[str, Any]]:
 def reset_events(db_path: Path) -> None:
     """Clear the live event store."""
 
-    with get_connection(db_path) as connection:
+    with closing(get_connection(db_path)) as connection, connection:
         connection.execute("DELETE FROM live_events")
         connection.execute("DELETE FROM sqlite_sequence WHERE name = 'live_events'")
 
@@ -279,7 +286,7 @@ def query_events(
     query += " ORDER BY datetime(timestamp) DESC, id DESC LIMIT ?"
     params.append(max(1, min(int(limit), 2000)))
 
-    with get_connection(db_path) as connection:
+    with closing(get_connection(db_path)) as connection, connection:
         rows = connection.execute(query, params).fetchall()
     return [dict(row) for row in rows]
 
@@ -289,7 +296,7 @@ def _count_rows(
     clauses: list[str],
     params: list[Any],
 ) -> int:
-    with get_connection(db_path) as connection:
+    with closing(get_connection(db_path)) as connection, connection:
         row = connection.execute(
             "SELECT COUNT(*) AS count FROM live_events" + _where(clauses),
             params,
@@ -315,7 +322,7 @@ def _severity_counts(
     where = _where(clauses)
     counts = {"High": 0, "Medium": 0, "Low": 0}
 
-    with get_connection(db_path) as connection:
+    with closing(get_connection(db_path)) as connection, connection:
         rows = connection.execute(
             "SELECT severity, COUNT(*) AS count FROM live_events"
             + where
@@ -335,7 +342,7 @@ def _dimension_values(db_path: Path, column: str) -> list[str]:
     if column not in allowed:
         raise ValueError("Unsupported dimension")
 
-    with get_connection(db_path) as connection:
+    with closing(get_connection(db_path)) as connection, connection:
         rows = connection.execute(
             f"SELECT DISTINCT {column} AS value FROM live_events "
             f"WHERE {column} NOT IN ('', 'unknown') ORDER BY {column} LIMIT 150"
@@ -353,7 +360,7 @@ def _top_values(
     if column not in {"provider", "event_id", "username", "channel"}:
         raise ValueError("Unsupported ranking field")
 
-    with get_connection(db_path) as connection:
+    with closing(get_connection(db_path)) as connection, connection:
         rows = connection.execute(
             f"SELECT {column} AS label, COUNT(*) AS count FROM live_events"
             + _where(clauses)
@@ -369,7 +376,7 @@ def _timeline(
     params: list[Any],
     points: int = 20,
 ) -> list[dict[str, Any]]:
-    with get_connection(db_path) as connection:
+    with closing(get_connection(db_path)) as connection, connection:
         rows = connection.execute(
             "SELECT substr(timestamp,1,16) AS bucket, COUNT(*) AS count "
             "FROM live_events"

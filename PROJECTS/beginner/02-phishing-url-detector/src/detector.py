@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import re
+import sys
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -101,11 +102,19 @@ def main() -> None:
     parser.add_argument("urls", nargs="+")
     args = parser.parse_args()
 
+    invalid = False
     for raw in args.urls:
-        result = score_url(raw)
+        try:
+            result = score_url(raw)
+        except ValueError as exc:
+            print(f"Invalid URL {raw!r}: {exc}", file=sys.stderr)
+            invalid = True
+            continue
         print(f"\n{raw}\n  Score: {result.score}\n  Result: {result.label}")
         for reason in result.reasons:
             print(f"  - {reason}")
+    if invalid:
+        raise SystemExit(1)
 
 if __name__ == "__main__":
     main()

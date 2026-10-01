@@ -22,3 +22,12 @@ def test_zero_max_age_requires_review():
     })
     age_check=next(check for check in checks if check.setting=="max_age_days")
     assert age_check.passed is False
+
+
+def test_misspelled_setting_is_reported(tmp_path):
+    import pytest
+    from src.audit import parse_policy
+    path = tmp_path / "policy.conf"
+    path.write_text("min_lenght=12")
+    with pytest.raises(ValueError, match="unknown setting"):
+        parse_policy(path)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,15 @@ def _validate_condition(condition: dict[str, Any], rule_id: str) -> None:
         raise ValueError(f"Rule {rule_id} uses unsupported operator: {operator!r}")
     if "value" not in condition:
         raise ValueError(f"Rule {rule_id} condition is missing a value")
+    value = condition["value"]
+    if operator == "in" and (not isinstance(value, list) or not value):
+        raise ValueError(f"Rule {rule_id}: in requires a nonempty list")
+    if operator == "greater_or_equal":
+        try:
+            if isinstance(value, bool) or not math.isfinite(float(value)):
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError(f"Rule {rule_id}: greater_or_equal requires a finite number") from None
 
 
 def load_rules(path: Path) -> list[DetectionRule]:
@@ -80,7 +90,7 @@ def load_rules(path: Path) -> list[DetectionRule]:
                 raise ValueError(f"Threshold rule {rule_id} needs group_by")
             if not isinstance(threshold, int) or threshold < 2:
                 raise ValueError(f"Threshold rule {rule_id} needs threshold >= 2")
-            if not isinstance(window_minutes, int) or window_minutes < 1:
+            if type(window_minutes) is not int or window_minutes < 1:
                 raise ValueError(f"Threshold rule {rule_id} needs window_minutes >= 1")
 
         rules.append(

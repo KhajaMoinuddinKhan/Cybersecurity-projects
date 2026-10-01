@@ -56,7 +56,7 @@
     <article class="stat-card"><span>Total events</span><strong id="count-total">--</strong><small>Current filtered event set</small></article>
     <article class="stat-card alert"><span>Security alerts</span><strong id="count-alerts">--</strong><small>Events matching security rules</small></article>
     <article class="stat-card high"><span>High severity</span><strong id="count-high">--</strong><small>High-severity matching events</small></article>
-    <article class="stat-card rate"><span>Events / minute</span><strong id="count-rate">--</strong><small>Events received in the last minute</small></article>
+    <article class="stat-card rate"><span>Events / minute</span><strong id="count-rate">--</strong><small>Events timestamped in the last minute</small></article>
   </section>
 
   <section class="analytics-grid">
@@ -413,6 +413,7 @@
 
       text("last-updated", new Date(data.generated_at).toLocaleTimeString());
     } catch (error) {
+      if (requestId !== state.requestId) return;
       text("collector-state", "connection error");
       text("feed-text", "Disconnected · displayed values may be stale");
       text("connection-notice", "Connection lost. Displayed values are from the last successful update. Retrying while live refresh is enabled.");

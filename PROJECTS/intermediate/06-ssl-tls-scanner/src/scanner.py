@@ -12,8 +12,7 @@ def parse_certificate_time(value: str | None) -> str | None:
 
     if not value:
         return None
-    parsed = datetime.strptime(value, "%b %d %H:%M:%S %Y %Z")
-    return parsed.replace(tzinfo=timezone.utc).isoformat()
+    return datetime.fromtimestamp(ssl.cert_time_to_seconds(value), timezone.utc).isoformat()
 
 def certificate_subject(cert: dict[str, Any]) -> str:
     """Format the certificate subject."""

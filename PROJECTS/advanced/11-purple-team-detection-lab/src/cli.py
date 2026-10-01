@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 from pathlib import Path
 
 from .dashboard import serve
@@ -85,7 +86,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        raise SystemExit(f"Could not complete {args.command}: {exc}") from exc
 
 
 if __name__ == "__main__":

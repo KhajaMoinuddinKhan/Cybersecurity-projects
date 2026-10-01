@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -19,15 +20,16 @@ def sha256_file(path: Path) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
-def build_baseline(folder: Path) -> dict[str, dict[str, Any]]:
+def build_baseline(folder: Path, *, exclude: Path | None = None) -> dict[str, dict[str, Any]]:
     """Build a baseline for every file in a folder."""
 
     folder = folder.resolve()
+    excluded = exclude.resolve() if exclude is not None else None
     baseline: dict[str, dict[str, Any]] = {}
 
     # Sorting keeps the saved baseline in a stable order.
     for path in sorted(folder.rglob("*")):
-        if path.is_file():
+        if path.is_file() and path.resolve() != excluded:
             relative_path = path.relative_to(folder).as_posix()
             baseline[relative_path] = {
                 "sha256": sha256_file(path),
@@ -51,14 +53,20 @@ def load_baseline(path: Path) -> dict[str, dict[str, Any]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("Baseline must contain a JSON object.")
+    for name, metadata in data.items():
+        if not isinstance(metadata, dict) or not isinstance(metadata.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", metadata["sha256"]):
+            raise ValueError(f"Invalid baseline metadata for {name!r}: expected a SHA-256 digest.")
     return data
 
 def compare_baseline(
-    folder: Path, baseline: dict[str, dict[str, Any]]
+    folder: Path, baseline: dict[str, dict[str, Any]], *, exclude: Path | None = None
 ) -> list[tuple[str, str]]:
     """Find files that were added, changed, or removed."""
 
-    current = build_baseline(folder)
+    current = build_baseline(folder, exclude=exclude)
+    if exclude is not None:
+        excluded = exclude.resolve()
+        baseline = {name: metadata for name, metadata in baseline.items() if (folder / name).resolve() != excluded}
     changes: list[tuple[str, str]] = []
 
     for path, metadata in current.items():
@@ -88,14 +96,14 @@ def main() -> None:
         raise SystemExit(f"Folder not found: {args.folder}")
 
     if args.create:
-        save_baseline(build_baseline(args.folder), args.baseline)
+        save_baseline(build_baseline(args.folder, exclude=args.baseline), args.baseline)
         print("Baseline created.")
         return
 
     if not args.baseline.is_file():
         raise SystemExit("Baseline not found. Use --create first.")
 
-    changes = compare_baseline(args.folder, load_baseline(args.baseline))
+    changes = compare_baseline(args.folder, load_baseline(args.baseline), exclude=args.baseline)
     if not changes:
         print("No integrity changes detected.")
         return
@@ -105,4 +113,7 @@ def main() -> None:
         print(f"  {kind:8} {path}")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"File integrity check failed: {exc}") from exc

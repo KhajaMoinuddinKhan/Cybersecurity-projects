@@ -6,6 +6,12 @@ MKMK Live SIEM is a local Flask and SQLite security monitoring project for Windo
 
 The dashboard is driven by the current contents of `siem_live.db`. Event totals, security alerts, severity counts, events per minute, timelines, providers, Event IDs, filters, and event tables all change from collected data.
 
+## A useful first investigation
+
+Start the app, wait for the available channels to connect, and open Sources to see what is actually being collected. Choose a channel, narrow the time window, and open Details on an event. The message, record ID, host, and raw fields let you connect a chart total to the evidence behind it. Use Security alerts only when you want rule matches; ordinary operational events remain useful context.
+
+A high-severity event is not automatically a security-rule alert. Windows errors map to High severity, while the separate alert flag records whether a detection rule matched. Treat a rule match as a reason to investigate, not confirmation of an attack.
+
 ## Windows data sources
 
 The collector attempts to read:
@@ -70,3 +76,31 @@ The JavaScript control test runs with Node.js when installed and uses a temporar
 ![Live SIEM event stream](assets/siem-dashboard-event-stream.png)
 
 These screenshots show the dashboard running on Windows with collected events, measured system health, provider activity, and event triage.
+
+## If the Security channel says unauthorized
+
+`Get-WinEvent: Attempted to perform an unauthorized operation` means the Windows process cannot read that log with its current permissions. The dashboard cannot grant itself access. Stop the app, close VS Code, reopen VS Code using **Run as administrator**, open the same project, and start it with the same virtual-environment interpreter. On a managed device, use the access your administrator permits.
+
+Other readable channels can continue collecting while Security is unavailable. If an operational channel is missing or disabled, the dashboard reports that state and retries. A quiet channel can also return no new events; that is a normal result. Keep the app running on `127.0.0.1`, particularly when using an elevated terminal.
+
+## Import your own events
+
+The API accepts one JSON object or a list. File import accepts a JSON object, a list, an object containing an `events` list, newline-delimited JSON, or CSV. Every record needs nonempty `message` or `event` text. Useful optional fields are `timestamp`, `channel`, `provider`, `event_id`, `username`, `host`, `source_ip`, `severity`, `is_alert`, and `rule_name`.
+
+Use High, Medium, or Low for severity. JSON `is_alert` must be a boolean; CSV accepts true/false or 1/0. CSV rows must match their header width and have unique, nonempty column names. Files must be UTF-8 and fit within the 3 MB request limit. A batch is validated before insertion, so one invalid record does not leave a partially imported batch.
+
+Prefer an explicit ISO 8601 timestamp with a timezone. Times are stored in UTC; a timestamp without an offset is treated as UTC, and a missing timestamp uses ingestion time. Missing descriptive fields receive labels such as `unknown`; those labels indicate missing information. API and file records retain the alert flag you supply rather than automatically running the Windows classification rules.
+
+## Storage and operating limits
+
+`src/windows_collector.py` reads Windows records and maps selected event IDs into explainable alerts. `src/app.py` validates data, queries SQLite, exposes ingestion routes, and measures server health. The HTML template handles refresh, filters, details, and export; the CSS controls the black-and-red layout.
+
+The collector polls channels sequentially, waits two seconds between cycles, and reads at most 100 new records per channel per poll. Slow or inaccessible channels can extend a cycle. PowerShell itself may generate operational events while collecting; these are real activity and can affect provider counts. Startup backfill is limited to 25 recent records per channel, so the project does not promise complete historical coverage after downtime.
+
+Clear removes stored events; it does not clear Windows logs or stop collection. Pause stops browser refresh, while collection continues. The database has no automatic retention policy, so plan for growth and back up evidence before clearing it. Record-ID-based collection can need a restart after a Windows log is cleared; this remains a local learning collector, not a durable enterprise log shipper.
+
+## Troubleshooting
+
+If the page cannot connect, confirm that the terminal still shows the Flask process running and that you opened the configured port. Use `--port 5001` if another application already uses 5000. An empty filtered view can be caused by the time window or another filter, so try Reset filters before assuming collection stopped. Server-health values describe the machine running Flask, not another device viewing the page.
+
+[Return to all projects](../../../README.md)

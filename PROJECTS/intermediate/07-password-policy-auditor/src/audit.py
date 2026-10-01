@@ -57,6 +57,8 @@ def parse_policy(path: Path) -> dict[str, object]:
                     f"Line {line_number}: unsupported value for {key!r}"
                 ) from exc
 
+        if key not in RECOMMENDED:
+            raise ValueError(f"Line {line_number}: unknown setting {key!r}")
     return values
 
 def audit_policy(policy: dict[str, object]) -> list[PolicyCheck]:
@@ -125,7 +127,7 @@ def main() -> None:
 
     try:
         checks = audit_policy(parse_policy(args.policy))
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
 
     for check in checks:

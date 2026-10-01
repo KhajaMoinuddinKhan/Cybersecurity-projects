@@ -38,3 +38,30 @@ def test_present_headers_are_marked_present():
     assert all(checks.values())
     assert score == 100
     assert findings == []
+
+
+def test_empty_headers_are_missing():
+    checks, findings, score = analyse_headers({"Content-Security-Policy": "  "}, True)
+    assert checks["Content-Security-Policy"] is False
+    assert score < 100
+
+
+def test_connection_uses_validated_ip_without_second_hostname_lookup(monkeypatch):
+    from src import website_check
+    calls = []
+    monkeypatch.setattr(website_check, "_public_ips", lambda host, port: ["93.184.215.14"])
+    monkeypatch.setattr(website_check.socket, "create_connection", lambda *args: calls.append(args) or type("Socket", (), {"setsockopt": lambda *args: None})())
+    connection = website_check.PublicHTTPConnection("example.com", timeout=2)
+    connection.connect()
+    assert calls == [(("93.184.215.14", 80), 2, None)]
+
+
+def test_rebound_private_address_is_rejected_before_connect(monkeypatch):
+    import pytest
+    from src import website_check
+    monkeypatch.setattr(website_check.socket, "getaddrinfo", lambda *args, **kwargs: [(2, 1, 6, "", ("127.0.0.1", 80))])
+    def forbidden(*args, **kwargs):
+        raise AssertionError("A private address must never be contacted")
+    monkeypatch.setattr(website_check.socket, "create_connection", forbidden)
+    with pytest.raises(ValueError, match="public internet"):
+        website_check.PublicHTTPConnection("example.com").connect()

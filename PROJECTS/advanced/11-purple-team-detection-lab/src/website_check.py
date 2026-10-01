@@ -4,11 +4,12 @@ from __future__ import annotations
 import ipaddress
 import socket
 import ssl
+from http.client import HTTPConnection, HTTPSConnection
 from datetime import datetime, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPHandler, HTTPSHandler, HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 
 SECURITY_HEADERS = {
@@ -71,12 +72,50 @@ def validate_public_url(value: str) -> tuple[str, list[str]]:
     if not parsed.hostname:
         raise ValueError("The URL needs a hostname")
 
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("URLs containing credentials are not supported")
+
+    port = parsed.port if parsed.port is not None else (443 if parsed.scheme == "https" else 80)
     if port not in {80, 443}:
         raise ValueError("This quick check only uses ports 80 and 443")
 
     addresses = _public_ips(parsed.hostname, port)
     return url, addresses
+
+
+def _public_connection(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
+    """Resolve once, validate all answers, then connect to a vetted IP address."""
+    host, port = address
+    addresses = _public_ips(host, port)
+    last_error = None
+    for ip in addresses:
+        try:
+            return socket.create_connection((ip, port), timeout, source_address)
+        except OSError as exc:
+            last_error = exc
+    raise OSError(f"Could not connect to {host}: {last_error}")
+
+
+class PublicHTTPConnection(HTTPConnection):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._create_connection = _public_connection
+
+
+class PublicHTTPSConnection(HTTPSConnection):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._create_connection = _public_connection
+
+
+class PublicHTTPHandler(HTTPHandler):
+    def http_open(self, request):
+        return self.do_open(PublicHTTPConnection, request)
+
+
+class PublicHTTPSHandler(HTTPSHandler):
+    def https_open(self, request):
+        return self.do_open(PublicHTTPSConnection, request, context=self._context)
 
 
 class PublicRedirectHandler(HTTPRedirectHandler):
@@ -93,7 +132,7 @@ def analyse_headers(headers: dict[str, str], is_https: bool) -> tuple[dict[str, 
     score = 100
 
     for header, label in SECURITY_HEADERS.items():
-        exists = header.lower() in present
+        exists = bool(present.get(header.lower(), "").strip())
         checks[header] = exists
         if exists:
             continue
@@ -136,9 +175,7 @@ def inspect_tls(url: str, timeout: float = 5.0) -> dict[str, Any] | None:
             days_left = None
 
             if expires_text:
-                expires_dt = datetime.strptime(expires_text, "%b %d %H:%M:%S %Y %Z").replace(
-                    tzinfo=timezone.utc
-                )
+                expires_dt = datetime.fromtimestamp(ssl.cert_time_to_seconds(expires_text), timezone.utc)
                 expires = expires_dt.isoformat()
                 days_left = (expires_dt - datetime.now(timezone.utc)).days
 
@@ -152,7 +189,7 @@ def inspect_tls(url: str, timeout: float = 5.0) -> dict[str, Any] | None:
 
 def inspect_website(value: str, timeout: float = 7.0) -> dict[str, Any]:
     url, _ = validate_public_url(value)
-    opener = build_opener(PublicRedirectHandler())
+    opener = build_opener(ProxyHandler({}), PublicHTTPHandler(), PublicHTTPSHandler(), PublicRedirectHandler())
     response = None
     last_error: Exception | None = None
 
@@ -171,6 +208,7 @@ def inspect_website(value: str, timeout: float = 7.0) -> dict[str, Any]:
         except HTTPError as exc:
             if exc.code == 405 and method == "HEAD":
                 last_error = exc
+                exc.close()
                 continue
             response = exc
             break

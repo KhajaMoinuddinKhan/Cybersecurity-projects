@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from .models import Alert
@@ -37,7 +38,7 @@ def get_connection(path: Path) -> sqlite3.Connection:
 
 
 def replace_alerts(path: Path, alerts: list[Alert]) -> int:
-    with get_connection(path) as connection:
+    with closing(get_connection(path)) as connection, connection:
         connection.execute("DELETE FROM alerts")
         connection.execute("DELETE FROM sqlite_sequence WHERE name='alerts'")
         connection.executemany(
@@ -98,7 +99,7 @@ def list_alerts(
         query += " WHERE " + " AND ".join(clauses)
     query += " ORDER BY CASE severity WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END, first_seen DESC"
 
-    with get_connection(path) as connection:
+    with closing(get_connection(path)) as connection, connection:
         rows = connection.execute(query, params).fetchall()
 
     results: list[dict[str, object]] = []
@@ -110,7 +111,7 @@ def list_alerts(
 
 
 def alert_stats(path: Path) -> dict[str, object]:
-    with get_connection(path) as connection:
+    with closing(get_connection(path)) as connection, connection:
         total = connection.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
         by_severity = {
             row["severity"]: row["count"]

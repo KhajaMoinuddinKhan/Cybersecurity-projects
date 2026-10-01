@@ -1,4 +1,4 @@
-"""Review a synthetic cloud inventory."""
+"""Review a supplied JSON cloud inventory."""
 from __future__ import annotations
 
 import argparse
@@ -20,6 +20,9 @@ def review_assets(
         name = str(asset.get("name") or "unnamed")
         resource_type = str(asset.get("type") or "unknown")
 
+        if "public" in asset and not isinstance(asset["public"], bool):
+            findings.append(("LOW", name, "Public exposure must be recorded as a JSON boolean."))
+
         # Public assets get a review item, not an automatic failure.
         if asset.get("public") is True:
             findings.append(
@@ -38,7 +41,7 @@ def review_assets(
         missing = [
             tag
             for tag in REQUIRED_TAGS
-            if not tags.get(tag)
+            if not isinstance(tags.get(tag), str) or not tags[tag].strip()
         ]
         if missing:
             findings.append(
@@ -67,7 +70,7 @@ def main() -> None:
     """Load the inventory and print the findings."""
 
     parser = argparse.ArgumentParser(
-        description="Inventory synthetic cloud assets and flag simple gaps."
+        description="Review a JSON cloud asset export for exposure and metadata gaps."
     )
     parser.add_argument("file", type=Path)
     args = parser.parse_args()
@@ -77,7 +80,7 @@ def main() -> None:
 
     try:
         assets = load_assets(args.file)
-    except (ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         raise SystemExit(f"Invalid asset file: {exc}") from exc
 
     print(f"Assets found: {len(assets)}")
