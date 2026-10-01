@@ -28,15 +28,6 @@
     <article class="stat-card rate"><span>Events / minute</span><strong id="count-rate">--</strong><small>Events received in the last minute</small></article>
   </section>
 
-  <section class="panel collector-panel">
-    <div class="panel-heading">
-      <div><span class="kicker">COLLECTOR HEALTH</span><h2>Windows Event Log channels</h2></div>
-      <div class="collector-total"><span>Collector activity</span><strong id="collector-ingested">0</strong></div>
-    </div>
-    <div id="channel-status" class="channel-grid"><div class="empty-inline">Connecting to Windows Event Logs...</div></div>
-    <p id="collector-error" class="collector-error"></p>
-  </section>
-
   <section class="panel filters-panel">
     <div class="panel-heading">
       <div><span class="kicker">LIVE FILTERS</span><h2>Investigation workspace</h2></div>
@@ -63,15 +54,30 @@
 
   <section class="analytics-grid">
     <article class="panel timeline-panel">
-      <div class="panel-heading"><div><span class="kicker">EVENT VOLUME</span><h2>Live activity timeline</h2></div><span class="mini-chip" id="visible-count">0 visible</span></div>
+      <div class="panel-heading"><div><span class="kicker">01 / EVENT VOLUME</span><h2>Live activity timeline</h2></div><span class="mini-chip" id="visible-count">0 visible</span></div>
       <div id="timeline" class="timeline"><div class="empty-inline">Waiting for live events</div></div>
     </article>
-    <article class="panel">
-      <div class="panel-heading"><div><span class="kicker">TOP PROVIDERS</span><h2>Windows providers</h2></div></div>
+  <section class="panel collector-panel">
+    <div class="panel-heading">
+      <div><span class="kicker">02 / COLLECTOR HEALTH</span><h2>Windows Event Log channels</h2></div>
+      <div class="collector-total"><span>Collector activity</span><strong id="collector-ingested">0</strong></div>
+    </div>
+    <div id="channel-status" class="channel-grid"><div class="empty-inline">Connecting to Windows Event Logs...</div></div>
+    <p id="collector-error" class="collector-error"></p>
+  </section>
+
+    <article class="panel sources-panel">
+      <div class="panel-heading"><div><span class="kicker">03 / LOG SOURCES</span><h2>Windows providers</h2></div><span class="mini-chip">By volume</span></div>
       <div id="top-providers" class="rank-list"><div class="empty-inline">No provider data yet</div></div>
     </article>
-    <article class="panel">
-      <div class="panel-heading"><div><span class="kicker">TOP EVENT IDs</span><h2>Event frequency</h2></div></div>
+    <article class="panel severity-panel">
+      <div class="panel-heading"><div><span class="kicker">04 / SEVERITY MIX</span><h2>Event distribution</h2></div></div>
+      <div class="severity-layout"><div id="severity-ring" class="severity-ring"><div><strong id="ring-total">--</strong><span>EVENTS</span></div></div>
+      <div class="severity-legend"><div><i class="dot-high"></i>High <b id="ring-high">--</b></div><div><i class="dot-medium"></i>Medium <b id="ring-medium">--</b></div><div><i class="dot-low"></i>Low <b id="ring-low">--</b></div></div></div>
+      <p class="chart-note" id="severity-note">Waiting for event data</p>
+    </article>
+    <article class="panel frequency-panel">
+      <div class="panel-heading"><div><span class="kicker">05 / EVENT FREQUENCY</span><h2>Top Event IDs</h2></div></div>
       <div id="top-event-ids" class="rank-list"><div class="empty-inline">No Event IDs yet</div></div>
     </article>
   </section>
@@ -188,6 +194,17 @@
     text("filter-count-low", data.filter_counts.Low);
     text("visible-count", data.visible + " visible");
     text("alert-visible", data.alerts.length + " alerts");
+    var total = data.counts.Total;
+    var high = total ? data.counts.High / total * 100 : 0;
+    var medium = total ? data.counts.Medium / total * 100 : 0;
+    text("ring-total", total);
+    text("ring-high", data.counts.High);
+    text("ring-medium", data.counts.Medium);
+    text("ring-low", data.counts.Low);
+    el("severity-ring").style.background = total
+      ? "conic-gradient(var(--red) 0 " + high + "%, var(--rose) " + high + "% " + (high + medium) + "%, var(--low) " + (high + medium) + "% 100%)"
+      : "var(--line)";
+    text("severity-note", total ? "Current filtered event set" : "No events for the current filters");
   }
 
   function renderCollector(collector) {
@@ -218,12 +235,28 @@
       return;
     }
     var max = Math.max.apply(null, items.map(function (item) { return item.count; }).concat([1]));
-    box.innerHTML = items.map(function (item) {
-      var height = Math.max(6, Math.round(item.count / max * 100));
-      return '<div class="timeline-column" title="' + esc(item.label) + ': ' + item.count + '">' +
-        '<span>' + item.count + '</span><div class="bar-shell"><div class="bar-fill" style="height:' + height + '%"></div></div>' +
-        '<small>' + esc(item.label.slice(11)) + '</small></div>';
+    var width = 1000, height = 180, baseline = 154;
+    var coordinates = items.map(function (item, index) {
+      return {x: items.length === 1 ? 500 : 40 + index / (items.length - 1) * 920,
+        y: baseline - item.count / max * 126, item: item};
+    });
+    var line = coordinates.map(function (point) { return point.x + "," + point.y; }).join(" ");
+    var area = coordinates[0].x + "," + baseline + " " + line + " " + coordinates[coordinates.length - 1].x + "," + baseline;
+    var grid = [0, 0.5, 1].map(function (fraction) {
+      var y = baseline - fraction * 126;
+      return '<line x1="40" y1="' + y + '" x2="960" y2="' + y + '" class="chart-grid"/><text x="30" y="' + (y + 4) + '" text-anchor="end">' + Math.round(max * fraction) + '</text>';
     }).join("");
+    var labels = coordinates.filter(function (point, index) {
+      return index === 0 || index === items.length - 1 || index % Math.max(1, Math.ceil(items.length / 8)) === 0;
+    }).map(function (point) {
+      return '<text x="' + point.x + '" y="177" text-anchor="middle">' + esc(point.item.label.slice(11)) + '</text>';
+    }).join("");
+    box.innerHTML = '<svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="Event counts by minute, latest ' + items.length + ' active minutes">' +
+      '<defs><linearGradient id="volume-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ef3340" stop-opacity=".38"/><stop offset="100%" stop-color="#ef3340" stop-opacity=".03"/></linearGradient></defs>' +
+      grid + '<polygon points="' + area + '" fill="url(#volume-fill)"/><polyline points="' + line + '" fill="none" stroke="#ef3340" stroke-width="2.5"/>' +
+      coordinates.map(function (point) {
+        return '<circle cx="' + point.x + '" cy="' + point.y + '" r="4" fill="#ef3340" stroke="#ffb6bc"><title>' + esc(point.item.label) + ': ' + point.item.count + ' events</title></circle>';
+      }).join("") + labels + '</svg>';
   }
 
   function renderRanking(id, items) {
@@ -418,3 +451,4 @@
 </script>
 </body>
 </html>
+
