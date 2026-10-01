@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from .windows_collector import WindowsEventCollector
+
 EventInput = tuple[str, str, str, str, str]
 EventRow = tuple[int, str, str, str, str, str, str, str, str, str, str]
 VALID_SEVERITIES = ("High", "Medium", "Low")
@@ -25,7 +27,8 @@ host TEXT NOT NULL DEFAULT 'unknown',
 source TEXT NOT NULL DEFAULT 'manual',
 event_type TEXT NOT NULL DEFAULT 'security_event',
 raw_log TEXT NOT NULL DEFAULT '',
-created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+external_id TEXT NOT NULL DEFAULT ''
 )"""
 
 SAMPLE_EVENTS: tuple[EventInput, ...] = (
@@ -52,6 +55,7 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
         "event_type": "TEXT NOT NULL DEFAULT 'security_event'",
         "raw_log": "TEXT NOT NULL DEFAULT ''",
         "created_at": "TEXT NOT NULL DEFAULT ''",
+        "external_id": "TEXT NOT NULL DEFAULT ''",
     }
     for name, definition in additions.items():
         if name not in existing:
@@ -59,6 +63,10 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
 
     connection.execute(
         "UPDATE events SET created_at = timestamp WHERE created_at = '' OR created_at IS NULL"
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_events_external "
+        "ON events(source, external_id) WHERE external_id != ''"
     )
     connection.commit()
     return connection
@@ -116,7 +124,7 @@ def _normalise_event(row: EventInput) -> EventInput:
 def normalise_payload(
     payload: dict[str, Any],
     source_default: str = "api",
-) -> tuple[str, str, str, str, str, str, str, str, str]:
+) -> tuple[str, str, str, str, str, str, str, str, str, str]:
     """Convert an API or imported event into a database row."""
 
     message = str(payload.get("event") or payload.get("message") or "").strip()
@@ -144,6 +152,7 @@ def normalise_payload(
         str(payload.get("source") or source_default).strip(),
         str(payload.get("event_type") or payload.get("type") or "security_event").strip(),
         str(raw_log),
+        str(payload.get("external_id") or "").strip(),
     )
 
 
@@ -171,13 +180,15 @@ def ingest_payloads(
         return 0
 
     with get_connection(db_path) as connection:
+        before = connection.total_changes
         connection.executemany(
-            """INSERT INTO events(
-                timestamp,source_ip,event,severity,username,host,source,event_type,raw_log
-            ) VALUES (?,?,?,?,?,?,?,?,?)""",
+            """INSERT OR IGNORE INTO events(
+                timestamp,source_ip,event,severity,username,host,source,event_type,raw_log,external_id
+            ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
             rows,
         )
-    return len(rows)
+        inserted = connection.total_changes - before
+    return inserted
 
 
 def parse_event_file(filename: str, content: bytes) -> list[dict[str, Any]]:
@@ -289,7 +300,7 @@ def query_events(
     )
     query = (
         "SELECT id,timestamp,source_ip,event,severity,username,host,source,"
-        "event_type,raw_log,created_at FROM events"
+        "event_type,raw_log,created_at,external_id FROM events"
     )
     if clauses:
         query += " WHERE " + " AND ".join(clauses)
@@ -312,6 +323,7 @@ def query_events(
             str(row["event_type"]),
             str(row["raw_log"]),
             str(row["created_at"]),
+            str(row["external_id"]),
         )
         for row in rows
     ]
@@ -463,6 +475,7 @@ def dashboard_snapshot(
             "event_type": row[8],
             "raw_log": row[9],
             "created_at": row[10],
+            "external_id": row[11],
         }
         for row in rows
     ]
@@ -484,7 +497,7 @@ def dashboard_snapshot(
     }
 
 
-def dashboard_app(db_path: Path):
+def dashboard_app(db_path: Path, collector_status: dict[str, Any] | None = None):
     """Create the Flask SIEM application."""
 
     try:
@@ -514,8 +527,7 @@ def dashboard_app(db_path: Path):
     def api_dashboard():
         since_text = request.args.get("since", "").strip()
         since_minutes = int(since_text) if since_text.isdigit() else None
-        return jsonify(
-            dashboard_snapshot(
+        snapshot = dashboard_snapshot(
                 db_path,
                 severity=request.args.get("severity") or None,
                 search=request.args.get("search") or None,
@@ -524,7 +536,14 @@ def dashboard_app(db_path: Path):
                 username=request.args.get("username") or None,
                 since_minutes=since_minutes,
             )
-        )
+        snapshot["collector"] = collector_status or {
+            "enabled": False,
+            "running": False,
+            "ingested": 0,
+            "logs": {},
+            "last_error": "",
+        }
+        return jsonify(snapshot)
 
     @app.post("/api/events")
     def api_events():
@@ -570,6 +589,11 @@ def main() -> None:
     parser.add_argument("--reset", action="store_true")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument(
+        "--no-windows-events",
+        action="store_true",
+        help="Do not collect new local Windows Event Log entries.",
+    )
     args = parser.parse_args()
 
     get_connection(args.db).close()
@@ -580,10 +604,21 @@ def main() -> None:
     if args.seed:
         print(f"Seeded {seed_events(args.db, SAMPLE_EVENTS)} optional lab events.")
 
+    collector = WindowsEventCollector(args.db, ingest_payloads)
+    if not args.no_windows_events:
+        collector.start()
+
     try:
-        dashboard_app(args.db).run(host=args.host, port=args.port, debug=False)
+        dashboard_app(args.db, collector.status).run(
+            host=args.host,
+            port=args.port,
+            debug=False,
+            threaded=True,
+        )
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from exc
+    finally:
+        collector.stop()
 
 
 if __name__ == "__main__":

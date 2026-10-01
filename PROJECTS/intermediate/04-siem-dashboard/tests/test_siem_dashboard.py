@@ -166,3 +166,34 @@ def test_file_import_endpoint(tmp_path: Path):
     )
     assert response.status_code == 201
     assert response.get_json()["inserted"] == 1
+
+
+from src.windows_collector import severity_from_windows_level, windows_event_to_payload
+
+
+def test_windows_event_mapping_is_real_event_data():
+    payload = windows_event_to_payload(
+        "System",
+        {
+            "RecordId": 4421,
+            "Id": 7045,
+            "TimeCreated": "2026-10-01T15:10:00.0000000Z",
+            "Level": "Information",
+            "Provider": "Service Control Manager",
+            "Machine": "DESKTOP-LAB",
+            "User": "S-1-5-18",
+            "Message": "A service was installed in the system.",
+        },
+    )
+    assert payload["source"] == "Windows:System"
+    assert payload["external_id"] == "System:4421"
+    assert payload["event_type"] == "windows_event_7045"
+    assert payload["host"] == "DESKTOP-LAB"
+    assert payload["severity"] == "Low"
+
+
+def test_windows_level_severity_mapping():
+    assert severity_from_windows_level("Critical") == "High"
+    assert severity_from_windows_level("Error") == "High"
+    assert severity_from_windows_level("Warning") == "Medium"
+    assert severity_from_windows_level("Information") == "Low"

@@ -16,7 +16,7 @@
       </div>
       <div class="top-actions">
         <button id="live-toggle" class="live-button active" type="button"><span class="pulse"></span><span id="live-label">LIVE</span></button>
-        <div class="updated">Last update <strong id="last-updated">--</strong></div>
+        <div class="updated">Windows collector <strong id="collector-state">starting...</strong></div><div class="updated">Last update <strong id="last-updated">--</strong></div>
       </div>
     </header>
 
@@ -269,6 +269,13 @@
       updateSelect("filter-source", data.dimensions.sources, "All sources", state.source);
       updateSelect("filter-type", data.dimensions.event_types, "All event types", state.eventType);
       updateSelect("filter-user", data.dimensions.usernames, "All users", state.username);
+      var collector = data.collector || {};
+      var logStates = collector.logs || {};
+      var connected = Object.keys(logStates).filter(function (name) { return logStates[name] === "connected"; });
+      var collectorText = collector.enabled
+        ? (collector.running ? connected.length + " logs live · " + (collector.ingested || 0) + " new" : "stopped")
+        : "not available";
+      setText("collector-state", collectorText);
       setText("last-updated", new Date(data.generated_at).toLocaleTimeString());
     } catch (error) {
       setText("last-updated", "connection error");

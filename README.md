@@ -7,7 +7,7 @@ A collection of practical cybersecurity projects built mainly in Python. The pro
 | [Network Traffic Analyzer](PROJECTS/beginner/01-network-traffic-analyzer) | Reads PCAP files and summarizes protocols, source hosts, destination ports, and DNS queries. |
 | [Phishing URL Detector](PROJECTS/beginner/02-phishing-url-detector) | Scores URLs with simple phishing clues and explains why a URL received its score. |
 | [File Integrity Monitor](PROJECTS/beginner/03-file-integrity-monitor) | Creates SHA-256 baselines and reports files that were added, changed, or removed. |
-| [SIEM Dashboard](PROJECTS/intermediate/04-siem-dashboard) | Ingests security events through a live API or file import, stores them in SQLite, and provides real-time filtering, metrics, timelines, and event triage. |
+| [SIEM Dashboard](PROJECTS/intermediate/04-siem-dashboard) | Collects new Windows Event Log records, accepts API/file events, stores them in SQLite, and updates filters, metrics, timelines, and event triage live. |
 | [Threat Intelligence Aggregator](PROJECTS/intermediate/05-threat-intelligence-aggregator) | Imports IP, domain, hash, and URL indicators from CSV or JSON into a searchable SQLite database. |
 | [SSL/TLS Scanner](PROJECTS/intermediate/06-ssl-tls-scanner) | Connects to a TLS endpoint and reports the negotiated protocol, cipher, certificate subject, issuer, and expiry. |
 | [Password Policy Auditor](PROJECTS/intermediate/07-password-policy-auditor) | Reads a simple policy file and compares password settings with a visible baseline. |
