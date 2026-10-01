@@ -3,183 +3,379 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MKMK SIEM Dashboard</title>
+  <title>MKMK SIEM Console</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
 </head>
 <body>
-  <div class="ambient ambient-one"></div>
-  <div class="ambient ambient-two"></div>
-
   <main class="shell">
     <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark">M</div>
-        <div>
-          <div class="eyebrow">MKMK // SECURITY OPERATIONS</div>
-          <h1>MKMK SIEM Dashboard</h1>
-          <p>Synthetic event monitoring, triage, filtering, and analyst review.</p>
-        </div>
+      <div>
+        <div class="eyebrow">MKMK // SECURITY OPERATIONS</div>
+        <h1>MKMK SIEM Console</h1>
+        <p>Live local event ingestion, triage, filtering, timelines, and source analysis.</p>
       </div>
-
-      <div class="status-stack">
-        <div class="status-pill">
-          <span class="pulse"></span>
-          LOCAL LAB ONLINE
-        </div>
-        <div class="view-pill">
-          <span>Current view</span>
-          <strong>{{ current_view }}</strong>
-        </div>
+      <div class="top-actions">
+        <button id="live-toggle" class="live-button active" type="button"><span class="pulse"></span><span id="live-label">LIVE</span></button>
+        <div class="updated">Last update <strong id="last-updated">--</strong></div>
       </div>
     </header>
 
-    <section class="stats-grid" aria-label="SIEM event summary">
-      <article class="stat-card stat-total">
-        <div class="stat-head"><span class="stat-icon">Σ</span><span class="stat-label">Total Events</span></div>
-        <div class="stat-value">{{ counts["Total"] }}</div>
-        <div class="stat-caption">Events currently stored in SQLite</div>
-      </article>
+    <section class="stats-grid">
+      <article class="stat-card total"><span>Total events</span><strong id="count-total">0</strong><small>Matching current filters</small></article>
+      <article class="stat-card high"><span>High severity</span><strong id="count-high">0</strong><small>Immediate review</small></article>
+      <article class="stat-card medium"><span>Medium severity</span><strong id="count-medium">0</strong><small>Needs validation</small></article>
+      <article class="stat-card low"><span>Low severity</span><strong id="count-low">0</strong><small>Routine activity</small></article>
+    </section>
 
-      <article class="stat-card stat-high">
-        <div class="stat-head"><span class="stat-icon">!</span><span class="stat-label">High Severity</span></div>
-        <div class="stat-value">{{ counts["High"] }}</div>
-        <div class="stat-caption">Priority events for immediate review</div>
-      </article>
+    <section class="panel filters-panel">
+      <div class="panel-heading">
+        <div><span class="kicker">LIVE FILTERS</span><h2>Investigation workspace</h2></div>
+        <button id="reset-filters" class="ghost-button" type="button">Reset filters</button>
+      </div>
+      <div class="filter-grid">
+        <label class="wide"><span>Search</span><input id="filter-search" type="search" placeholder="Event, IP, user, host, source or type"></label>
+        <label><span>Time</span><select id="filter-since"><option value="">All time</option><option value="15">Last 15 min</option><option value="60">Last hour</option><option value="360">Last 6 hours</option><option value="1440">Last 24 hours</option></select></label>
+        <label><span>Source</span><select id="filter-source"><option value="">All sources</option></select></label>
+        <label><span>Event type</span><select id="filter-type"><option value="">All event types</option></select></label>
+        <label><span>User</span><select id="filter-user"><option value="">All users</option></select></label>
+      </div>
+      <div class="severity-filters">
+        <button type="button" class="severity-filter active" data-severity="">All <b id="filter-count-all">0</b></button>
+        <button type="button" class="severity-filter high" data-severity="High">High <b id="filter-count-high">0</b></button>
+        <button type="button" class="severity-filter medium" data-severity="Medium">Medium <b id="filter-count-medium">0</b></button>
+        <button type="button" class="severity-filter low" data-severity="Low">Low <b id="filter-count-low">0</b></button>
+      </div>
+    </section>
 
-      <article class="stat-card stat-medium">
-        <div class="stat-head"><span class="stat-icon">◆</span><span class="stat-label">Medium Severity</span></div>
-        <div class="stat-value">{{ counts["Medium"] }}</div>
-        <div class="stat-caption">Events requiring analyst validation</div>
+    <section class="analytics-grid">
+      <article class="panel">
+        <div class="panel-heading"><div><span class="kicker">EVENT VOLUME</span><h2>Activity timeline</h2></div><span class="mini-chip" id="visible-count">0 visible</span></div>
+        <div id="timeline" class="timeline"><div class="empty-inline">Waiting for events</div></div>
       </article>
-
-      <article class="stat-card stat-low">
-        <div class="stat-head"><span class="stat-icon">●</span><span class="stat-label">Low Severity</span></div>
-        <div class="stat-value">{{ counts["Low"] }}</div>
-        <div class="stat-caption">Routine and lower-risk activity</div>
+      <article class="panel">
+        <div class="panel-heading"><div><span class="kicker">TOP SOURCES</span><h2>Source IP activity</h2></div></div>
+        <div id="top-sources" class="rank-list"><div class="empty-inline">No source data</div></div>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><span class="kicker">EVENT TYPES</span><h2>Telemetry mix</h2></div></div>
+        <div id="top-types" class="rank-list"><div class="empty-inline">No event types</div></div>
       </article>
     </section>
 
-    <section class="overview-grid">
-      <article class="panel distribution-panel">
-        <div class="panel-heading">
-          <div>
-            <span class="section-kicker">SOC SNAPSHOT</span>
-            <h2>Severity Distribution</h2>
+    <section class="panel ingest-panel">
+      <details>
+        <summary><span><span class="kicker">DATA INGESTION</span><strong>Add real events to the SIEM</strong></span><span class="summary-hint">API, manual event, or file import</span></summary>
+        <div class="ingest-body">
+          <div class="ingest-grid">
+            <form id="event-form" class="ingest-card">
+              <h3>Add one event</h3>
+              <div class="form-grid">
+                <label><span>Severity</span><select name="severity"><option>High</option><option selected>Medium</option><option>Low</option></select></label>
+                <label><span>Event type</span><input name="event_type" value="authentication"></label>
+                <label><span>Source IP</span><input name="source_ip" placeholder="10.0.0.25"></label>
+                <label><span>User</span><input name="username" placeholder="admin"></label>
+                <label><span>Host</span><input name="host" placeholder="workstation-01"></label>
+                <label><span>Source</span><input name="source" value="manual"></label>
+                <label class="full"><span>Event message</span><input name="event" required placeholder="Multiple failed login attempts"></label>
+              </div>
+              <button class="primary-button" type="submit">Ingest event</button>
+            </form>
+
+            <form id="file-form" class="ingest-card">
+              <h3>Import event file</h3>
+              <p>Import JSON, JSONL, NDJSON, or CSV. Events are written to SQLite and appear in the feed automatically.</p>
+              <input id="event-file" type="file" name="file" accept=".json,.jsonl,.ndjson,.csv" required>
+              <button class="primary-button" type="submit">Import file</button>
+              <div class="api-note"><span>POST endpoint</span><code>/api/events</code></div>
+            </form>
           </div>
-          <div class="mini-chip">{{ counts["Total"] }} total</div>
+          <div class="danger-row">
+            <span id="ingest-message" aria-live="polite"></span>
+            <button id="clear-events" class="danger-button" type="button">Clear event store</button>
+          </div>
         </div>
-
-        <div class="distribution-list">
-          <div class="distribution-row">
-            <div class="distribution-meta"><span><i class="dot dot-high"></i>High</span><strong>{{ counts["High"] }}</strong></div>
-            <div class="track"><div class="fill fill-high" style="width: {{ '%.1f'|format(high_width) }}%"></div></div>
-          </div>
-          <div class="distribution-row">
-            <div class="distribution-meta"><span><i class="dot dot-medium"></i>Medium</span><strong>{{ counts["Medium"] }}</strong></div>
-            <div class="track"><div class="fill fill-medium" style="width: {{ '%.1f'|format(medium_width) }}%"></div></div>
-          </div>
-          <div class="distribution-row">
-            <div class="distribution-meta"><span><i class="dot dot-low"></i>Low</span><strong>{{ counts["Low"] }}</strong></div>
-            <div class="track"><div class="fill fill-low" style="width: {{ '%.1f'|format(low_width) }}%"></div></div>
-          </div>
-        </div>
-
-        <div class="health-card">
-          <div>
-            <span class="health-label">Data source</span>
-            <strong>Local SQLite Event Store</strong>
-          </div>
-          <span class="health-state">HEALTHY</span>
-        </div>
-      </article>
-
-      <article class="panel analyst-panel">
-        <div class="panel-heading">
-          <div>
-            <span class="section-kicker">ANALYST WORKSPACE</span>
-            <h2>Event Triage</h2>
-          </div>
-          <div class="mini-chip">{{ rows|length }} shown</div>
-        </div>
-
-        <form class="search-form" method="get" action="/">
-          {% if current_severity %}
-          <input type="hidden" name="severity" value="{{ current_severity }}">
-          {% endif %}
-          <div class="search-box">
-            <span class="search-symbol">⌕</span>
-            <input type="text" name="search" value="{{ search }}" placeholder="Search event, source IP, or username" aria-label="Search events">
-          </div>
-          <button type="submit">Search Events</button>
-        </form>
-
-        <nav class="filters" aria-label="Severity filters">
-          <a class="filter-chip {{ 'active' if not current_severity else '' }}" href="{{ build_filter_link(None, search) }}">All Events</a>
-          <a class="filter-chip filter-high {{ 'active' if current_severity == 'High' else '' }}" href="{{ build_filter_link('High', search) }}">High</a>
-          <a class="filter-chip filter-medium {{ 'active' if current_severity == 'Medium' else '' }}" href="{{ build_filter_link('Medium', search) }}">Medium</a>
-          <a class="filter-chip filter-low {{ 'active' if current_severity == 'Low' else '' }}" href="{{ build_filter_link('Low', search) }}">Low</a>
-          {% if search %}
-          <a class="filter-chip clear-chip" href="{{ build_filter_link(current_severity or None, '') }}">Clear Search</a>
-          {% endif %}
-        </nav>
-
-        <div class="analyst-summary">
-          <div><span>Visible events</span><strong>{{ rows|length }}</strong></div>
-          <div><span>Severity filter</span><strong>{{ current_severity or "All" }}</strong></div>
-          <div><span>Search</span><strong>{{ search or "None" }}</strong></div>
-        </div>
-      </article>
+      </details>
     </section>
 
     <section class="panel event-panel">
       <div class="panel-heading event-heading">
-        <div>
-          <span class="section-kicker">LIVE EVENT FEED</span>
-          <h2>Recent Security Events</h2>
-        </div>
-        <div class="feed-status"><span class="pulse"></span>Monitoring synthetic telemetry</div>
+        <div><span class="kicker">LIVE EVENT STREAM</span><h2>Security events</h2></div>
+        <div class="feed-state"><span class="pulse"></span><span id="feed-text">Polling SQLite every 2.5 seconds</span></div>
       </div>
-
-      {% if rows %}
       <div class="table-wrap">
         <table>
-          <thead>
-            <tr>
-              <th>Event ID</th>
-              <th>Time</th>
-              <th>Source IP</th>
-              <th>Event</th>
-              <th>Severity</th>
-              <th>User</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in rows %}
-            <tr>
-              <td><span class="event-id">EVT-{{ "%04d"|format(row[0]) }}</span></td>
-              <td class="timestamp">{{ row[1] }}</td>
-              <td><span class="ip">{{ row[2] }}</span></td>
-              <td class="event-name">{{ row[3] }}</td>
-              <td><span class="severity severity-{{ row[4]|lower }}">{{ row[4] }}</span></td>
-              <td><span class="user">{{ row[5] }}</span></td>
-            </tr>
-            {% endfor %}
-          </tbody>
+          <thead><tr><th>ID</th><th>Time</th><th>Severity</th><th>Event</th><th>Type</th><th>Source IP</th><th>User</th><th>Host</th><th>Source</th><th></th></tr></thead>
+          <tbody id="event-body"><tr><td colspan="10" class="table-empty">No events yet. Ingest an event or import a file.</td></tr></tbody>
         </table>
       </div>
-      {% else %}
-      <div class="empty-state">
-        <div class="empty-icon">⌕</div>
-        <h3>No events matched this view</h3>
-        <p>Adjust the severity filter or clear the current search.</p>
-      </div>
-      {% endif %}
-
-      <footer class="panel-footer">
-        <span>MKMK SIEM • Flask + SQLite</span>
-        <span>Safe synthetic data for local portfolio demonstration</span>
-      </footer>
     </section>
+
+    <dialog id="event-dialog">
+      <div class="dialog-head"><div><span class="kicker">EVENT DETAILS</span><h2 id="detail-title">Event</h2></div><button id="close-dialog" type="button">Close</button></div>
+      <div id="event-detail" class="detail-grid"></div>
+      <div class="raw-block"><span>Raw event</span><pre id="detail-raw"></pre></div>
+    </dialog>
   </main>
+
+<script>
+(function () {
+  var state = {
+    severity: "", search: "", since: "", source: "", eventType: "", username: "",
+    live: true, timer: null, requestId: 0, events: new Map()
+  };
+
+  function el(id) { return document.getElementById(id); }
+  function esc(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) {
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch];
+    });
+  }
+  function setText(id, value) { el(id).textContent = value; }
+
+  function queryString() {
+    var params = new URLSearchParams();
+    if (state.severity) params.set("severity", state.severity);
+    if (state.search) params.set("search", state.search);
+    if (state.since) params.set("since", state.since);
+    if (state.source) params.set("source", state.source);
+    if (state.eventType) params.set("event_type", state.eventType);
+    if (state.username) params.set("username", state.username);
+    return params.toString();
+  }
+
+  function updateSelect(id, items, placeholder, selected) {
+    var select = el(id);
+    var html = '<option value="">' + esc(placeholder) + '</option>';
+    items.forEach(function (item) {
+      html += '<option value="' + esc(item) + '">' + esc(item) + '</option>';
+    });
+    select.innerHTML = html;
+    for (var i = 0; i < select.options.length; i += 1) {
+      if (select.options[i].value === selected) {
+        select.value = selected;
+        break;
+      }
+    }
+  }
+
+  function renderCounts(data) {
+    setText("count-total", data.counts.Total);
+    setText("count-high", data.counts.High);
+    setText("count-medium", data.counts.Medium);
+    setText("count-low", data.counts.Low);
+    setText("filter-count-all", data.filter_counts.Total);
+    setText("filter-count-high", data.filter_counts.High);
+    setText("filter-count-medium", data.filter_counts.Medium);
+    setText("filter-count-low", data.filter_counts.Low);
+    setText("visible-count", data.visible + " visible");
+  }
+
+  function renderTimeline(items) {
+    var box = el("timeline");
+    if (!items.length) {
+      box.innerHTML = '<div class="empty-inline">No activity for the current filters</div>';
+      return;
+    }
+    var max = Math.max.apply(null, items.map(function (item) { return item.count; }).concat([1]));
+    var html = "";
+    items.forEach(function (item) {
+      var height = Math.max(8, Math.round((item.count / max) * 100));
+      html += '<div class="timeline-column" title="' + esc(item.label) + ': ' + item.count + '">';
+      html += '<div class="bar-value">' + item.count + '</div>';
+      html += '<div class="bar-shell"><div class="bar-fill" style="height:' + height + '%"></div></div>';
+      html += '<div class="bar-label">' + esc(item.label.slice(5)) + '</div></div>';
+    });
+    box.innerHTML = html;
+  }
+
+  function renderRanking(id, items) {
+    var box = el(id);
+    if (!items.length) {
+      box.innerHTML = '<div class="empty-inline">No data for current filters</div>';
+      return;
+    }
+    var max = Math.max.apply(null, items.map(function (item) { return item.count; }).concat([1]));
+    var html = "";
+    items.forEach(function (item, index) {
+      var width = Math.max(4, item.count / max * 100);
+      html += '<div class="rank-row"><span class="rank-index">' + String(index + 1).padStart(2, "0") + '</span>';
+      html += '<div class="rank-main"><div><strong>' + esc(item.label) + '</strong><span>' + item.count + ' event' + (item.count === 1 ? '' : 's') + '</span></div>';
+      html += '<div class="rank-track"><div style="width:' + width + '%"></div></div></div></div>';
+    });
+    box.innerHTML = html;
+  }
+
+  function renderEvents(events) {
+    var body = el("event-body");
+    state.events.clear();
+    events.forEach(function (event) { state.events.set(String(event.id), event); });
+
+    if (!events.length) {
+      body.innerHTML = '<tr><td colspan="10" class="table-empty">No events match the current filters.</td></tr>';
+      return;
+    }
+
+    var html = "";
+    events.forEach(function (event) {
+      html += '<tr>';
+      html += '<td><span class="event-id">EVT-' + String(event.id).padStart(5, "0") + '</span></td>';
+      html += '<td class="timestamp">' + esc(event.timestamp) + '</td>';
+      html += '<td><span class="severity severity-' + esc(event.severity.toLowerCase()) + '">' + esc(event.severity) + '</span></td>';
+      html += '<td class="event-message">' + esc(event.event) + '</td>';
+      html += '<td><span class="type-chip">' + esc(event.event_type) + '</span></td>';
+      html += '<td class="mono">' + esc(event.source_ip) + '</td>';
+      html += '<td>' + esc(event.username) + '</td><td>' + esc(event.host) + '</td><td>' + esc(event.source) + '</td>';
+      html += '<td><button class="detail-button" type="button" data-event-id="' + event.id + '">Details</button></td></tr>';
+    });
+    body.innerHTML = html;
+
+    body.querySelectorAll(".detail-button").forEach(function (button) {
+      button.addEventListener("click", function () { openDetails(button.dataset.eventId); });
+    });
+  }
+
+  function openDetails(id) {
+    var event = state.events.get(String(id));
+    if (!event) return;
+    setText("detail-title", event.event);
+    var fields = [
+      ["Event ID", "EVT-" + String(event.id).padStart(5, "0")],
+      ["Timestamp", event.timestamp], ["Severity", event.severity],
+      ["Event type", event.event_type], ["Source IP", event.source_ip],
+      ["Username", event.username], ["Host", event.host], ["Source", event.source]
+    ];
+    var html = "";
+    fields.forEach(function (field) {
+      html += '<div><span>' + esc(field[0]) + '</span><strong>' + esc(field[1]) + '</strong></div>';
+    });
+    el("event-detail").innerHTML = html;
+    el("detail-raw").textContent = event.raw_log || "(no raw log stored)";
+    el("event-dialog").showModal();
+  }
+
+  async function refresh() {
+    var requestId = ++state.requestId;
+    try {
+      var response = await fetch("/api/dashboard?" + queryString(), {cache:"no-store"});
+      if (!response.ok) throw new Error("Dashboard API returned " + response.status);
+      var data = await response.json();
+      if (requestId !== state.requestId) return;
+
+      renderCounts(data);
+      renderTimeline(data.timeline);
+      renderRanking("top-sources", data.top_sources);
+      renderRanking("top-types", data.top_event_types);
+      renderEvents(data.events);
+      updateSelect("filter-source", data.dimensions.sources, "All sources", state.source);
+      updateSelect("filter-type", data.dimensions.event_types, "All event types", state.eventType);
+      updateSelect("filter-user", data.dimensions.usernames, "All users", state.username);
+      setText("last-updated", new Date(data.generated_at).toLocaleTimeString());
+    } catch (error) {
+      setText("last-updated", "connection error");
+      console.error(error);
+    }
+  }
+
+  function scheduleRefresh() {
+    clearInterval(state.timer);
+    if (state.live) state.timer = setInterval(refresh, 2500);
+  }
+
+  function applyFilters() {
+    state.search = el("filter-search").value.trim();
+    state.since = el("filter-since").value;
+    state.source = el("filter-source").value;
+    state.eventType = el("filter-type").value;
+    state.username = el("filter-user").value;
+    refresh();
+  }
+
+  var searchDelay;
+  el("filter-search").addEventListener("input", function () {
+    clearTimeout(searchDelay);
+    searchDelay = setTimeout(applyFilters, 220);
+  });
+
+  ["filter-since","filter-source","filter-type","filter-user"].forEach(function (id) {
+    el(id).addEventListener("change", applyFilters);
+  });
+
+  document.querySelectorAll(".severity-filter").forEach(function (button) {
+    button.addEventListener("click", function () {
+      state.severity = button.dataset.severity;
+      document.querySelectorAll(".severity-filter").forEach(function (item) {
+        item.classList.toggle("active", item === button);
+      });
+      refresh();
+    });
+  });
+
+  el("reset-filters").addEventListener("click", function () {
+    state.severity = "";
+    state.search = "";
+    state.since = "";
+    state.source = "";
+    state.eventType = "";
+    state.username = "";
+    el("filter-search").value = "";
+    el("filter-since").value = "";
+    document.querySelectorAll(".severity-filter").forEach(function (button) {
+      button.classList.toggle("active", button.dataset.severity === "");
+    });
+    refresh();
+  });
+
+  el("live-toggle").addEventListener("click", function () {
+    state.live = !state.live;
+    el("live-toggle").classList.toggle("active", state.live);
+    setText("live-label", state.live ? "LIVE" : "PAUSED");
+    setText("feed-text", state.live ? "Polling SQLite every 2.5 seconds" : "Live refresh paused");
+    scheduleRefresh();
+    if (state.live) refresh();
+  });
+
+  el("event-form").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+    var response = await fetch("/api/events", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)
+    });
+    var data = await response.json();
+    setText("ingest-message", response.ok ? "Ingested " + data.inserted + " event." : data.error);
+    if (response.ok) {
+      event.currentTarget.elements.event.value = "";
+      refresh();
+    }
+  });
+
+  el("file-form").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var formData = new FormData(event.currentTarget);
+    var response = await fetch("/api/import", {method:"POST", body:formData});
+    var data = await response.json();
+    setText("ingest-message", response.ok ? "Imported " + data.inserted + " events." : data.error);
+    if (response.ok) {
+      event.currentTarget.reset();
+      refresh();
+    }
+  });
+
+  el("clear-events").addEventListener("click", async function () {
+    if (!confirm("Clear every event from the local SIEM database?")) return;
+    var response = await fetch("/api/events/clear", {method:"POST"});
+    var data = await response.json();
+    setText("ingest-message", data.cleared ? "Event store cleared." : "Could not clear event store.");
+    refresh();
+  });
+
+  el("close-dialog").addEventListener("click", function () { el("event-dialog").close(); });
+  el("event-dialog").addEventListener("click", function (event) {
+    if (event.target === el("event-dialog")) el("event-dialog").close();
+  });
+
+  refresh();
+  scheduleRefresh();
+})();
+</script>
 </body>
 </html>

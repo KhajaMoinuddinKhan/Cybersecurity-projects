@@ -7,7 +7,7 @@
 - [File Integrity Monitor](PROJECTS/beginner/03-file-integrity-monitor)
   Tracks file changes by comparing SHA-256 hashes with a saved baseline.
 - [SIEM Dashboard](PROJECTS/intermediate/04-siem-dashboard)
-  Displays synthetic security events in a local Flask and SQLite dashboard.
+  Ingests live or imported security events into SQLite and provides real-time filtering, metrics, timelines, and event triage.
 - [Threat Intelligence Aggregator](PROJECTS/intermediate/05-threat-intelligence-aggregator)
   Imports IOC feeds into SQLite, removes duplicates, and searches stored indicators.
 - [SSL/TLS Scanner](PROJECTS/intermediate/06-ssl-tls-scanner)
