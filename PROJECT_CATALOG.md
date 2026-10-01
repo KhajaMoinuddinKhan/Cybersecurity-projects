@@ -9,6 +9,9 @@ Choose a project by the data you already have and the question you want to answe
 | [Network Traffic Analyzer](PROJECTS/beginner/01-network-traffic-analyzer) | A PCAP from your lab | Extract packet fields and turn them into an interpretable summary. |
 | [Phishing URL Detector](PROJECTS/beginner/02-phishing-url-detector) | One or more URL strings | Keep heuristic scores explainable and distinguish clues from verdicts. |
 | [File Integrity Monitor](PROJECTS/beginner/03-file-integrity-monitor) | A folder and a trusted baseline | Compare content hashes and separate added, changed, and removed files. |
+| [Keylogger](PROJECTS/beginner/keylogger) | Your authorized foreground terminal | Learn visible consent, terminal input, and safe local event recording. |
+| [Network Traffic Analyzer](PROJECTS/beginner/network-traffic-analyzer) | A PCAP from your lab | Stream packet observations into a compact, input-driven report. |
+| [Hash Cracker](PROJECTS/beginner/hash-cracker) | An authorized digest and wordlist | Compare offline candidates while measuring actual work. |
 
 The URL detector is a quick offline starting point. The file monitor adds persistence and repeatable comparisons. The packet analyzer introduces protocol parsing and the limits of what a capture can reveal.
 

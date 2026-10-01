@@ -1,6 +1,6 @@
 # Cybersecurity projects
 
-This repository brings together ten Python projects for learning how security data moves from a raw input to an explanation someone can act on. Some tools answer a small question, such as whether a file changed. Others combine collection, storage, detection, and an analyst interface.
+This repository brings together thirteen Python projects for learning how security data moves from a raw input to an explanation someone can act on. Some tools answer a small question, such as whether a file changed. Others combine collection, storage, detection, and an analyst interface.
 
 The emphasis is on readable code and results you can trace back to the input. Each project has its own source, tests, run instructions, and learning notes. You can work on one project without starting the others.
 
@@ -11,6 +11,9 @@ The emphasis is on readable code and results you can trace back to the input. Ea
 | [Network Traffic Analyzer](PROJECTS/beginner/01-network-traffic-analyzer) | Reads PCAP files and summarizes protocols, source hosts, destination ports, and DNS queries. |
 | [Phishing URL Detector](PROJECTS/beginner/02-phishing-url-detector) | Scores URLs with simple phishing clues and explains why a URL received its score. |
 | [File Integrity Monitor](PROJECTS/beginner/03-file-integrity-monitor) | Creates SHA-256 baselines and reports files that were added, changed, or removed. |
+| [Keylogger](PROJECTS/beginner/keylogger) | Records visible, consent-based keystrokes from the foreground terminal to a local JSONL file. |
+| [Network Traffic Analyzer](PROJECTS/beginner/network-traffic-analyzer) | Streams a supplied PCAP and summarizes observed protocols, endpoints, ports, and DNS questions. |
+| [Hash Cracker](PROJECTS/beginner/hash-cracker) | Tests a supplied offline digest against a wordlist you provide and reports measured work. |
 | [SIEM Dashboard](PROJECTS/intermediate/04-siem-dashboard) | Collects real Windows Event Logs, applies event-based security rules, stores telemetry in SQLite, and updates alerts, filters, timelines, providers, and event triage live. |
 | [Threat Intelligence Aggregator](PROJECTS/intermediate/05-threat-intelligence-aggregator) | Imports IP, domain, hash, and URL indicators from CSV or JSON into a searchable SQLite database. |
 | [SSL/TLS Scanner](PROJECTS/intermediate/06-ssl-tls-scanner) | Connects to a TLS endpoint and reports the negotiated protocol, cipher, certificate subject, issuer, and expiry. |

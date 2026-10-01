@@ -25,6 +25,9 @@ To focus on one project, change into its directory and run `python -m pytest -q 
 | Packet analysis | Summary counters and a generated PCAP containing a DNS query and reply. |
 | URL scoring | Known heuristic outcomes and malformed-input handling. |
 | File integrity | Added, modified, and removed files, an internal baseline file, and invalid baseline metadata. |
+| Terminal input | Consent enforcement, special-key labels, and JSONL event writing. |
+| Offline hash recovery | Real digest comparisons, streamed wordlists, no-match results, and invalid target handling. |
+| PCAP analysis | Protocol, endpoint, port, and DNS aggregation over observed packet records. |
 | SIEM | Empty startup, classification, deduplication, filters, imports, atomic validation, metrics, collector retry logic, and JavaScript controls against a temporary Flask API. |
 | Indicator feeds | Deduplication, literal searches, and invalid field types. |
 | TLS | Certificate formatting and session behavior using controlled connection objects. |

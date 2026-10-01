@@ -14,6 +14,9 @@ jobs:
           - PROJECTS/beginner/01-network-traffic-analyzer
           - PROJECTS/beginner/02-phishing-url-detector
           - PROJECTS/beginner/03-file-integrity-monitor
+          - PROJECTS/beginner/keylogger
+          - PROJECTS/beginner/network-traffic-analyzer
+          - PROJECTS/beginner/hash-cracker
           - PROJECTS/intermediate/04-siem-dashboard
           - PROJECTS/intermediate/05-threat-intelligence-aggregator
           - PROJECTS/intermediate/06-ssl-tls-scanner
