@@ -20,3 +20,5 @@
   Runs passive security checks against localhost web pages.
 - [Cloud Asset Inventory](PROJECTS/moderate/10-cloud-asset-inventory)
   Reviews a synthetic cloud inventory for public exposure and missing metadata.
+- [Purple Team Detection Lab](PROJECTS/advanced/11-purple-team-detection-lab)
+  Correlates synthetic endpoint, authentication, and network events into MITRE ATT&CK-mapped alerts.
