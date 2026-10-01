@@ -16,6 +16,7 @@ class PacketRecord:
     destination: str | None
     destination_port: int | None
     dns_query: str | None
+    dns_queries: tuple[str, ...] = ()
 
 
 def summarize(records: Iterable[PacketRecord]) -> dict[str, Any]:
@@ -32,7 +33,9 @@ def summarize(records: Iterable[PacketRecord]) -> dict[str, Any]:
         if record.source: sources[record.source] += 1
         if record.destination: destinations[record.destination] += 1
         if record.destination_port is not None: ports[record.destination_port] += 1
-        if record.dns_query: dns_queries[record.dns_query.rstrip(".")] += 1
+        # Every question counts; one packet can ask more than one name.
+        for name in (record.dns_queries or ((record.dns_query,) if record.dns_query else ())):
+            dns_queries[name.rstrip(".")] += 1
     return {
         "packet_count": packets,
         "protocols": dict(protocols.most_common()),
@@ -64,6 +67,53 @@ def load_scapy_layers() -> None:
     from scapy.layers.inet6 import IPv6  # noqa: F401
 
 
+def packet_transport(packet: Any) -> Any:
+    """Return the packet's own transport layer, or None.
+
+    A capture can nest IP headers (a tunnel) or quote one inside an ICMP error.
+    Those inner headers are payload rather than live traffic, so only the outer
+    transport should decide the protocol, port and DNS names.
+    """
+    from scapy.layers.inet import IP, TCP, UDP
+    from scapy.layers.inet6 import IPv6
+
+    network = packet[IP] if IP in packet else (packet[IPv6] if IPv6 in packet else None)
+    layer = network.payload if network is not None else None
+    while layer is not None:
+        if isinstance(layer, (TCP, UDP)):
+            return layer
+        if isinstance(layer, (IP, IPv6)) or type(layer).__name__.startswith("ICMP"):
+            return None
+        following = getattr(layer, "payload", None)
+        if following is None or following is layer:
+            return None
+        layer = following
+    return None
+
+
+def dns_question_names(dns_layer: Any) -> tuple[str, ...]:
+    """Return every question name in a DNS query layer.
+
+    Scapy exposes several questions either as a list of ``DNSQR`` entries or as
+    a chain hanging off the first one, so both shapes are walked here.
+    """
+    from scapy.layers.dns import DNSQR
+
+    entries = dns_layer.qd if isinstance(dns_layer.qd, list) else [dns_layer.qd]
+    names: list[str] = []
+    for entry in entries:
+        while entry is not None:
+            raw = getattr(entry, "qname", None)
+            if raw is not None:
+                text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+                text = text.strip().rstrip(".")
+                if text:
+                    names.append(text)
+            following = getattr(entry, "payload", None)
+            entry = following if isinstance(following, DNSQR) else None
+    return tuple(names)
+
+
 def packet_record(packet: Any) -> PacketRecord:
     """Extract the fields used by the report from one Scapy packet."""
     from scapy.layers.dns import DNS, DNSQR
@@ -76,21 +126,23 @@ def packet_record(packet: Any) -> PacketRecord:
     elif IPv6 in packet:
         source, destination = packet[IPv6].src, packet[IPv6].dst
 
+    # Only the packet's own transport counts; a header quoted by an ICMP error
+    # or carried inside a tunnel belongs to a different packet.
+    transport = packet_transport(packet)
+
     protocol, port = "OTHER", None
-    if TCP in packet:
-        protocol, port = "TCP", port_number(packet[TCP].dport)
-    elif UDP in packet:
-        protocol, port = "UDP", port_number(packet[UDP].dport)
+    if isinstance(transport, TCP):
+        protocol, port = "TCP", port_number(transport.dport)
+    elif isinstance(transport, UDP):
+        protocol, port = "UDP", port_number(transport.dport)
     elif source:
         protocol = "IPv6" if IPv6 in packet else "IP"
 
-    query = None
-    if DNS in packet and packet[DNS].qr == 0 and DNSQR in packet:
-        raw = packet[DNSQR].qname
-        if raw is not None:
-            text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
-            query = text.strip() or None
-    return PacketRecord(protocol, source, destination, port, query)
+    questions: tuple[str, ...] = ()
+    if transport is not None and DNS in transport and transport[DNS].qr == 0:
+        questions = dns_question_names(transport[DNS])
+
+    return PacketRecord(protocol, source, destination, port, questions[0] if questions else None, questions)
 
 
 def analyze_pcap(path: Path) -> dict[str, Any]:

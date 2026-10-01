@@ -50,12 +50,15 @@ def save_baseline(
 def load_baseline(path: Path) -> dict[str, dict[str, Any]]:
     """Load a saved baseline."""
 
-    data = json.loads(path.read_text(encoding="utf-8"))
+    # utf-8-sig accepts a baseline that an editor saved with a byte order mark.
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
         raise ValueError("Baseline must contain a JSON object.")
     for name, metadata in data.items():
-        if not isinstance(metadata, dict) or not isinstance(metadata.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", metadata["sha256"]):
+        if not isinstance(metadata, dict) or not isinstance(metadata.get("sha256"), str) or not re.fullmatch(r"[0-9a-fA-F]{64}", metadata["sha256"]):
             raise ValueError(f"Invalid baseline metadata for {name!r}: expected a SHA-256 digest.")
+        # Hex digests are case-insensitive, so store one case for comparison.
+        metadata["sha256"] = metadata["sha256"].lower()
     return data
 
 def compare_baseline(
