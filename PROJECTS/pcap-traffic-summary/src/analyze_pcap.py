@@ -1,4 +1,4 @@
-"""Small PCAP traffic summary tool."""
+"""PCAP traffic summary tool."""
 from __future__ import annotations
 
 import argparse

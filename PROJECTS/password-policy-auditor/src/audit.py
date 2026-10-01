@@ -5,7 +5,7 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
-# Baseline values used by this small example.
+# Baseline values used by this example.
 RECOMMENDED = {
     "min_length": 12,
     "require_upper": True,
