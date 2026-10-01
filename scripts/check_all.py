@@ -6,7 +6,7 @@ import sys
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
-    projects = sorted(root.glob("PROJECTS/*/*"))
+    projects = sorted(root.glob("PROJECTS/*"))
     failed = []
     for project in projects:
         if not (project / "tests").is_dir():

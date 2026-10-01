@@ -1,41 +1,41 @@
 # Project catalog
 
-Choose a project by the data you already have and the question you want to answer. The level labels describe the repository's learning progression, not a certification or a guarantee of production readiness.
+Thirteen projects, grouped by what you have to bring. Pick the row that matches the data in front of you; the last column is what that project is really teaching.
 
-## Start with one input and one result
+## You have a file
 
-| Project | Bring this input | What to learn |
+| Project | Bring this | What you will practise |
 | --- | --- | --- |
-| [Network Traffic Analyzer](PROJECTS/beginner/01-network-traffic-analyzer) | A PCAP from your lab | Extract packet fields and turn them into an interpretable summary. |
-| [Phishing URL Detector](PROJECTS/beginner/02-phishing-url-detector) | One or more URL strings | Keep heuristic scores explainable and distinguish clues from verdicts. |
-| [File Integrity Monitor](PROJECTS/beginner/03-file-integrity-monitor) | A folder and a trusted baseline | Compare content hashes and separate added, changed, and removed files. |
-| [Keylogger](PROJECTS/beginner/keylogger) | Your authorized foreground terminal | Learn visible consent, terminal input, and safe local event recording. |
-| [Network Traffic Analyzer](PROJECTS/beginner/network-traffic-analyzer) | A PCAP from your lab | Stream packet observations into a compact, input-driven report. |
-| [Hash Cracker](PROJECTS/beginner/hash-cracker) | An authorized digest and wordlist | Compare offline candidates while measuring actual work. |
+| [PCAP Traffic Summary](PROJECTS/pcap-traffic-summary) | A PCAP from your lab | Pulling fields out of packets and turning them into a summary someone can read. |
+| [Network Traffic Analyzer](PROJECTS/network-traffic-analyzer) | The same kind of PCAP, possibly a large one | Streaming instead of loading, and emitting a report another tool can consume. |
+| [Phishing URL Detector](PROJECTS/phishing-url-detector) | One or more URL strings | Keeping a heuristic score explainable, and separating clues from verdicts. |
+| [File Integrity Monitor](PROJECTS/file-integrity-monitor) | A folder and a trusted baseline | Hashing file contents and telling added, changed and removed files apart. |
+| [Hash Cracker](PROJECTS/hash-cracker) | A digest you are authorised to test, and a wordlist | Comparing candidates offline and measuring the actual work involved. |
 
-The URL detector is a quick offline starting point. The file monitor adds persistence and repeatable comparisons. The packet analyzer introduces protocol parsing and the limits of what a capture can reveal.
+The two traffic tools answer the same question in different ways. The summary tool loads the capture and prints a text report; the analyzer reads it one packet at a time and can print JSON. Start with whichever matches the size of your file and the shape of output you want.
 
-## Add storage and configuration context
+## You have a live system or a service
 
-| Project | Bring this input | What to learn |
+| Project | Bring this | What you will practise |
 | --- | --- | --- |
-| [SIEM Dashboard](PROJECTS/intermediate/04-siem-dashboard) | Windows Event Logs, or structured event files/API records | Connect collection, validation, persistence, detection, and live investigation controls. |
-| [Threat Intelligence Aggregator](PROJECTS/intermediate/05-threat-intelligence-aggregator) | CSV or JSON indicator feeds | Normalize records, deduplicate with SQLite, and search safely. |
-| [SSL/TLS Scanner](PROJECTS/intermediate/06-ssl-tls-scanner) | A hostname and TLS port | Read a verified handshake without confusing one negotiated session with a complete server audit. |
-| [Password Policy Auditor](PROJECTS/intermediate/07-password-policy-auditor) | A key=value policy file | Apply field-specific comparisons against an explicit example baseline. |
-| [Docker Security Audit](PROJECTS/intermediate/08-docker-security-audit) | Saved docker inspect JSON | Explain container configuration findings and review every object in an export. |
+| [SIEM Dashboard](PROJECTS/siem-dashboard) | Windows Event Logs, or structured event files and API records | Connecting collection, validation, storage, detection and an analyst view. |
+| [SSL/TLS Scanner](PROJECTS/ssl-tls-scanner) | A hostname and a TLS port | Reading one verified handshake without confusing it for a server audit. |
+| [Keylogger](PROJECTS/keylogger) | Your own foreground terminal | Consent, visible recording, and what keyboard events actually look like. |
+| [Web Vulnerability Scanner](PROJECTS/web-vulnerability-scanner) | A web application running on localhost | Checking response headers and form metadata without submitting anything. |
 
-The supplied feed and configuration files are training fixtures. The SIEM instead starts with an empty store and collects actual available events; it can legitimately show zero matching alerts.
+The SIEM is the only project that watches a running machine. It starts from an empty store and collects what is genuinely available, so an empty dashboard is a real result, not a broken one. The TLS and web tools each make a single connection to a target you name, and neither will point anywhere but a local address for the web checker.
 
-## Review applications and inventories
+## You have configuration or an export
 
-| Project | Bring this input | What to learn |
+| Project | Bring this | What you will practise |
 | --- | --- | --- |
-| [Web Vulnerability Scanner](PROJECTS/moderate/09-web-vulnerability-scanner) | A running localhost HTTP application | Inspect response headers and form metadata without submitting data. |
-| [Cloud Asset Inventory](PROJECTS/moderate/10-cloud-asset-inventory) | JSON assets mapped to the project schema | Connect exposure and missing metadata to individual resources. |
+| [Password Policy Auditor](PROJECTS/password-policy-auditor) | A key=value policy file | Field-by-field comparison against an explicit, reviewable baseline. |
+| [Docker Security Audit](PROJECTS/docker-security-audit) | Saved `docker inspect` JSON | Turning container configuration into findings you can defend, one container at a time. |
+| [Threat Intelligence Aggregator](PROJECTS/threat-intelligence-aggregator) | CSV or JSON indicator feeds | Normalising records, deduplicating in SQLite, and searching safely. |
+| [Cloud Asset Inventory](PROJECTS/cloud-asset-inventory) | A JSON inventory that matches the project schema | Linking exposure and missing metadata to individual resources. |
 
-The local web checker does not crawl or exploit an application. The inventory tool does not connect to a cloud account. Both are deliberately small enough that you can trace every finding to a specific input field.
+The bundled `sample_*` files are fixtures, not evidence. They exist so you can see the output shape on the first run; replace them with your own data as soon as you want the results to mean something.
 
-## Before running a project
+## Before running anything
 
-Follow the project's README from its own directory. Keep test fixtures separate from collected evidence, and keep a copy of inputs you need for comparison. The root README covers the repository layout and project links; [TESTING.md](TESTING.md) explains the automated checks and their boundaries.
+Follow the project's own README from inside its folder. Keep your fixtures separate from anything you are collecting for real, and keep a copy of the inputs you need to compare later. [TESTING.md](TESTING.md) explains the automated checks and where their authority stops; the [root README](README.md) covers the layout.

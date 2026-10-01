@@ -11,19 +11,19 @@ jobs:
       fail-fast: false
       matrix:
         project:
-          - PROJECTS/beginner/01-network-traffic-analyzer
-          - PROJECTS/beginner/02-phishing-url-detector
-          - PROJECTS/beginner/03-file-integrity-monitor
-          - PROJECTS/beginner/keylogger
-          - PROJECTS/beginner/network-traffic-analyzer
-          - PROJECTS/beginner/hash-cracker
-          - PROJECTS/intermediate/04-siem-dashboard
-          - PROJECTS/intermediate/05-threat-intelligence-aggregator
-          - PROJECTS/intermediate/06-ssl-tls-scanner
-          - PROJECTS/intermediate/07-password-policy-auditor
-          - PROJECTS/intermediate/08-docker-security-audit
-          - PROJECTS/moderate/09-web-vulnerability-scanner
-          - PROJECTS/moderate/10-cloud-asset-inventory
+          - PROJECTS/pcap-traffic-summary
+          - PROJECTS/phishing-url-detector
+          - PROJECTS/file-integrity-monitor
+          - PROJECTS/keylogger
+          - PROJECTS/network-traffic-analyzer
+          - PROJECTS/hash-cracker
+          - PROJECTS/siem-dashboard
+          - PROJECTS/threat-intelligence-aggregator
+          - PROJECTS/ssl-tls-scanner
+          - PROJECTS/password-policy-auditor
+          - PROJECTS/docker-security-audit
+          - PROJECTS/web-vulnerability-scanner
+          - PROJECTS/cloud-asset-inventory
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -46,7 +46,7 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: PROJECTS/intermediate/04-siem-dashboard
+        working-directory: PROJECTS/siem-dashboard
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

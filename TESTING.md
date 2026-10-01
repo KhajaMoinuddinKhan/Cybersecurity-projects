@@ -1,49 +1,49 @@
 # Running and interpreting the checks
 
-Tests should make changes easier to trust, but their result only applies to the behavior they exercise. This repository separates repeatable fixture tests from native operating-system and external-network checks.
+A test result is only as broad as the behaviour it exercises, and it is easy to read more into a green run than it says. This repository splits its checks into the repeatable ones that run anywhere and the ones that depend on your operating system or a live endpoint.
 
-## Check the whole repository
+## Running everything
 
-Create and activate a virtual environment as described in the root README. Install the test runner and the dependencies used across the projects:
+Create and activate a virtual environment as described in the root README, then install the test runner and the three projects that have dependencies:
 
 ```console
 python -m pip install pytest
-python -m pip install -r PROJECTS/beginner/01-network-traffic-analyzer/requirements.txt
-python -m pip install -r PROJECTS/intermediate/04-siem-dashboard/requirements.txt
-python -m pip install -r PROJECTS/moderate/09-web-vulnerability-scanner/requirements.txt
+python -m pip install -r PROJECTS/pcap-traffic-summary/requirements.txt
+python -m pip install -r PROJECTS/siem-dashboard/requirements.txt
+python -m pip install -r PROJECTS/web-vulnerability-scanner/requirements.txt
 python scripts/check_all.py
 ```
 
-Install Node.js as well to run the SIEM JavaScript control check. The other projects use the standard library. The runner compiles each source directory, launches its tests in a separate Python process, continues through the remaining projects after a failure, and returns a nonzero exit status if anything fails. Separate processes are necessary because the projects deliberately reuse the package name `src`.
+The runner compiles each project's source and runs its tests in a separate Python process, keeps going after a failure, and exits nonzero if anything failed. Separate processes are not a style choice: every project deliberately uses the package name `src`, so collecting them in one interpreter would be ambiguous.
 
-To focus on one project, change into its directory and run `python -m pytest -q tests`. For more context on a failure, replace `-q` with `-v`.
+To work on a single project, `cd` into it and run `python -m pytest -q tests`. Swap `-q` for `-v` when you want to see each test name.
 
-## What is exercised
+Node.js is needed for one extra check: the SIEM JavaScript controls are exercised in a small DOM harness against a temporary API. Everything else is Python and the standard library.
 
-| Area | Evidence from tests |
+## What the automated checks actually cover
+
+| Area | Evidence from the tests |
 | --- | --- |
-| Packet analysis | Summary counters and a generated PCAP containing a DNS query and reply. |
-| URL scoring | Known heuristic outcomes and malformed-input handling. |
-| File integrity | Added, modified, and removed files, an internal baseline file, and invalid baseline metadata. |
-| Terminal input | Consent enforcement, special-key labels, and JSONL event writing. |
-| Offline hash recovery | Real digest comparisons, streamed wordlists, no-match results, and invalid target handling. |
-| PCAP analysis | Protocol, endpoint, port, and DNS aggregation over observed packet records. |
-| SIEM | Empty startup, classification, deduplication, filters, imports, atomic validation, metrics, collector retry logic, and JavaScript controls against a temporary Flask API. |
-| Indicator feeds | Deduplication, literal searches, and invalid field types. |
-| TLS | Certificate formatting and session behavior using controlled connection objects. |
-| Policy and Docker review | Baseline comparisons, risky settings, explicit root users, structured mounts, multiple containers, and malformed inputs. |
-| Local web and inventory review | Localhost boundaries, response/form checks, and inventory metadata findings. |
+| Packet analysis | Summary counters, generated captures, a DNS query and reply, truncated frames, ICMP errors quoting a DNS query, and packets asking several questions. |
+| URL scoring | Known heuristic outcomes, malformed input, scheme-less and protocol-relative URLs. |
+| File integrity | Added, modified and removed files, a baseline stored inside the watched folder, invalid metadata, byte-order marks, upper-case digests. |
+| Terminal input | Consent enforcement, key labelling, JSONL writing, refusal when stdin is not a console, Ctrl+C handling. |
+| Offline hash recovery | Real digest comparisons, streamed wordlists, no-match results, invalid targets and unsupported algorithms. |
+| SIEM | Empty startup, event classification, deduplication, filters, JSON/JSONL/CSV import, atomic validation, metrics, collector retry logic, and the JavaScript controls. |
+| Indicator feeds | Normalisation, deduplication counts, literal search, and every malformed-input path. |
+| TLS | Certificate formatting, session behaviour with controlled sockets, and the port and timeout bounds. |
+| Policy, Docker, inventory and web review | Baseline comparisons, risky container settings, localhost boundaries, response and form checks, metadata findings. |
 
-The SIEM control test runs the shipped JavaScript in a small DOM harness against a real local API. It verifies behavior, but it does not replace a visual browser review. Tests create temporary files and databases; they do not seed the normal SIEM store.
+Tests create their own temporary files and databases. They do not seed the SIEM store you use day to day, and they never reach an external host.
 
-## Platform and network boundaries
+## Where a green run stops being evidence
 
-The native SIEM test reads actual System events on Windows. It is skipped on other operating systems. The GitHub Actions Windows job runs it alongside the API and control tests. Security-channel access still depends on the account and machine policy, so a passing System-log test does not establish that every channel is accessible on your computer.
+**Operating system.** The native SIEM test reads real System events on Windows and is skipped elsewhere. The GitHub Actions Windows job runs it alongside the API and control tests. Access to the Security channel depends on the account and the machine policy, so a passing System-log test does not establish that every channel is readable on your computer.
 
-Scapy may discover local network interfaces while importing its packet layers. A highly restricted container can block that initialization even though the analyzer only reads a file. Run the capture tests on a normal workstation or the Linux CI runner in that case; do not report an unexecuted capture test as a pass.
+**Scapy's import time.** Scapy may probe local network interfaces while importing its packet layers. A tightly restricted container can block that even though the analyzers only read a file. If the capture tests cannot start there, run them on a normal workstation or on the Linux CI runner — and do not record an unexecuted capture test as a pass.
 
-External endpoints can change or become unreachable. Automated website boundary tests use controlled DNS and socket behavior, and TLS tests retain certificate-verification behavior without depending on a public site's availability. A live inspection is a separate observation tied to its endpoint and time.
+**External endpoints.** Sites change and go offline. The tests therefore use controlled sockets and temporary local servers rather than a public website, so a passing suite says nothing about any particular server on the internet. A live scan is an observation tied to one endpoint and one moment.
 
 ## Before accepting a change
 
-Run the affected project tests, then the full runner when shared instructions, dependencies, or workflows change. Try the documented command with an input you understand and inspect the output, including a failure case. Review GitHub Actions for the pushed commit; local Linux results cannot substitute for the Windows collector job.
+Run the tests for the project you touched, then the full runner if you changed shared instructions, dependencies or workflows. Run the documented command yourself with an input you understand, and try a failing case as well as a successful one — most of the defects found in this repository were in paths the tests were perfectly happy with. Finally, check the GitHub Actions result for the pushed commit; a local Linux run cannot stand in for the Windows collector job.
