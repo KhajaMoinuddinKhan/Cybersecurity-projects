@@ -21,6 +21,10 @@ SECURITY_HEADERS = {
 }
 
 
+def _finding(severity: str, category: str, message: str) -> dict[str, str]:
+    return {"severity": severity, "category": category, "message": message}
+
+
 def normalise_url(value: str) -> str:
     value = value.strip()
     if not value:
@@ -93,22 +97,22 @@ def analyse_headers(headers: dict[str, str], is_https: bool) -> tuple[dict[str, 
         checks[header] = exists
         if exists:
             continue
-
         if header == "Strict-Transport-Security" and not is_https:
             continue
 
         severity = "Medium" if header in {"Content-Security-Policy", "Strict-Transport-Security"} else "Low"
-        penalty = 12 if severity == "Medium" else 6
-        score -= penalty
-        findings.append({"severity": severity, "message": f"Missing {label} header"})
+        score -= 12 if severity == "Medium" else 6
+        findings.append(_finding(severity, "Security Header", f"Missing {label} header"))
 
     if not is_https:
         score -= 30
-        findings.insert(0, {"severity": "High", "message": "The page is not using HTTPS"})
+        findings.insert(0, _finding("High", "Transport Security", "The page is not using HTTPS"))
 
     server = present.get("server")
     if server:
-        findings.append({"severity": "Info", "message": f"Server header is exposed: {server}"})
+        findings.append(
+            _finding("Info", "Information Exposure", f"Server header is exposed: {server}")
+        )
 
     return checks, findings, max(score, 0)
 
@@ -196,13 +200,24 @@ def inspect_website(value: str, timeout: float = 7.0) -> dict[str, Any]:
                 days_left = int(tls["days_left"])
                 if days_left < 0:
                     score = max(score - 35, 0)
-                    findings.insert(0, {"severity": "High", "message": "TLS certificate is expired"})
+                    findings.insert(
+                        0,
+                        _finding("High", "TLS Certificate", "TLS certificate is expired"),
+                    )
                 elif days_left < 14:
                     score = max(score - 15, 0)
-                    findings.append({"severity": "Medium", "message": f"TLS certificate expires in {days_left} days"})
+                    findings.append(
+                        _finding(
+                            "Medium",
+                            "TLS Certificate",
+                            f"TLS certificate expires in {days_left} days",
+                        )
+                    )
         except (OSError, ssl.SSLError, ValueError) as exc:
             score = max(score - 15, 0)
-            findings.append({"severity": "Medium", "message": f"TLS inspection failed: {exc}"})
+            findings.append(
+                _finding("Medium", "TLS Certificate", f"TLS inspection failed: {exc}")
+            )
 
     return {
         "requested_url": url,
@@ -213,5 +228,5 @@ def inspect_website(value: str, timeout: float = 7.0) -> dict[str, Any]:
         "headers": checks,
         "findings": findings,
         "tls": tls,
-        "note": "This is a passive header and TLS review, not a full vulnerability scan.",
+        "note": "Alerts above come from passive header and TLS checks, not exploit testing.",
     }

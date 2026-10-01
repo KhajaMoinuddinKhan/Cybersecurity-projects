@@ -14,10 +14,14 @@ def test_private_ip_is_rejected():
     raise AssertionError("Private address should have been rejected")
 
 
-def test_missing_security_headers_reduce_score():
+def test_missing_security_headers_become_categorized_alerts():
     checks, findings, score = analyse_headers({}, True)
     assert checks["Content-Security-Policy"] is False
-    assert any("Content Security Policy" in item["message"] for item in findings)
+    assert any(
+        item["category"] == "Security Header"
+        and "Content Security Policy" in item["message"]
+        for item in findings
+    )
     assert score < 100
 
 

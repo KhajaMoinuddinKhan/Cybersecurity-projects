@@ -2,4 +2,4 @@
 
 ## Overview
 
-Purple Team Detection Lab is a local security console that turns synthetic endpoint, authentication, and network events into correlated ATT&CK-mapped alerts. It also includes a passive public-website check for HTTPS, TLS certificate details, HTTP status, and common security headers.
+Purple Team Detection Lab is a local security console with two parts. Its website scanner turns passive HTTPS, TLS, certificate, and security-header findings into live severity-based alerts and filters. Its event lab correlates synthetic endpoint, authentication, and network events into MITRE ATT&CK-mapped detections.
