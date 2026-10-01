@@ -37,3 +37,13 @@ def test_recorded_region_is_not_flagged():
          "tags": {"Owner": "o", "Environment": "e"}, "region": "eu-west-2"}
     ])
     assert not any("Region" in message for _, _, message in findings)
+
+
+def test_numeric_region_is_reported_as_the_wrong_type():
+    findings = review_assets([
+        {"name": "a", "type": "EC2", "public": False,
+         "tags": {"Owner": "o", "Environment": "e"}, "region": 12345}
+    ])
+    messages = " ".join(message for _, _, message in findings)
+    assert "Region must be recorded as text" in messages
+    assert "Region is not recorded" not in messages

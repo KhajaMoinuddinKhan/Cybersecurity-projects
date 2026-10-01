@@ -87,7 +87,7 @@ Other readable channels can continue collecting while Security is unavailable. I
 
 The API accepts one JSON object or a list. File import accepts a JSON object, a list, an object containing an `events` list, newline-delimited JSON, or CSV. Every record needs nonempty `message` or `event` text. Useful optional fields are `timestamp`, `channel`, `provider`, `event_id`, `username`, `host`, `source_ip`, `severity`, `is_alert`, and `rule_name`.
 
-Use High, Medium, or Low for severity. JSON `is_alert` must be a boolean; CSV accepts true/false or 1/0. CSV rows must match their header width and have unique, nonempty column names. Files must be UTF-8 and fit within the 3 MB request limit. A batch is validated before insertion, so one invalid record does not leave a partially imported batch.
+The `since` filter takes a whole number of minutes and accepts up to 5256000 (ten years); anything else returns a JSON error. Use High, Medium, or Low for severity. JSON `is_alert` must be a boolean; CSV accepts true/false or 1/0. CSV rows must match their header width and have unique, nonempty column names. Files must be UTF-8 and fit within the 3 MB request limit. A batch is validated before insertion, so one invalid record does not leave a partially imported batch.
 
 Prefer an explicit ISO 8601 timestamp with a timezone. Times are stored in UTC; a timestamp without an offset is treated as UTC, and a missing timestamp uses ingestion time. Missing descriptive fields receive labels such as `unknown`; those labels indicate missing information. API and file records retain the alert flag you supply rather than automatically running the Windows classification rules.
 

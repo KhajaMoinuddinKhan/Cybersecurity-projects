@@ -31,7 +31,7 @@ Import `sample_feed.csv` twice and compare the counts. Then search for just part
 
 Use the same `--db` path for import and search. Different terminal directories can otherwise create different databases with the same filename. Invalid JSON, missing feed files, and non-text fields produce a clear command-line error; fix the feed before retrying.
 
-Deduplication is exact for indicator values. It does not canonicalize URL forms or merge source histories: the first stored source remains attached to a duplicate. The tool validates structure, not whether an IP, domain, hash, or URL is a trustworthy indicator. It has no automatic feed updates, confidence scoring, or expiry mechanism.
+Deduplication compares indicator values byte for byte, so it is case-sensitive: `EVIL.test` and `evil.test` are stored as separate indicators. It does not canonicalize URL forms or merge source histories: the first stored source remains attached to a duplicate. The tool validates structure, not whether an IP, domain, hash, or URL is a trustworthy indicator. It has no automatic feed updates, confidence scoring, or expiry mechanism.
 
 ## Tests
 

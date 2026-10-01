@@ -44,28 +44,40 @@ def normalise_row(row: dict[str, str]) -> tuple[str, str, str]:
 
     return kind, value, source
 
+def read_utf8_text(path: Path) -> str:
+    """Read a feed as UTF-8 text, naming the file when decoding fails."""
+
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{path.name} is not valid UTF-8 text: {exc}") from exc
+
+
 def read_feed(path: Path) -> list[tuple[str, str, str]]:
     """Read IOC rows from JSON or CSV."""
 
     if path.suffix.lower() == ".json":
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        data = json.loads(read_utf8_text(path))
         if not isinstance(data, list):
             raise ValueError("JSON feed must be a list")
         if not all(isinstance(item, dict) for item in data):
             raise ValueError("Every JSON feed item must be an object")
         return [normalise_row(item) for item in data]
 
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        reader = csv.DictReader(handle)
-        missing = [
-            name for name in ("type", "value")
-            if name not in (reader.fieldnames or ())
-        ]
-        if missing:
-            raise ValueError(
-                f"CSV feed is missing required column(s): {', '.join(missing)}"
-            )
-        return [normalise_row(row) for row in reader]
+    try:
+        with path.open(newline="", encoding="utf-8-sig") as handle:
+            reader = csv.DictReader(handle)
+            missing = [
+                name for name in ("type", "value")
+                if name not in (reader.fieldnames or ())
+            ]
+            if missing:
+                raise ValueError(
+                    f"CSV feed is missing required column(s): {', '.join(missing)}"
+                )
+            return [normalise_row(row) for row in reader]
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{path.name} is not valid UTF-8 text: {exc}") from exc
 
 def import_iocs(
     db_path: Path,
@@ -111,8 +123,11 @@ def main() -> None:
     parser.add_argument("--search")
     args = parser.parse_args()
 
-    if not args.feed and not args.search:
+    if args.feed is None and args.search is None:
         parser.error("Use --feed and/or --search")
+    if args.search is not None and not args.search.strip():
+        # An empty --search used to be reported as if no option had been given.
+        parser.error("Search text must not be empty")
 
     if args.feed:
         print(f"Imported {import_iocs(args.db, read_feed(args.feed))} new IOCs.")

@@ -16,6 +16,27 @@ def _object(info: dict[str, Any], key: str) -> dict[str, Any]:
     return value
 
 
+def bind_source(binding: str) -> str:
+    """Return the host path of a bind spec, keeping a Windows drive letter."""
+
+    parts = binding.split(":")
+    if (
+        len(parts) >= 2
+        and len(parts[0]) == 1
+        and parts[0].isalpha()
+        and parts[1][:1] in {"\\", "/", ""}
+    ):
+        return f"{parts[0]}:{parts[1]}"
+    return parts[0]
+
+def is_host_root(source: str) -> bool:
+    """True for a filesystem root: "/", "\\" or a bare drive such as "C:"."""
+
+    stripped = source.rstrip("/\\")
+    if not stripped:
+        return True
+    return len(stripped) == 2 and stripped[0].isalpha() and stripped[1] == ":"
+
 def audit_container(info: dict[str, Any]) -> list[tuple[str, str]]:
     """Return explainable findings for one container's configuration."""
     if not isinstance(info, dict):
@@ -38,11 +59,11 @@ def audit_container(info: dict[str, Any]) -> list[tuple[str, str]]:
         raise ValueError("HostConfig.Binds must be a list of strings")
     sources: set[str] = set()
     for binding in bindings:
-        source = binding.split(":", 1)[0]
+        source = bind_source(binding)
         if not source:
             # An empty host path is not a bind and must not be read as "/".
             continue
-        sources.add(source.rstrip("/") or "/")
+        sources.add(source.rstrip("/\\") or "/")
 
     # Docker records --mount bind mounts here even when HostConfig.Binds is empty.
     mounts = info.get("Mounts")
@@ -56,7 +77,7 @@ def audit_container(info: dict[str, Any]) -> list[tuple[str, str]]:
             if not isinstance(source, str) or not source:
                 raise ValueError("Bind mount Source must be nonempty text")
             sources.add(source.rstrip("/") or "/")
-    if "/" in sources:
+    if any(is_host_root(source) for source in sources):
         findings.append(("HIGH", "Host root filesystem is mounted into the container."))
     if any(source.endswith("/docker.sock") for source in sources):
         findings.append(("HIGH", "Docker socket is mounted into the container."))
@@ -66,7 +87,9 @@ def audit_container(info: dict[str, Any]) -> list[tuple[str, str]]:
     if published_ports:
         findings.append(("LOW", f"{published_ports} published port mapping(s) require review."))
 
-    user = str(config.get("User") or "").strip().split(":", 1)[0]
+    # A numeric UID 0 is a real declaration, so only None means "not declared".
+    raw_user = config.get("User")
+    user = "" if raw_user is None else str(raw_user).strip().split(":", 1)[0]
     if not user:
         findings.append(("MEDIUM", "Container does not explicitly declare a non-root user."))
     elif user == "root" or (user.isdecimal() and int(user) == 0):

@@ -15,6 +15,10 @@ from .windows_collector import WindowsEventCollector
 
 VALID_SEVERITIES = ("High", "Medium", "Low")
 
+# Ten years in minutes. SQLite cannot represent a window beyond its own date
+# range, so a larger value used to match no events at all.
+MAX_SINCE_MINUTES = 5_256_000
+
 SCHEMA = """CREATE TABLE IF NOT EXISTS live_events (
 id INTEGER PRIMARY KEY AUTOINCREMENT,
 timestamp TEXT NOT NULL,
@@ -554,7 +558,16 @@ def dashboard_app(db_path: Path, collector_status: dict[str, Any] | None = None)
     @app.get("/api/dashboard")
     def api_dashboard():
         since_text = request.args.get("since", "").strip()
-        since_minutes = int(since_text) if since_text.isdigit() else None
+        since_minutes = None
+        if since_text:
+            if not since_text.isdigit():
+                return jsonify({"error": "since must be a whole number of minutes"}), 400
+            since_minutes = int(since_text)
+            if since_minutes > MAX_SINCE_MINUTES:
+                return (
+                    jsonify({"error": f"since is limited to {MAX_SINCE_MINUTES} minutes"}),
+                    400,
+                )
         snapshot = dashboard_snapshot(
             db_path,
             severity=request.args.get("severity") or None,

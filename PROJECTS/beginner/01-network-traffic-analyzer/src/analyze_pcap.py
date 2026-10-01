@@ -16,6 +16,7 @@ class TrafficRecord:
     destination: str | None = None
     destination_port: int | None = None
     dns_query: str | None = None
+    dns_queries: tuple[str, ...] = ()
 
 def summarize_records(records: Iterable[TrafficRecord]) -> dict[str, Any]:
     """Count protocols, hosts, ports, and DNS names."""
@@ -30,10 +31,11 @@ def summarize_records(records: Iterable[TrafficRecord]) -> dict[str, Any]:
             for record in records
             if record.destination_port is not None
         ),
+        # Every question is reported; a packet can ask more than one name.
         "dns_queries": [
-            record.dns_query.rstrip(".")
+            name.rstrip(".")
             for record in records
-            if record.dns_query
+            for name in (record.dns_queries or ((record.dns_query,) if record.dns_query else ()))
         ],
     }
 
@@ -70,6 +72,34 @@ def packet_transport(packet: Any) -> Any:
         layer = next_layer
     return None
 
+def dns_question_names(dns_layer: Any) -> tuple[str, ...]:
+    """Return every question name in a DNS query layer.
+
+    Scapy exposes several questions either as a list of ``DNSQR`` entries or as
+    a chain hanging off the first one, so both shapes are walked here.
+    """
+
+    from scapy.layers.dns import DNSQR
+
+    entries = dns_layer.qd if isinstance(dns_layer.qd, list) else [dns_layer.qd]
+    names: list[str] = []
+    for entry in entries:
+        while entry is not None:
+            raw = getattr(entry, "qname", None)
+            if raw is not None:
+                text = (
+                    raw.decode("utf-8", errors="replace")
+                    if isinstance(raw, bytes)
+                    else str(raw)
+                )
+                text = text.strip().rstrip(".")
+                if text:
+                    names.append(text)
+            following = getattr(entry, "payload", None)
+            entry = following if isinstance(following, DNSQR) else None
+    return tuple(names)
+
+
 def packet_to_record(packet: Any) -> TrafficRecord:
     """Pull the fields we need from one Scapy packet."""
 
@@ -100,24 +130,18 @@ def packet_to_record(packet: Any) -> TrafficRecord:
     elif source:
         protocol = "IPv6" if IPv6 in packet else "IP"
 
-    # Keep the DNS name when the packet's own transport carries a query.
-    dns_query = None
-    if transport is not None and DNS in transport and transport[DNS].qr == 0 and DNSQR in transport:
-        raw_query = transport[DNSQR].qname
-        if raw_query is not None:
-            text = (
-                raw_query.decode("utf-8", errors="replace")
-                if isinstance(raw_query, bytes)
-                else str(raw_query)
-            )
-            dns_query = text.strip() or None
+    # Keep the DNS names when the packet's own transport carries a query.
+    questions: tuple[str, ...] = ()
+    if transport is not None and DNS in transport and transport[DNS].qr == 0:
+        questions = dns_question_names(transport[DNS])
 
     return TrafficRecord(
         protocol,
         source,
         destination,
         destination_port,
-        dns_query,
+        questions[0] if questions else None,
+        questions,
     )
 
 def analyse_pcap(path: Path) -> dict[str, Any]:

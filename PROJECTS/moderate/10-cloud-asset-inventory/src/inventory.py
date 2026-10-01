@@ -49,8 +49,12 @@ def review_assets(
             )
 
         region = asset.get("region")
-        if not region or (isinstance(region, str) and not region.strip()):
+        if isinstance(region, str) and region.strip():
+            pass  # A usable region is recorded.
+        elif region is None or (isinstance(region, str) and not region.strip()):
             findings.append(("LOW", name, "Region is not recorded."))
+        else:
+            findings.append(("LOW", name, "Region must be recorded as text."))
 
     return findings
 

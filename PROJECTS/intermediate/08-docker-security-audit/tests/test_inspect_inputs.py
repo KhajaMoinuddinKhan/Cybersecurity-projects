@@ -2,7 +2,7 @@ import json
 import subprocess
 import sys
 import pytest
-from src.audit import audit_container
+from src.audit import audit_container, bind_source, is_host_root
 
 
 @pytest.mark.parametrize("user", ["root", "0", "root:root", "0:1000"])
@@ -38,4 +38,26 @@ def test_empty_bind_source_is_not_treated_as_host_root():
 
 def test_host_root_bind_is_still_reported():
     findings = audit_container({"Config": {"User": "1000"}, "HostConfig": {"Binds": ["/:/host"]}})
+    assert any("Host root" in message for _, message in findings)
+
+
+def test_numeric_uid_zero_is_reported_as_root():
+    findings = audit_container({"Config": {"User": 0}, "HostConfig": {"Binds": []}})
+    assert any("UID 0" in message for _, message in findings)
+
+
+def test_windows_drive_bind_keeps_its_drive_letter():
+    assert bind_source("C:\\data:/container") == "C:\\data"
+    assert bind_source("/data:/container") == "/data"
+    findings = audit_container(
+        {"Config": {"User": "1000"}, "HostConfig": {"Binds": ["C:\\data:/container"]}}
+    )
+    assert not any("Host root" in message for _, message in findings)
+
+
+def test_windows_drive_root_bind_is_reported():
+    assert is_host_root("C:") and is_host_root("/") and not is_host_root("C:\\data")
+    findings = audit_container(
+        {"Config": {"User": "1000"}, "HostConfig": {"Binds": ["C:\\:/container"]}}
+    )
     assert any("Host root" in message for _, message in findings)
