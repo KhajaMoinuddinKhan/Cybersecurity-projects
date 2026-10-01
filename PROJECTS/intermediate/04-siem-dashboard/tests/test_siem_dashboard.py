@@ -208,3 +208,70 @@ def test_invalid_severity_is_rejected(tmp_path: Path):
     db = tmp_path / "siem_live.db"
     with pytest.raises(ValueError, match="Unsupported severity"):
         ingest_payloads(db, [{"message":"Unexpected","severity":"Critical"}])
+
+
+def test_invalid_api_filter_returns_json_error(tmp_path):
+    client = dashboard_app(tmp_path / "live.db").test_client()
+    response = client.get("/api/dashboard?severity=INVALID")
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
+def test_alert_boolean_and_csv_false(tmp_path):
+    rows = parse_event_file("events.csv", b"message,is_alert\nNormal,false\nAlert,true\n")
+    assert rows[0]["is_alert"] is False
+    assert rows[1]["is_alert"] is True
+    ingest_payloads(tmp_path / "live.db", rows)
+    assert dashboard_snapshot(tmp_path / "live.db")["alert_count"] == 1
+    with pytest.raises(ValueError, match="JSON boolean"):
+        ingest_payloads(tmp_path / "live.db", [{"message":"Normal", "is_alert":"false"}])
+
+
+def test_api_rejects_invalid_batch_without_partial_insert(tmp_path):
+    client = dashboard_app(tmp_path / "live.db").test_client()
+    response = client.post("/api/events", json=[{"message":"Valid"}, {"message":"Invalid","severity":"Invalid"}])
+    assert response.status_code == 400
+    assert dashboard_snapshot(tmp_path / "live.db")["counts"]["Total"] == 0
+
+
+def test_measured_system_metrics(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    import psutil
+    from src.app import system_metrics
+    monkeypatch.setattr(psutil, "cpu_percent", lambda interval: 12.5)
+    monkeypatch.setattr(psutil, "virtual_memory", lambda: SimpleNamespace(percent=34.5))
+    monkeypatch.setattr(psutil, "disk_usage", lambda path: SimpleNamespace(percent=56.5))
+    metrics = system_metrics(tmp_path / "live.db")
+    assert metrics["available"] is True
+    assert [metrics[key] for key in ("cpu_percent","memory_percent","disk_percent")] == [12.5,34.5,56.5]
+    monkeypatch.setattr(psutil, "disk_usage", lambda path: (_ for _ in ()).throw(OSError("Disk unavailable")))
+    assert system_metrics(tmp_path / "live.db")["available"] is False
+
+
+def test_collector_reads_backlog_without_ten_minute_cutoff(tmp_path, monkeypatch):
+    from src.windows_collector import WindowsEventCollector
+    collector = WindowsEventCollector(tmp_path / "live.db", ingest_payloads)
+    scripts = []
+    monkeypatch.setattr(collector, "_powershell", lambda script: scripts.append(script) or "[]")
+    assert collector._new_records("System", 25) == []
+    assert "EventRecordID > 25" in scripts[0]
+    assert "-Oldest -MaxEvents 100" in scripts[0]
+    assert "NoMatchingEventsFound" in scripts[0]
+    assert "AddMinutes" not in scripts[0]
+
+
+def test_collector_retries_unavailable_channels(tmp_path, monkeypatch):
+    from src.windows_collector import WindowsEventCollector
+    collector = WindowsEventCollector(tmp_path / "live.db", ingest_payloads, channels=("System",))
+    attempts = []
+    def recent(channel):
+        attempts.append(channel)
+        if len(attempts) == 1:
+            raise RuntimeError("Temporary failure")
+        collector.stop_event.set()
+        return []
+    monkeypatch.setattr(collector, "_recent_records", recent)
+    collector._run()
+    assert len(attempts) == 2
+    assert collector.status["channels"]["System"]["state"] == "connected"
+    assert collector.status["last_error"] == ""

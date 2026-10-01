@@ -94,6 +94,11 @@ def normalise_payload(
 ) -> tuple[Any, ...]:
     """Convert a collector, API, or imported event into one database row."""
 
+    if not isinstance(payload, dict):
+        raise ValueError("Each event must be a JSON object")
+    alert = payload.get("is_alert", False)
+    if not isinstance(alert, bool):
+        raise ValueError("is_alert must be a JSON boolean")
     message = str(payload.get("message") or payload.get("event") or "").strip()
     if not message:
         raise ValueError("Event payload needs a 'message' or 'event' value")
@@ -115,7 +120,7 @@ def normalise_payload(
         message,
         str(payload.get("record_id") or "").strip(),
         str(payload.get("source") or source_default).strip(),
-        1 if bool(payload.get("is_alert")) else 0,
+        1 if alert else 0,
         str(payload.get("rule_name") or "").strip(),
         str(raw_log),
         str(payload.get("external_id") or "").strip(),
@@ -177,7 +182,14 @@ def parse_event_file(filename: str, content: bytes) -> list[dict[str, Any]]:
         return rows
 
     if suffix == ".csv":
-        return [dict(row) for row in csv.DictReader(io.StringIO(text))]
+        rows = [dict(row) for row in csv.DictReader(io.StringIO(text))]
+        for row in rows:
+            if "is_alert" in row:
+                value = str(row["is_alert"]).strip().lower()
+                if value not in {"true", "false", "1", "0", ""}:
+                    raise ValueError("CSV is_alert must be true, false, 1, or 0")
+                row["is_alert"] = value in {"true", "1"}
+        return rows
 
     raise ValueError("Supported imports: .json, .jsonl, .ndjson, and .csv")
 
@@ -461,6 +473,25 @@ def dashboard_snapshot(
     }
 
 
+def system_metrics(db_path: Path) -> dict[str, Any]:
+    """Measure the machine running the collector; report failures explicitly."""
+    import socket
+
+    try:
+        import psutil
+
+        return {
+            "available": True,
+            "host": socket.gethostname(),
+            "cpu_percent": psutil.cpu_percent(interval=0.1),
+            "memory_percent": psutil.virtual_memory().percent,
+            "disk_percent": psutil.disk_usage(str(db_path.resolve().parent)).percent,
+            "sampled_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except (ImportError, OSError, RuntimeError) as exc:
+        return {"available": False, "host": socket.gethostname(), "error": str(exc)}
+
+
 def dashboard_app(db_path: Path, collector_status: dict[str, Any] | None = None):
     """Create the Flask application."""
 
@@ -478,6 +509,16 @@ def dashboard_app(db_path: Path, collector_status: dict[str, Any] | None = None)
         static_folder=str(source_dir / "static"),
     )
     app.config["MAX_CONTENT_LENGTH"] = 3_000_000
+    # Prepare WAL and schema before concurrent dashboard/ingestion requests arrive.
+    get_connection(db_path).close()
+
+    @app.errorhandler(ValueError)
+    def invalid_input(error):
+        return jsonify({"error": str(error)}), 400
+
+    @app.errorhandler(413)
+    def too_large(error):
+        return jsonify({"error": "Import file is too large. Keep it under 3 MB."}), 413
 
     @app.get("/")
     def index():
@@ -511,6 +552,7 @@ def dashboard_app(db_path: Path, collector_status: dict[str, Any] | None = None)
             "last_error": "",
             "last_poll": "",
         }
+        snapshot["system"] = system_metrics(db_path)
         return jsonify(snapshot)
 
     @app.post("/api/events")

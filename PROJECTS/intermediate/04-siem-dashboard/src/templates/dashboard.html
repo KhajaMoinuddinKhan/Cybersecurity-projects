@@ -7,12 +7,18 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
 </head>
 <body>
-<main class="shell">
+<a class="skip-link" href="#overview">Skip to dashboard</a>
+<aside class="sidebar" aria-label="Dashboard navigation">
+  <a class="brand-mark" href="#overview" aria-label="MKMK overview">M</a>
+  <nav><a href="#overview"><span>◈</span>Overview</a><a href="#alerts"><span>△</span>Alerts</a><a href="#sources"><span>▤</span>Sources</a><a href="#health"><span>▧</span>Health</a><a href="#events"><span>≡</span>Events</a><a href="#ingestion"><span>⇥</span>Import</a></nav>
+  <span class="sidebar-label">MKMK</span>
+</aside>
+<main class="shell" id="overview">
   <header class="topbar">
     <div>
       <div class="eyebrow">MKMK // LIVE SECURITY OPERATIONS</div>
-      <h1>Live SIEM Console</h1>
-      <p>Windows Event Log telemetry, security-rule alerts, filtering, provider activity, and event triage from the local machine.</p>
+      <h1><span>MKMK</span> SIEM Dashboard</h1>
+      <p>Live SIEM Console · Security monitoring, event triage and system visibility</p>
     </div>
     <div class="status-area">
       <button id="live-toggle" class="live-toggle active" type="button"><span class="pulse"></span><span id="live-label">LIVE</span></button>
@@ -21,13 +27,7 @@
     </div>
   </header>
 
-  <section class="stats-grid">
-    <article class="stat-card"><span>Total events</span><strong id="count-total">--</strong><small>Current filtered event set</small></article>
-    <article class="stat-card alert"><span>Security alerts</span><strong id="count-alerts">--</strong><small>Events matching security rules</small></article>
-    <article class="stat-card high"><span>High severity</span><strong id="count-high">--</strong><small>High-severity matching events</small></article>
-    <article class="stat-card rate"><span>Events / minute</span><strong id="count-rate">--</strong><small>Events received in the last minute</small></article>
-  </section>
-
+  <p id="connection-notice" class="connection-notice" role="status" hidden></p>
   <section class="panel filters-panel">
     <div class="panel-heading">
       <div><span class="kicker">LIVE FILTERS</span><h2>Investigation workspace</h2></div>
@@ -52,12 +52,19 @@
     </div>
   </section>
 
+  <section class="stats-grid">
+    <article class="stat-card"><span>Total events</span><strong id="count-total">--</strong><small>Current filtered event set</small></article>
+    <article class="stat-card alert"><span>Security alerts</span><strong id="count-alerts">--</strong><small>Events matching security rules</small></article>
+    <article class="stat-card high"><span>High severity</span><strong id="count-high">--</strong><small>High-severity matching events</small></article>
+    <article class="stat-card rate"><span>Events / minute</span><strong id="count-rate">--</strong><small>Events received in the last minute</small></article>
+  </section>
+
   <section class="analytics-grid">
     <article class="panel timeline-panel">
       <div class="panel-heading"><div><span class="kicker">01 / EVENT VOLUME</span><h2>Live activity timeline</h2></div><span class="mini-chip" id="visible-count">0 visible</span></div>
       <div id="timeline" class="timeline"><div class="empty-inline">Waiting for live events</div></div>
     </article>
-  <section class="panel collector-panel">
+  <section class="panel collector-panel" id="sources">
     <div class="panel-heading">
       <div><span class="kicker">02 / COLLECTOR HEALTH</span><h2>Windows Event Log channels</h2></div>
       <div class="collector-total"><span>Collector activity</span><strong id="collector-ingested">0</strong></div>
@@ -66,6 +73,15 @@
     <p id="collector-error" class="collector-error"></p>
   </section>
 
+    <article class="panel volume-panel">
+      <div class="panel-heading"><div><span class="kicker">LOG VOLUME</span><h2>Events per active minute</h2></div><span class="mini-chip">UTC</span></div>
+      <div id="log-volume" class="volume-chart"><div class="empty-inline">Waiting for events</div></div>
+    </article>
+    <article class="panel health-panel" id="health">
+      <div class="panel-heading"><div><span class="kicker">SERVER HEALTH</span><h2 id="system-host">Collector machine</h2></div><span class="mini-chip" id="system-status">Waiting</span></div>
+      <div class="health-metrics"><div><span>CPU usage</span><strong id="system-cpu">--</strong><meter id="cpu-meter" min="0" max="100" value="0" aria-label="CPU usage"></meter></div><div><span>Memory used</span><strong id="system-memory">--</strong><meter id="memory-meter" min="0" max="100" value="0" aria-label="Memory usage"></meter></div><div><span>Disk used</span><strong id="system-disk">--</strong><meter id="disk-meter" min="0" max="100" value="0" aria-label="Disk usage"></meter></div></div>
+      <p id="system-note" class="chart-note">Waiting for measurements</p>
+    </article>
     <article class="panel sources-panel">
       <div class="panel-heading"><div><span class="kicker">03 / LOG SOURCES</span><h2>Windows providers</h2></div><span class="mini-chip">By volume</span></div>
       <div id="top-providers" class="rank-list"><div class="empty-inline">No provider data yet</div></div>
@@ -76,13 +92,13 @@
       <div class="severity-legend"><div><i class="dot-high"></i>High <b id="ring-high">--</b></div><div><i class="dot-medium"></i>Medium <b id="ring-medium">--</b></div><div><i class="dot-low"></i>Low <b id="ring-low">--</b></div></div></div>
       <p class="chart-note" id="severity-note">Waiting for event data</p>
     </article>
+  </section>
+
     <article class="panel frequency-panel">
       <div class="panel-heading"><div><span class="kicker">05 / EVENT FREQUENCY</span><h2>Top Event IDs</h2></div></div>
       <div id="top-event-ids" class="rank-list"><div class="empty-inline">No Event IDs yet</div></div>
     </article>
-  </section>
-
-  <section class="panel alert-panel">
+  <section class="panel alert-panel" id="alerts">
     <div class="panel-heading">
       <div><span class="kicker">DETECTION QUEUE</span><h2>Security-rule alerts</h2></div>
       <span class="mini-chip" id="alert-visible">0 alerts</span>
@@ -95,10 +111,10 @@
     </div>
   </section>
 
-  <section class="panel event-panel">
+  <section class="panel event-panel" id="events">
     <div class="panel-heading event-heading">
       <div><span class="kicker">LIVE EVENT STREAM</span><h2>Windows events</h2></div>
-      <div class="feed-state"><span class="pulse"></span><span id="feed-text">Refreshing every 1.5 seconds</span></div>
+      <button id="export-events" type="button" class="ghost-button">Export current view</button><div class="feed-state"><span class="pulse"></span><span id="feed-text">Refreshing every 1.5 seconds</span></div>
     </div>
     <div class="table-wrap">
       <table>
@@ -108,7 +124,7 @@
     </div>
   </section>
 
-  <section class="panel ingest-panel">
+  <section class="panel ingest-panel" id="ingestion">
     <details>
       <summary><span><span class="kicker">EXTERNAL INGESTION</span><strong>API and event-file input</strong></span><span class="summary-hint">Optional additional log sources</span></summary>
       <div class="ingest-body">
@@ -175,12 +191,16 @@
 
   function updateSelect(id, items, placeholder, selected) {
     var node = el(id);
+    if (document.activeElement === node) return;
     var html = '<option value="">' + esc(placeholder) + '</option>';
     items.forEach(function (item) {
       html += '<option value="' + esc(item) + '">' + esc(item) + '</option>';
     });
     node.innerHTML = html;
-    if (items.indexOf(selected) !== -1) node.value = selected;
+    if (selected && items.indexOf(selected) === -1) {
+      node.innerHTML += '<option value="' + esc(selected) + '">' + esc(selected) + '</option>';
+    }
+    node.value = selected;
   }
 
   function renderCounts(data) {
@@ -222,7 +242,8 @@
     } else {
       el("channel-status").innerHTML = names.map(function (name) {
         var item = channels[name];
-        return '<div class="channel-card ' + esc(item.state) + '"><div><strong>' + esc(name) + '</strong><span>' + esc(item.state) + '</span></div><code>#' + esc(item.last_record || 0) + '</code></div>';
+        var channelState = collector.enabled ? item.state : "unavailable";
+        return '<div class="channel-card ' + esc(channelState) + '"><div><strong title="' + esc(name) + '">' + esc(name) + '</strong><span>' + esc(channelState) + '</span></div><code>' + (item.last_record ? '#' + esc(item.last_record) : '--') + '</code></div>';
       }).join("");
     }
     text("collector-error", collector.last_error || "");
@@ -257,6 +278,27 @@
       coordinates.map(function (point) {
         return '<circle cx="' + point.x + '" cy="' + point.y + '" r="4" fill="#ef3340" stroke="#ffb6bc"><title>' + esc(point.item.label) + ': ' + point.item.count + ' events</title></circle>';
       }).join("") + labels + '</svg>';
+  }
+
+  function renderVolume(items) {
+    if (!items.length) { el("log-volume").innerHTML = '<div class="empty-inline">No events for the current filters.</div>'; return; }
+    var max = Math.max.apply(null, items.map(function (item) { return item.count; }).concat([1]));
+    el("log-volume").innerHTML = items.map(function (item) {
+      return '<div class="volume-column"><span>' + item.count + '</span><div class="volume-track"><div style="height:' + item.count / max * 100 + '%"></div></div><small>' + esc(item.label.slice(11)) + '</small></div>';
+    }).join("");
+  }
+
+  function renderSystem(system) {
+    text("system-host", system.host || "Collector machine");
+    text("system-status", system.available ? "Measured" : "Unavailable");
+    [["cpu", "cpu_percent"], ["memory", "memory_percent"], ["disk", "disk_percent"]].forEach(function (field) {
+      var value = system[field[1]];
+      var measured = system.available && Number.isFinite(value);
+      text("system-" + field[0], measured ? value.toFixed(1) + "%" : "--");
+      el(field[0] + "-meter").value = measured ? value : 0;
+      el(field[0] + "-meter").hidden = !measured;
+    });
+    text("system-note", system.available ? "Measured on the machine running this SIEM" : (system.error || "System metrics unavailable"));
   }
 
   function renderRanking(id, items) {
@@ -351,10 +393,14 @@
       var data = await response.json();
       if (requestId !== state.requestId) return;
 
+      el("connection-notice").hidden = true;
+      text("feed-text", state.live ? "Connected · refreshing every 1.5 seconds" : "Live refresh paused");
       state.events.clear();
       renderCounts(data);
       renderCollector(data.collector || {});
       renderTimeline(data.timeline);
+      renderVolume(data.timeline);
+      renderSystem(data.system || {});
       renderRanking("top-providers", data.top_providers);
       renderRanking("top-event-ids", data.top_event_ids);
       renderAlerts(data.alerts);
@@ -368,6 +414,9 @@
       text("last-updated", new Date(data.generated_at).toLocaleTimeString());
     } catch (error) {
       text("collector-state", "connection error");
+      text("feed-text", "Disconnected · displayed values may be stale");
+      text("connection-notice", "Connection lost. Displayed values are from the last successful update. Retrying while live refresh is enabled.");
+      el("connection-notice").hidden = false;
       console.error(error);
     }
   }
@@ -417,6 +466,7 @@
     el("live-toggle").classList.toggle("active", state.live);
     text("live-label", state.live ? "LIVE" : "PAUSED");
     text("feed-text", state.live ? "Refreshing every 1.5 seconds" : "Live refresh paused");
+    ++state.requestId;
     clearInterval(state.timer);
     if (state.live) {
       refresh();
@@ -424,20 +474,41 @@
     }
   });
 
+  el("export-events").addEventListener("click", function () {
+    var fields = ["timestamp","severity","channel","event_id","provider","message","username","host","source_ip","is_alert","rule_name"];
+    var bodyRows = Array.from(el("event-body").querySelectorAll("button[data-id]"));
+    var events = bodyRows.map(function (button) { return state.events.get(String(button.dataset.id)); }).filter(Boolean);
+    var csv = [fields.join(",")].concat(events.map(function (event) {
+      return fields.map(function (field) {
+        var value = String(event[field] == null ? "" : event[field]);
+        if (/^[=+@\-]/.test(value)) value = "'" + value;
+        return '"' + value.replace(/"/g, '""') + '"';
+      }).join(",");
+    })).join("\r\n");
+    var url = URL.createObjectURL(new Blob([csv], {type:"text/csv;charset=utf-8"}));
+    var link = document.createElement("a"); link.href = url; link.download = "siem-current-view.csv"; link.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  });
+
   el("file-form").addEventListener("submit", async function (event) {
     event.preventDefault();
-    var response = await fetch("/api/import", {method:"POST", body:new FormData(event.currentTarget)});
-    var data = await response.json();
-    text("ingest-message", response.ok ? "Imported " + data.inserted + " events." : data.error);
-    if (response.ok) { event.currentTarget.reset(); refresh(); }
+    var form = event.currentTarget;
+    try {
+      var response = await fetch("/api/import", {method:"POST", body:new FormData(form)});
+      var data = await response.json();
+      text("ingest-message", response.ok ? "Imported " + data.inserted + " events." : data.error);
+      if (response.ok) { form.reset(); refresh(); }
+    } catch (error) { text("ingest-message", "Import failed: connection unavailable."); }
   });
 
   el("clear-events").addEventListener("click", async function () {
     if (!confirm("Clear all collected events from siem_live.db? New Windows events will continue arriving.")) return;
-    var response = await fetch("/api/events/clear", {method:"POST"});
-    var data = await response.json();
-    text("ingest-message", data.cleared ? "Live event store cleared." : "Could not clear event store.");
-    refresh();
+    try {
+      var response = await fetch("/api/events/clear", {method:"POST"});
+      var data = await response.json();
+      text("ingest-message", response.ok && data.cleared ? "Live event store cleared." : (data.error || "Could not clear event store."));
+      if (response.ok) refresh();
+    } catch (error) { text("ingest-message", "Clear failed: connection unavailable."); }
   });
 
   el("close-dialog").addEventListener("click", function () { el("event-dialog").close(); });
@@ -451,4 +522,3 @@
 </script>
 </body>
 </html>
-

@@ -262,21 +262,24 @@ class WindowsEventCollector:
 
     def _recent_records(self, channel: str) -> list[dict[str, Any]]:
         script = (
+            "$ErrorActionPreference='Stop';try {"
             f"@(Get-WinEvent -LogName '{channel}' -MaxEvents {self.backfill_per_channel} "
             "-ErrorAction Stop | Sort-Object RecordId | "
             + self._projection()
             + ") | ConvertTo-Json -Depth 5 -Compress"
+            + "} catch {if($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*'){ '[]' }else{throw}}"
         )
         return self._decode_records(self._powershell(script))
 
     def _new_records(self, channel: str, after_record_id: int) -> list[dict[str, Any]]:
         script = (
-            f"@(Get-WinEvent -FilterHashtable @{{LogName='{channel}';"
-            "StartTime=(Get-Date).AddMinutes(-10)}} -ErrorAction Stop | "
-            f"Where-Object {{$_.RecordId -gt {after_record_id}}} | "
-            "Sort-Object RecordId | Select-Object -First 100 | "
+            "$ErrorActionPreference='Stop';try {"
+            f"@(Get-WinEvent -LogName '{channel}' "
+            f"-FilterXPath '*[System[EventRecordID > {after_record_id}]]' "
+            "-Oldest -MaxEvents 100 -ErrorAction Stop | Sort-Object RecordId | "
             + self._projection()
             + ") | ConvertTo-Json -Depth 5 -Compress"
+            + "} catch {if($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*'){ '[]' }else{throw}}"
         )
         return self._decode_records(self._powershell(script))
 
@@ -331,12 +334,15 @@ class WindowsEventCollector:
 
         while not self.stop_event.is_set():
             for channel in self.channels:
-                if self.status["channels"][channel]["state"] != "connected":
-                    continue
-
                 try:
-                    records = self._new_records(channel, self.cursors.get(channel, 0))
+                    records = (
+                        self._new_records(channel, self.cursors[channel])
+                        if channel in self.cursors else self._recent_records(channel)
+                    )
                     self._ingest_records(channel, records, backfill=False)
+                    self.cursors.setdefault(channel, 0)
+                    self.status["channels"][channel]["state"] = "connected"
+                    self.status["channels"][channel]["error"] = ""
                 except (
                     RuntimeError,
                     ValueError,
@@ -345,9 +351,12 @@ class WindowsEventCollector:
                     OSError,
                 ) as exc:
                     self.status["channels"][channel]["state"] = "error"
+                    self.status["channels"][channel]["error"] = str(exc)
                     self.status["last_error"] = f"{channel}: {exc}"
 
             self.status["last_poll"] = datetime.now(timezone.utc).isoformat()
+            if all(item["state"] == "connected" for item in self.status["channels"].values()):
+                self.status["last_error"] = ""
             self.stop_event.wait(self.interval)
 
         self.status["running"] = False

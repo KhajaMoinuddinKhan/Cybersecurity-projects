@@ -1,5 +1,3 @@
 # Overview
 
-MKMK SIEM Dashboard is a local Flask application backed by SQLite. It stores synthetic security events, normalizes severity values, supports text and severity filters, and displays event counts with a readable analyst view.
-
-The source code in `src/` contains the implementation.
+MKMK Live SIEM collects real Windows Event Logs, stores normalized records in SQLite, and updates a black-and-red analyst dashboard. It starts empty unless real records are available. API and file ingestion support additional actual log sources.

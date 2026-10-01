@@ -1,8 +1,8 @@
 # Implementation
 
-- `SAMPLE_EVENTS` is the single source for the demo data.
-- `normalise_severity()` accepts supported values in a consistent form.
-- `reset_events()` clears stored rows and restarts the local event ID sequence.
-- `query_events()` builds parameterized filters and escapes literal search characters.
-- `severity_counts()` reads grouped counts and the full row total from SQLite.
-- `dashboard_app()` connects the data layer to the Flask routes and template.
+- windows_collector.py converts native records, extracts EventData, and applies security rules.
+- ingest_payloads validates a complete batch before inserting it.
+- dashboard_snapshot queries live counts, provider rankings and minute buckets.
+- system_metrics reads psutil measurements and reports unavailable data.
+- dashboard.html implements filters, charts, event details, export, import and pause/resume.
+- The production application inserts no generated sample records. Tests use isolated temporary databases.
