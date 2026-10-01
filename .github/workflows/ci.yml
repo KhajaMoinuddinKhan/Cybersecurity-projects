@@ -39,3 +39,20 @@ jobs:
       - name: Run tests
         working-directory: ${{ matrix.project }}
         run: PYTHONPATH=. pytest -q tests
+
+  windows-siem:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: PROJECTS/intermediate/04-siem-dashboard
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install SIEM dependencies
+        run: python -m pip install pytest -r requirements.txt
+      - name: Compile SIEM source
+        run: python -m compileall -q src
+      - name: Test SIEM controls and native Windows Event Logs
+        run: python -m pytest -q tests
