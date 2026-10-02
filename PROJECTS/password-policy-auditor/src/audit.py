@@ -45,6 +45,8 @@ def parse_policy(path: Path) -> dict[str, object]:
             raise ValueError(f"Line {line_number}: expected key=value")
 
         key, value = (part.strip() for part in stripped.split("=", 1))
+        # Keys are documented as case-insensitive, so normalise before lookup.
+        key = key.lower()
         lowered = value.lower()
 
         if lowered in {"true", "false"}:

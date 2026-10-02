@@ -67,6 +67,28 @@ def load_scapy_layers() -> None:
     from scapy.layers.inet6 import IPv6  # noqa: F401
 
 
+def outer_network_layer(packet: Any) -> Any:
+    """Return the packet's own outermost IP or IPv6 layer, or None.
+
+    Scapy's ``packet[IP]`` returns the first IPv4 layer wherever it sits, so a
+    capture whose outer header is IPv6 but that carries an IPv4 tunnel would
+    hand back the inner header. Walking the layers in order keeps the outermost
+    one, which is the header that describes the packet on the wire.
+    """
+    from scapy.layers.inet import IP
+    from scapy.layers.inet6 import IPv6
+
+    layer = packet
+    while layer is not None:
+        if isinstance(layer, (IP, IPv6)):
+            return layer
+        following = getattr(layer, "payload", None)
+        if following is layer:
+            return None
+        layer = following
+    return None
+
+
 def packet_transport(packet: Any) -> Any:
     """Return the packet's own transport layer, or None.
 
@@ -77,7 +99,7 @@ def packet_transport(packet: Any) -> Any:
     from scapy.layers.inet import IP, TCP, UDP
     from scapy.layers.inet6 import IPv6
 
-    network = packet[IP] if IP in packet else (packet[IPv6] if IPv6 in packet else None)
+    network = outer_network_layer(packet)
     layer = network.payload if network is not None else None
     while layer is not None:
         if isinstance(layer, (TCP, UDP)):
@@ -116,15 +138,16 @@ def dns_question_names(dns_layer: Any) -> tuple[str, ...]:
 
 def packet_record(packet: Any) -> PacketRecord:
     """Extract the fields used by the report from one Scapy packet."""
-    from scapy.layers.dns import DNS, DNSQR
-    from scapy.layers.inet import IP, TCP, UDP
+    from scapy.layers.dns import DNS
+    from scapy.layers.inet import TCP, UDP
     from scapy.layers.inet6 import IPv6
 
+    # The packet's own (outermost) network layer gives the addresses; an inner
+    # header quoted by an ICMP error or carried in a tunnel is payload.
+    network = outer_network_layer(packet)
     source = destination = None
-    if IP in packet:
-        source, destination = packet[IP].src, packet[IP].dst
-    elif IPv6 in packet:
-        source, destination = packet[IPv6].src, packet[IPv6].dst
+    if network is not None:
+        source, destination = network.src, network.dst
 
     # Only the packet's own transport counts; a header quoted by an ICMP error
     # or carried inside a tunnel belongs to a different packet.
@@ -136,7 +159,7 @@ def packet_record(packet: Any) -> PacketRecord:
     elif isinstance(transport, UDP):
         protocol, port = "UDP", port_number(transport.dport)
     elif source:
-        protocol = "IPv6" if IPv6 in packet else "IP"
+        protocol = "IPv6" if isinstance(network, IPv6) else "IP"
 
     questions: tuple[str, ...] = ()
     if transport is not None and DNS in transport and transport[DNS].qr == 0:
@@ -159,6 +182,19 @@ def analyze_pcap(path: Path) -> dict[str, Any]:
         raise ValueError(f"Could not read PCAP {path}: {exc}") from exc
 
 
+def printable(value: Any) -> str:
+    """Render a captured name so it cannot drive the terminal.
+
+    Host names and DNS questions come from the capture, so they are attacker
+    controlled. Printed raw, a name carrying control or escape characters could
+    rewrite what the analyst sees; unprintable characters are shown escaped
+    instead. The --json report escapes the same characters itself.
+    """
+
+    text = str(value)
+    return "".join(character if character.isprintable() else f"\\x{ord(character):02x}" for character in text)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Summarize a real PCAP without retaining all packets in memory.")
     parser.add_argument("pcap", type=Path)
@@ -174,7 +210,7 @@ def main() -> None:
     for title, key in (("Protocols", "protocols"), ("Top sources", "top_sources"), ("Top destinations", "top_destinations"), ("Destination ports", "destination_ports"), ("DNS queries", "dns_queries")):
         print(f"\n{title}:")
         if not report[key]: print("  No observed values.")
-        for value, count in report[key].items(): print(f"  {value}: {count}")
+        for value, count in report[key].items(): print(f"  {printable(value)}: {count}")
 
 
 if __name__ == "__main__":

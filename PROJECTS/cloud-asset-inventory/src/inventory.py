@@ -61,7 +61,11 @@ def review_assets(
 def load_assets(path: Path) -> list[dict[str, Any]]:
     """Load the asset JSON file."""
 
-    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except RecursionError as exc:
+        # A deeply nested document must fail with a message, not a traceback.
+        raise ValueError("JSON is nested too deeply") from exc
 
     if not isinstance(data, dict) or not isinstance(data.get("assets"), list):
         raise ValueError("Expected JSON object with an assets list.")

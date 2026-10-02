@@ -20,6 +20,32 @@ def sha256_file(path: Path) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
+def files_under(folder: Path) -> list[Path]:
+    """Return every file under a folder without walking a directory twice.
+
+    ``rglob`` follows a Windows junction because a junction is not reported as a
+    symlink, so a junction that points at one of its own ancestors would repeat
+    the same files under ever-longer paths. Tracking the resolved ancestor chain
+    keeps the walk finite without changing which links are followed.
+    """
+
+    found: list[Path] = []
+
+    def walk(directory: Path, ancestors: frozenset[Path]) -> None:
+        real = directory.resolve()
+        if real in ancestors:
+            return
+        ancestors = ancestors | {real}
+        for entry in sorted(directory.iterdir()):
+            if entry.is_dir() and not entry.is_symlink():
+                walk(entry, ancestors)
+            elif entry.is_file():
+                found.append(entry)
+
+    walk(folder, frozenset())
+    return found
+
+
 def build_baseline(folder: Path, *, exclude: Path | None = None) -> dict[str, dict[str, Any]]:
     """Build a baseline for every file in a folder."""
 
@@ -28,8 +54,8 @@ def build_baseline(folder: Path, *, exclude: Path | None = None) -> dict[str, di
     baseline: dict[str, dict[str, Any]] = {}
 
     # Sorting keeps the saved baseline in a stable order.
-    for path in sorted(folder.rglob("*")):
-        if path.is_file() and path.resolve() != excluded:
+    for path in sorted(files_under(folder)):
+        if path.resolve() != excluded:
             relative_path = path.relative_to(folder).as_posix()
             baseline[relative_path] = {
                 "sha256": sha256_file(path),

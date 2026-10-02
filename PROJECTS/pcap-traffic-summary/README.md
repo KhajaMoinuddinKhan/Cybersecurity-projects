@@ -56,6 +56,8 @@ Two details are worth knowing because they are easy to get wrong:
 
 Packets with no transport layer of their own are counted as `IP` (IPv4 or IPv6) or `OTHER` (ARP and anything else unrecognised).
 
+A name that carries control characters is printed escaped, so a crafted capture cannot clear your screen or rewrite what you see. The JSON report escapes the same characters itself.
+
 ## What it cannot tell you
 
 A frequent address or port is a lead, not a conclusion. The summary describes what was recorded and nothing more: encrypted payloads stay encrypted, and traffic that was never captured cannot appear. A capture taken at one point on one machine is a partial view of the network, and reading it as a complete record is the most common way to draw the wrong conclusion.

@@ -99,7 +99,11 @@ def audit_container(info: dict[str, Any]) -> list[tuple[str, str]]:
 
 def load_json(path: Path) -> list[dict[str, Any]]:
     """Load every container from Docker's list or a single inspect object."""
-    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except RecursionError as exc:
+        # A deeply nested document must fail with a message, not a traceback.
+        raise ValueError("JSON is nested too deeply") from exc
     if isinstance(data, dict):
         return [data]
     if not isinstance(data, list) or not data or not all(isinstance(item, dict) for item in data):

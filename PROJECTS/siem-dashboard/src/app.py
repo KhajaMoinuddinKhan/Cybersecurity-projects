@@ -111,6 +111,9 @@ def normalise_payload(
     raw_log = payload.get("raw_log")
     if raw_log is None:
         raw_log = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    elif not isinstance(raw_log, str):
+        # Keep a supplied structured raw record as JSON, not a Python repr.
+        raw_log = json.dumps(raw_log, ensure_ascii=False, sort_keys=True)
 
     return (
         normalise_timestamp(payload.get("timestamp")),
@@ -227,6 +230,12 @@ def reset_events(db_path: Path) -> None:
 
 def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _as_bool(value: str | None) -> bool:
+    """Accept the common true spellings for a boolean query parameter."""
+
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _filters(
@@ -560,7 +569,7 @@ def dashboard_app(db_path: Path, collector_status: dict[str, Any] | None = None)
         since_text = request.args.get("since", "").strip()
         since_minutes = None
         if since_text:
-            if not since_text.isdigit():
+            if not since_text.isascii() or not since_text.isdigit():
                 return jsonify({"error": "since must be a whole number of minutes"}), 400
             since_minutes = int(since_text)
             if since_minutes > MAX_SINCE_MINUTES:
@@ -577,7 +586,7 @@ def dashboard_app(db_path: Path, collector_status: dict[str, Any] | None = None)
             event_id=request.args.get("event_id") or None,
             username=request.args.get("username") or None,
             since_minutes=since_minutes,
-            alerts_only=request.args.get("alerts") == "1",
+            alerts_only=_as_bool(request.args.get("alerts")),
         )
         snapshot["collector"] = collector_status or {
             "enabled": False,

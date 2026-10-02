@@ -52,6 +52,7 @@ The packet handling follows the same rules as the summary tool:
 - Only the packet's own outer transport decides the protocol, the destination port, and any DNS name. A header quoted inside an ICMP error, or carried inside an IP tunnel, is payload and is ignored.
 - Every DNS question in a packet is counted, not just the first.
 - Packets with no transport of their own are counted as `IP`, `IPv6`, or `OTHER`.
+- A name that carries control characters is printed escaped, so a crafted capture cannot rewrite your terminal; the `--json` report escapes them as `\u001b` in the usual way.
 
 One ordering detail matters if you ever extend this code: Scapy only knows how to map a capture's link type (DLT 1 to Ethernet, for example) once the matching layer module has been imported. If the reader is created before that happens, it silently falls back to raw bytes and every packet is reported as `OTHER` with no addresses or ports at all. `analyze_pcap()` therefore imports the layer modules first, and a test runs the documented command in a fresh interpreter so the ordering cannot regress.
 

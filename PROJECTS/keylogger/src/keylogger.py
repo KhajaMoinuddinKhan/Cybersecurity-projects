@@ -124,8 +124,18 @@ def record_session(output: Path, *, stop_key: str = "ESC", keys: Iterator[str] |
         require_interactive_terminal()  # before the output file is created
     source = keys if keys is not None else iter_terminal_keys()
     output.parent.mkdir(parents=True, exist_ok=True)
+    # Appending to a file whose last line has no newline would join the
+    # first new event onto that line and break the one-event-per-line JSONL.
+    separator = ""
+    if output.is_file() and output.stat().st_size:
+        with output.open("rb") as existing:
+            existing.seek(-1, os.SEEK_END)
+            if existing.read(1) != b"\n":
+                separator = "\n"
     count = 0
     with output.open("a", encoding="utf-8") as handle:
+        if separator:
+            handle.write(separator)
         try:
             for raw_key in source:
                 key = display_key(raw_key)

@@ -48,6 +48,29 @@ def port_number(value: Any) -> int | None:
         return None
 
 
+def outer_network_layer(packet: Any) -> Any:
+    """Return the packet's own outermost IP or IPv6 layer, or None.
+
+    Scapy's ``packet[IP]`` returns the first IPv4 layer wherever it sits, so a
+    capture whose outer header is IPv6 but that carries an IPv4 tunnel would
+    hand back the inner header. Walking the layers in order keeps the outermost
+    one, which is the header that describes the packet on the wire.
+    """
+
+    from scapy.layers.inet import IP
+    from scapy.layers.inet6 import IPv6
+
+    layer = packet
+    while layer is not None:
+        if isinstance(layer, (IP, IPv6)):
+            return layer
+        following = getattr(layer, "payload", None)
+        if following is layer:
+            return None
+        layer = following
+    return None
+
+
 def packet_transport(packet: Any) -> Any:
     """Return the packet's own transport layer, or None.
 
@@ -59,7 +82,7 @@ def packet_transport(packet: Any) -> Any:
     from scapy.layers.inet import IP, TCP, UDP
     from scapy.layers.inet6 import IPv6
 
-    network = packet[IP] if IP in packet else (packet[IPv6] if IPv6 in packet else None)
+    network = outer_network_layer(packet)
     layer = network.payload if network is not None else None
     while layer is not None:
         if isinstance(layer, (TCP, UDP)):
@@ -104,17 +127,17 @@ def packet_to_record(packet: Any) -> TrafficRecord:
     """Pull the fields we need from one Scapy packet."""
 
     # Import Scapy here so the summary code can load without it.
-    from scapy.layers.dns import DNS, DNSQR
-    from scapy.layers.inet import IP, TCP, UDP
-    from scapy.layers.inet6 import IPv6
+    from scapy.layers.dns import DNS
+    from scapy.layers.inet import TCP, UDP
 
     source = destination = None
 
-    # Use IPv4 first, then fall back to IPv6.
-    if IP in packet:
-        source, destination = packet[IP].src, packet[IP].dst
-    elif IPv6 in packet:
-        source, destination = packet[IPv6].src, packet[IPv6].dst
+    # The packet's own (outermost) network layer gives the addresses. An inner
+    # header quoted by an ICMP error or carried in a tunnel is payload, not the
+    # packet's own addressing.
+    network = outer_network_layer(packet)
+    if network is not None:
+        source, destination = network.src, network.dst
 
     # Only the packet's own transport counts; a header quoted by an ICMP error
     # or carried inside a tunnel belongs to a different packet.
@@ -128,7 +151,8 @@ def packet_to_record(packet: Any) -> TrafficRecord:
     elif isinstance(transport, UDP):
         protocol, destination_port = "UDP", port_number(transport.dport)
     elif source:
-        protocol = "IPv6" if IPv6 in packet else "IP"
+        # No transport of its own: IPv4 and IPv6 traffic are both counted as IP.
+        protocol = "IP"
 
     # Keep the DNS names when the packet's own transport carries a query.
     questions: tuple[str, ...] = ()
@@ -157,27 +181,46 @@ def analyse_pcap(path: Path) -> dict[str, Any]:
         raise ValueError(f"Could not read capture {path}: {exc}") from exc
     return summarize_records(packet_to_record(packet) for packet in packets)
 
+def printable(value: Any) -> str:
+    """Render a captured name so it cannot drive the terminal.
+
+    A host name or DNS question in a capture is attacker-controlled data. Printed
+    raw, a name carrying escape or control characters could clear the screen or
+    rewrite what the analyst sees. Anything unprintable is shown as an escape
+    sequence instead, and the JSON report escapes the same characters itself.
+    """
+
+    text = str(value)
+    return "".join(character if character.isprintable() else f"\\x{ord(character):02x}" for character in text)
+
+
 def print_summary(summary: dict[str, Any]) -> None:
     """Print the traffic summary."""
 
     print(f"Packets analysed: {summary['packet_count']}")
 
     print("\nProtocols:")
+    if not summary["protocols"]:
+        print("  No observed values")
     for name, count in summary["protocols"].most_common():
-        print(f"  {name}: {count}")
+        print(f"  {printable(name)}: {count}")
 
     print("\nTop source hosts:")
+    if not summary["source_hosts"]:
+        print("  No observed values")
     for host, count in summary["source_hosts"].most_common(10):
-        print(f"  {host}: {count} packets")
+        print(f"  {printable(host)}: {count} packets")
 
     print("\nTop destination ports:")
+    if not summary["destination_ports"]:
+        print("  No observed values")
     for port, count in summary["destination_ports"].most_common(10):
         print(f"  {port}: {count} packets")
 
     if summary["dns_queries"]:
         print("\nDNS queries:")
         for query in summary["dns_queries"][:20]:
-            print(f"  {query}")
+            print(f"  {printable(query)}")
 
 def main() -> None:
     """Read the command-line arguments and run the analyzer."""
