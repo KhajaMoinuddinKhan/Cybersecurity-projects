@@ -1,0 +1,89 @@
+# Correlation rules.
+#
+# These do not judge a single event. They fire when two rules match in order, on
+# the same host, inside a time window. This is the part a single-event rule
+# cannot express, and it is where most of the real signal lives.
+rules:
+  - id: corr-powershell-then-egress
+    type: correlation
+    title: Encoded PowerShell followed by an outbound connection
+    level: High
+    description: >-
+      An encoded PowerShell command ran, and within two minutes the same host
+      opened a connection to a remote address. Neither half is conclusive on its
+      own; together they describe a download or a command channel.
+    group_by: host
+    window_seconds: 120
+    steps:
+      - rule: win-suspicious-powershell-script-block
+      - rule: sysmon-network-connection-to-remote-port
+    falsepositives:
+      - A management agent that runs encoded commands and then talks to its
+        server, which is common.
+    tags:
+      - attack.execution
+      - attack.command_and_control
+      - attack.t1059.001
+      - attack.t1071.001
+
+  - id: corr-bruteforce-then-lockout
+    type: correlation
+    title: Repeated failed logons followed by a lockout
+    level: High
+    description: >-
+      Several failed logons against the same account, then a lockout. That is
+      the shape of a password guessing run rather than a user who forgot.
+    group_by: username
+    window_seconds: 300
+    min_steps: 3
+    steps:
+      - rule: win-failed-logon
+      - rule: win-failed-logon
+      - rule: win-account-locked-out
+    falsepositives:
+      - A user with a stale saved credential retrying in a loop.
+    tags:
+      - attack.credential_access
+      - attack.t1110
+      - attack.t1078
+
+  - id: corr-new-account-then-privilege
+    type: correlation
+    title: New account created and then given privileges
+    level: High
+    description: >-
+      An account was created and then added to a group within ten minutes. This
+      is the sequence used to leave a durable way back in.
+    group_by: host
+    window_seconds: 600
+    steps:
+      - rule: win-account-created
+      - rule: win-privileged-group-local
+    falsepositives:
+      - An automated onboarding process that creates an account and grants
+        access in the same transaction.
+    tags:
+      - attack.persistence
+      - attack.t1136.001
+      - attack.t1098.007
+
+  - id: corr-log-cleared-after-service
+    type: correlation
+    title: Service installed and then the audit log cleared
+    level: High
+    description: >-
+      A service was installed and the Security log was cleared shortly after.
+      Either half alone is a finding; this order is the behaviour of someone
+      covering their tracks.
+    group_by: host
+    window_seconds: 900
+    steps:
+      - rule: win-service-installed
+      - rule: win-audit-log-cleared
+    falsepositives:
+      - An administrator installing software and then clearing the log during a
+        documented maintenance window.
+    tags:
+      - attack.defense_evasion
+      - attack.t1070.001
+      - attack.t1543.003

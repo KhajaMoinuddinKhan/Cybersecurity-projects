@@ -30,7 +30,7 @@ Node.js is needed for one extra check: the SIEM JavaScript controls are exercise
 | File integrity | Added, modified and removed files, a baseline stored inside the watched folder, invalid metadata, byte-order marks, upper-case digests. |
 | Terminal input | Consent enforcement, key labelling, JSONL writing, refusal when stdin is not a console, Ctrl+C handling. |
 | Offline hash recovery | Real digest comparisons, streamed wordlists, no-match results, invalid targets and unsupported algorithms. |
-| SIEM | Empty startup, event classification, deduplication, filters, JSON/JSONL/CSV import, atomic validation, metrics, collector retry logic, and the JavaScript controls. |
+| SIEM | Empty startup, Windows and Sysmon event mapping, rule loading and matching, condition operators, severity ordering, correlation sequencing, capture parsing, threat-intelligence matching, retention, schema migration, notification, authentication, deduplication, filters, JSON/JSONL/CSV import, atomic validation, metrics, collector retry logic, and the JavaScript controls. |
 | Indicator feeds | Normalisation, deduplication counts, literal search, and every malformed-input path. |
 | TLS | Certificate formatting, session behaviour with controlled sockets, and the port and timeout bounds. |
 | Policy, Docker, inventory and web review | Baseline comparisons, risky container settings, localhost boundaries, response and form checks, metadata findings. |

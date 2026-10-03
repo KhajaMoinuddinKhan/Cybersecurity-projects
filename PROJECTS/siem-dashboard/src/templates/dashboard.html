@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>MKMK Live SIEM</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  <meta name="siem-token" content="{{ auth_token or '' }}">
 </head>
 <body>
 <a class="skip-link" href="#overview">Skip to dashboard</a>
@@ -40,6 +41,7 @@
       <label><span>Provider</span><select id="filter-provider"><option value="">All providers</option></select></label>
       <label><span>Event ID</span><select id="filter-event-id"><option value="">All event IDs</option></select></label>
       <label><span>User</span><select id="filter-user"><option value="">All users</option></select></label>
+      <label><span>Rule</span><select id="filter-rule"><option value="">All rules</option></select></label>
     </div>
     <div class="filter-row">
       <div class="severity-filters">
@@ -57,6 +59,7 @@
     <article class="stat-card alert"><span>Security alerts</span><strong id="count-alerts">--</strong><small>Events matching security rules</small></article>
     <article class="stat-card high"><span>High severity</span><strong id="count-high">--</strong><small>High-severity matching events</small></article>
     <article class="stat-card rate"><span>Events / minute</span><strong id="count-rate">--</strong><small>Events timestamped in the last minute</small></article>
+    <article class="stat-card correlation"><span>Correlations</span><strong id="count-correlations">--</strong><small>Sequences matched across sources</small></article>
   </section>
 
   <section class="analytics-grid">
@@ -105,10 +108,36 @@
     </div>
     <div class="table-wrap alert-table-wrap">
       <table>
-        <thead><tr><th>Time</th><th>Severity</th><th>Rule</th><th>Event ID</th><th>User / Source IP</th><th>Provider</th><th></th></tr></thead>
-        <tbody id="alert-body"><tr><td colspan="7" class="table-empty">No security-rule alerts in the current view.</td></tr></tbody>
+        <thead><tr><th>Time</th><th>Severity</th><th>Rule</th><th>Rule ID</th><th>ATT&amp;CK</th><th>Event ID</th><th>User / Source IP</th><th></th></tr></thead>
+        <tbody id="alert-body"><tr><td colspan="8" class="table-empty">No security-rule alerts in the current view.</td></tr></tbody>
       </table>
     </div>
+  </section>
+
+  <section class="panel correlation-panel" id="correlations">
+    <div class="panel-heading">
+      <div><span class="kicker">06 / CORRELATION</span><h2>Sequences across sources</h2></div>
+      <span class="mini-chip" id="correlation-visible">0 sequences</span>
+    </div>
+    <p class="chart-note">A correlation rule fires when two detections happen in order, on the same host or user, inside a time window. The events it was built from are recorded on the alert.</p>
+    <div class="table-wrap alert-table-wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Severity</th><th>Sequence</th><th>Group</th><th>ATT&amp;CK</th><th></th></tr></thead>
+        <tbody id="correlation-body"><tr><td colspan="6" class="table-empty">No sequences matched in the current view.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="analytics-grid coverage-grid">
+    <article class="panel techniques-panel">
+      <div class="panel-heading"><div><span class="kicker">07 / ATT&amp;CK COVERAGE</span><h2>Techniques seen in alerts</h2></div><span class="mini-chip">By alert volume</span></div>
+      <div id="top-techniques" class="rank-list"><div class="empty-inline">No technique data yet</div></div>
+    </article>
+    <article class="panel rules-panel">
+      <div class="panel-heading"><div><span class="kicker">08 / DETECTIONS</span><h2>Rules that fired</h2></div><span class="mini-chip">By alert volume</span></div>
+      <div id="top-rules" class="rank-list"><div class="empty-inline">No rule hits yet</div></div>
+      <p class="chart-note" id="runtime-note">Loading rule and retention status</p>
+    </article>
   </section>
 
   <section class="panel event-panel" id="events">
@@ -136,7 +165,17 @@
             <button class="primary-button" type="submit">Import events</button>
           </form>
         </div>
+        <div>
+          <h3>Import a packet capture</h3>
+          <p>A capture is read into one event per flow, plus one per DNS name, and written into the same store as the host events so the two can be correlated.</p>
+          <form id="pcap-form" class="file-form">
+            <input type="file" name="file" accept=".pcap,.pcapng,.cap" required>
+            <button class="primary-button" type="submit">Import capture</button>
+          </form>
+          <p id="pcap-message" class="chart-note" aria-live="polite"></p>
+        </div>
         <div class="api-card"><span>JSON ingestion endpoint</span><code>POST /api/events</code><p>Use this endpoint for another local collector or log shipper.</p></div>
+        <div class="api-card"><span>Detection content</span><code>GET /api/rules</code><p>Every loaded rule, its ATT&amp;CK technique and its documented false positives.</p></div>
         <div class="danger-row"><span id="ingest-message" aria-live="polite"></span><button id="clear-events" class="danger-button" type="button">Clear live event store</button></div>
       </div>
     </details>
@@ -153,9 +192,18 @@
 (function () {
   var state = {
     severity: "", search: "", since: "", channel: "", provider: "", eventId: "",
-    username: "", alertsOnly: false, live: true, timer: null, requestId: 0,
+    username: "", ruleId: "", alertsOnly: false, live: true, timer: null, requestId: 0,
     events: new Map()
   };
+
+  var tokenMeta = document.querySelector('meta[name="siem-token"]');
+  var authToken = tokenMeta ? (tokenMeta.content || "") : "";
+
+  function authHeaders(extra) {
+    var headers = Object.assign({}, extra || {});
+    if (authToken) headers["Authorization"] = "Bearer " + authToken;
+    return headers;
+  }
 
   function el(id) { return document.getElementById(id); }
   function esc(value) {
@@ -185,6 +233,7 @@
     if (state.provider) params.set("provider", state.provider);
     if (state.eventId) params.set("event_id", state.eventId);
     if (state.username) params.set("username", state.username);
+    if (state.ruleId) params.set("rule_id", state.ruleId);
     if (state.alertsOnly) params.set("alerts", "1");
     return params.toString();
   }
@@ -208,12 +257,14 @@
     setCounter("count-alerts", data.alert_count);
     setCounter("count-high", data.counts.High);
     setCounter("count-rate", data.events_per_minute);
+    setCounter("count-correlations", data.correlation_count || 0);
     text("filter-count-all", data.filter_counts.Total);
     text("filter-count-high", data.filter_counts.High);
     text("filter-count-medium", data.filter_counts.Medium);
     text("filter-count-low", data.filter_counts.Low);
     text("visible-count", data.visible + " visible");
     text("alert-visible", data.alerts.length + " alerts");
+    text("correlation-visible", (data.correlations || []).length + " sequences");
     var total = data.counts.Total;
     var high = total ? data.counts.High / total * 100 : 0;
     var medium = total ? data.counts.Medium / total * 100 : 0;
@@ -328,19 +379,68 @@
     remember(alerts);
     var body = el("alert-body");
     if (!alerts.length) {
-      body.innerHTML = '<tr><td colspan="7" class="table-empty">No security-rule alerts in the current view.</td></tr>';
+      body.innerHTML = '<tr><td colspan="8" class="table-empty">No security-rule alerts in the current view.</td></tr>';
       return;
     }
     body.innerHTML = alerts.map(function (event) {
       return '<tr class="alert-row"><td>' + esc(event.timestamp) + '</td>' +
         '<td><span class="' + severityClass(event.severity) + '">' + esc(event.severity) + '</span></td>' +
         '<td><strong class="rule-name">' + esc(event.rule_name || "Security rule") + '</strong></td>' +
+        '<td><code class="rule-id">' + esc(event.rule_id || "-") + '</code></td>' +
+        '<td>' + techniquesCell(event.techniques) + '</td>' +
         '<td><code>' + esc(event.event_id) + '</code></td>' +
         '<td>' + esc(event.username) + '<br><span class="muted mono">' + esc(event.source_ip) + '</span></td>' +
-        '<td>' + esc(event.provider) + '</td>' +
         '<td><button class="detail-button" type="button" data-id="' + event.id + '">Details</button></td></tr>';
     }).join("");
     bindDetailButtons(body);
+  }
+
+  function techniquesCell(value) {
+    var text = String(value || "").trim();
+    if (!text) return '<span class="muted">-</span>';
+    return text.split(",").map(function (item) {
+      var name = item.trim();
+      return name ? '<code class="technique">' + esc(name) + '</code>' : '';
+    }).join(" ");
+  }
+
+  function renderCorrelations(items) {
+    items = items || [];
+    remember(items);
+    var body = el("correlation-body");
+    if (!items.length) {
+      body.innerHTML = '<tr><td colspan="6" class="table-empty">No sequences matched in the current view.</td></tr>';
+      return;
+    }
+    body.innerHTML = items.map(function (event) {
+      var group = "";
+      try {
+        var raw = JSON.parse(event.raw_log || "{}");
+        group = raw.group || "";
+      } catch (error) { group = ""; }
+      return '<tr class="alert-row correlation-row"><td>' + esc(event.timestamp) + '</td>' +
+        '<td><span class="' + severityClass(event.severity) + '">' + esc(event.severity) + '</span></td>' +
+        '<td><strong class="rule-name">' + esc(event.rule_name) + '</strong><br><span class="muted mono">' + esc(event.message) + '</span></td>' +
+        '<td><code>' + esc(group) + '</code></td>' +
+        '<td>' + techniquesCell(event.techniques) + '</td>' +
+        '<td><button class="detail-button" type="button" data-id="' + event.id + '">Details</button></td></tr>';
+    }).join("");
+    bindDetailButtons(body);
+  }
+
+  function renderRuntime(runtime, notifier) {
+    var parts = [];
+    if (runtime && runtime.rules) {
+      parts.push(runtime.rules + " detections, " + (runtime.correlation_rules || 0) + " correlation rules");
+    }
+    if (runtime && runtime.intel_indicators) parts.push(runtime.intel_indicators + " threat indicators loaded");
+    if (runtime && runtime.retain_days) parts.push("retention " + runtime.retain_days + " days");
+    parts.push(runtime && runtime.auth_enabled ? "token required" : "no authentication (local lab)");
+    if (notifier && notifier.enabled) {
+      parts.push("alerts delivered: " + (notifier.sent || 0));
+      if (notifier.last_error) parts.push("delivery error: " + notifier.last_error);
+    }
+    text("runtime-note", parts.join(" · "));
   }
 
   function renderEvents(events) {
@@ -376,7 +476,9 @@
       ["Time", event.timestamp], ["Severity", event.severity], ["Channel", event.channel],
       ["Provider", event.provider], ["Event ID", event.event_id], ["Record ID", event.record_id || "-"],
       ["User", event.username], ["Host", event.host], ["Source IP", event.source_ip],
-      ["Security alert", event.is_alert ? "Yes" : "No"], ["Rule", event.rule_name || "-"]
+      ["Security alert", event.is_alert ? "Yes" : "No"], ["Rule", event.rule_name || "-"],
+      ["Rule ID", event.rule_id || "-"], ["ATT&CK", event.techniques || "-"],
+      ["Matched on", event.matched_on || "-"], ["Intelligence", event.enrichment || "-"]
     ];
     el("event-detail").innerHTML = fields.map(function (field) {
       return '<div><span>' + esc(field[0]) + '</span><strong>' + esc(field[1]) + '</strong></div>';
@@ -388,7 +490,7 @@
   async function refresh() {
     var requestId = ++state.requestId;
     try {
-      var response = await fetch("/api/dashboard?" + queryString(), {cache:"no-store"});
+      var response = await fetch("/api/dashboard?" + queryString(), {cache:"no-store", headers: authHeaders()});
       if (!response.ok) throw new Error("Dashboard API returned " + response.status);
       var data = await response.json();
       if (requestId !== state.requestId) return;
@@ -404,12 +506,17 @@
       renderRanking("top-providers", data.top_providers);
       renderRanking("top-event-ids", data.top_event_ids);
       renderAlerts(data.alerts);
+      renderCorrelations(data.correlations);
       renderEvents(data.events);
+      renderRanking("top-techniques", data.top_techniques || []);
+      renderRanking("top-rules", data.top_rules || []);
+      renderRuntime(data.runtime || {}, data.notifier || {});
 
       updateSelect("filter-channel", data.dimensions.channels, "All channels", state.channel);
       updateSelect("filter-provider", data.dimensions.providers, "All providers", state.provider);
       updateSelect("filter-event-id", data.dimensions.event_ids, "All event IDs", state.eventId);
       updateSelect("filter-user", data.dimensions.usernames, "All users", state.username);
+      updateSelect("filter-rule", data.dimensions.rules || [], "All rules", state.ruleId);
 
       text("last-updated", new Date(data.generated_at).toLocaleTimeString());
     } catch (error) {
@@ -429,6 +536,7 @@
     state.provider = el("filter-provider").value;
     state.eventId = el("filter-event-id").value;
     state.username = el("filter-user").value;
+    state.ruleId = el("filter-rule").value;
     state.alertsOnly = el("alerts-only").checked;
     refresh();
   }
@@ -438,7 +546,7 @@
     clearTimeout(searchDelay);
     searchDelay = setTimeout(applyFilters, 180);
   });
-  ["filter-since","filter-channel","filter-provider","filter-event-id","filter-user","alerts-only"].forEach(function (id) {
+  ["filter-since","filter-channel","filter-provider","filter-event-id","filter-user","filter-rule","alerts-only"].forEach(function (id) {
     el(id).addEventListener("change", applyFilters);
   });
 
@@ -454,7 +562,7 @@
 
   el("reset-filters").addEventListener("click", function () {
     state.severity = ""; state.search = ""; state.since = ""; state.channel = "";
-    state.provider = ""; state.eventId = ""; state.username = ""; state.alertsOnly = false;
+    state.provider = ""; state.eventId = ""; state.username = ""; state.ruleId = ""; state.alertsOnly = false;
     el("filter-search").value = ""; el("filter-since").value = ""; el("alerts-only").checked = false;
     document.querySelectorAll(".severity-filter").forEach(function (button) {
       button.classList.toggle("active", button.dataset.severity === "");
@@ -495,7 +603,7 @@
     event.preventDefault();
     var form = event.currentTarget;
     try {
-      var response = await fetch("/api/import", {method:"POST", body:new FormData(form)});
+      var response = await fetch("/api/import", {method:"POST", headers: authHeaders(), body:new FormData(form)});
       var data = await response.json();
       text("ingest-message", response.ok ? "Imported " + data.inserted + " events." : data.error);
       if (response.ok) { form.reset(); refresh(); }
@@ -505,11 +613,27 @@
   el("clear-events").addEventListener("click", async function () {
     if (!confirm("Clear all collected events from siem_live.db? New Windows events will continue arriving.")) return;
     try {
-      var response = await fetch("/api/events/clear", {method:"POST"});
+      var response = await fetch("/api/events/clear", {method:"POST", headers: authHeaders()});
       var data = await response.json();
       text("ingest-message", response.ok && data.cleared ? "Live event store cleared." : (data.error || "Could not clear event store."));
       if (response.ok) refresh();
     } catch (error) { text("ingest-message", "Clear failed: connection unavailable."); }
+  });
+
+  el("pcap-form").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var form = event.currentTarget;
+    text("pcap-message", "Reading capture...");
+    try {
+      var response = await fetch("/api/pcap", {method:"POST", headers: authHeaders(), body:new FormData(form)});
+      var data = await response.json();
+      if (!response.ok) { text("pcap-message", data.error || "Capture import failed."); return; }
+      text("pcap-message", "Read " + data.packets_read + " packets into " + data.flows +
+        " flows and " + data.dns_names + " DNS names; " + data.inserted + " events stored" +
+        (data.correlations_raised ? ", " + data.correlations_raised + " sequences raised." : "."));
+      form.reset();
+      refresh();
+    } catch (error) { text("pcap-message", "Capture import failed: connection unavailable."); }
   });
 
   el("close-dialog").addEventListener("click", function () { el("event-dialog").close(); });

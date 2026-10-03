@@ -1,0 +1,68 @@
+# Detections that read the network events produced by the PCAP importer.
+#
+# These arrive with source "pcap" and channel "network", so they sit in the same
+# store as host events and can be correlated with them.
+rules:
+  - id: net-cleartext-credential-service
+    title: Connection to a cleartext service on a remote host
+    level: Medium
+    description: >-
+      A flow was seen to a service that sends its credentials in the clear. On a
+      modern network this is worth explaining.
+    logsource:
+      channel: network
+    detection:
+      selection:
+        channel: "network"
+        data.protocol: "TCP"
+      ports:
+        data.destination_port:
+          - "21"
+          - "23"
+          - "25"
+          - "110"
+          - "143"
+      condition: selection and ports
+    falsepositives:
+      - A lab or a legacy appliance that has no alternative.
+    tags:
+      - attack.credential_access
+      - attack.t1040
+
+  - id: net-telnet-usage
+    title: Telnet traffic on the wire
+    level: Medium
+    description: Telnet carries everything, including the password, unencrypted.
+    logsource:
+      channel: network
+    detection:
+      selection:
+        channel: "network"
+        data.destination_port: "23"
+      condition: selection
+    falsepositives:
+      - Network equipment management on an isolated segment.
+    tags:
+      - attack.credential_access
+      - attack.t1040
+
+  - id: net-high-volume-dns-txt
+    title: DNS response carrying a large TXT record
+    level: Medium
+    description: >-
+      Large TXT answers are used to move data over DNS because almost every
+      network allows it out.
+    logsource:
+      channel: network
+    detection:
+      selection:
+        channel: "network"
+        data.protocol: "DNS"
+      size:
+        data.response_bytes|re: "^[0-9]{3,}$"
+      condition: selection and size
+    falsepositives:
+      - SPF and DKIM records, which are legitimately long.
+    tags:
+      - attack.exfiltration
+      - attack.t1048.003

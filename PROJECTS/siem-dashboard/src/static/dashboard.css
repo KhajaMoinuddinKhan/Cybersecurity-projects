@@ -38,3 +38,26 @@ html{scroll-behavior:smooth;scroll-padding-top:18px}body{background:#08090b}body
 .frequency-panel .rank-list>.empty-inline{grid-column:1/-1;padding:12px 0}
 .analytics-grid>.panel{min-width:0}.panel-heading>div{min-width:0}.health-panel h2{overflow-wrap:anywhere}
 @media(max-width:780px){.analytics-grid{grid-template-columns:minmax(0,1fr)}.collector-panel .panel-heading{flex-direction:column}.channel-card{min-width:0}.volume-chart{min-width:0}}
+
+/* --- Detection content: rule identity, ATT&CK tags and correlation ---------- */
+
+.stat-card.correlation{--accent:var(--amber)}
+.stat-card.correlation strong{color:var(--amber)}
+
+.rule-id{font-size:11px;color:var(--muted);background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:4px;padding:2px 6px;white-space:nowrap}
+.technique{display:inline-block;font-size:10.5px;letter-spacing:.04em;color:var(--amber);background:rgba(255,189,87,.08);border:1px solid rgba(255,189,87,.24);border-radius:4px;padding:2px 6px;margin:1px 2px 1px 0;white-space:nowrap}
+
+.correlation-panel{border-color:var(--line2)}
+.correlation-panel h2{color:var(--amber)}
+.correlation-row td{background:rgba(255,189,87,.04)}
+.correlation-row .rule-name{color:var(--amber)}
+.correlation-row .muted{display:inline-block;max-width:52ch;overflow-wrap:anywhere}
+
+.coverage-grid{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.techniques-panel h2,.rules-panel h2{font-size:15px}
+.rules-panel .chart-note{margin-top:10px}
+
+@media(max-width:780px){
+  .rule-id{white-space:normal}
+  .correlation-row .muted{max-width:100%}
+}

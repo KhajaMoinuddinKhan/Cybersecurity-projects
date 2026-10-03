@@ -16,7 +16,7 @@ Each project is self-contained: its own source, tests, run instructions and lear
 | [File Integrity Monitor](PROJECTS/file-integrity-monitor) | Baselines a folder with SHA-256 and reports files that were added, changed or removed. |
 | [Keylogger](PROJECTS/keylogger) | Records visible, consent-based keystrokes from your own terminal into a local JSONL file. |
 | [Hash Cracker](PROJECTS/hash-cracker) | Tests an offline digest against a wordlist you provide and reports the measured work. |
-| [SIEM Dashboard](PROJECTS/siem-dashboard) | Collects Windows Event Logs, applies event-based rules, stores telemetry in SQLite and serves a live dashboard. |
+| [SIEM Dashboard](PROJECTS/siem-dashboard) | Collects Windows Event Log and Sysmon telemetry, classifies it with rules loaded from files, correlates sequences across sources, and serves a live dashboard. |
 | [Threat Intelligence Aggregator](PROJECTS/threat-intelligence-aggregator) | Imports IP, domain, hash and URL indicators from CSV or JSON into a searchable SQLite database. |
 | [SSL/TLS Scanner](PROJECTS/ssl-tls-scanner) | Reports the protocol, cipher, certificate identity and expiry from one verified handshake. |
 | [Password Policy Auditor](PROJECTS/password-policy-auditor) | Compares a password policy file against an explicit baseline, one setting per line. |

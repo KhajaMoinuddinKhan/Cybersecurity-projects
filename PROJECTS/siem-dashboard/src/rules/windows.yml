@@ -1,0 +1,228 @@
+# Detections for the standard Windows event channels.
+#
+# Rule ids are stable: an alert records the id, so a rule can be scored on its
+# own and renamed without losing its history.
+rules:
+  - id: win-audit-log-cleared
+    title: Windows audit log cleared
+    level: High
+    description: >-
+      The Security log was emptied. Attackers clear it to remove the record of
+      what they did, so a cleared log is itself the evidence.
+    logsource:
+      channel: Security
+      event_id: "1102"
+    detection:
+      selection:
+        event_id: "1102"
+      condition: selection
+    falsepositives:
+      - An administrator clearing the log during maintenance.
+    tags:
+      - attack.defense_evasion
+      - attack.t1070.001
+
+  - id: win-failed-logon
+    title: Failed Windows logon
+    level: Medium
+    description: A logon attempt was rejected.
+    logsource:
+      channel: Security
+      event_id: "4625"
+    detection:
+      selection:
+        event_id: "4625"
+      condition: selection
+    falsepositives:
+      - A mistyped password.
+      - A service or scheduled task using a stale credential.
+    tags:
+      - attack.credential_access
+      - attack.t1110
+
+  - id: win-account-created
+    title: User account created
+    level: Medium
+    description: A new local or domain account was created.
+    logsource:
+      channel: Security
+      event_id: "4720"
+    detection:
+      selection:
+        event_id: "4720"
+      condition: selection
+    falsepositives:
+      - A joiner being onboarded by IT.
+    tags:
+      - attack.persistence
+      - attack.t1136.001
+
+  - id: win-account-deleted
+    title: User account deleted
+    level: Medium
+    description: An account was removed.
+    logsource:
+      channel: Security
+      event_id: "4726"
+    detection:
+      selection:
+        event_id: "4726"
+      condition: selection
+    falsepositives:
+      - A leaver being offboarded by IT.
+    tags:
+      - attack.impact
+      - attack.t1531
+
+  - id: win-privileged-group-global
+    title: Member added to a privileged group
+    level: High
+    description: An account was added to a global security group.
+    logsource:
+      channel: Security
+      event_id: "4728"
+    detection:
+      selection:
+        event_id: "4728"
+      condition: selection
+    falsepositives:
+      - An approved change to a group membership.
+    tags:
+      - attack.persistence
+      - attack.t1098
+
+  - id: win-privileged-group-local
+    title: Member added to a local privileged group
+    level: High
+    description: >-
+      An account was added to a local group. Administrators is the one that
+      matters, and the group name is in the event.
+    logsource:
+      channel: Security
+      event_id: "4732"
+    detection:
+      selection:
+        event_id: "4732"
+      condition: selection
+    falsepositives:
+      - A helpdesk adding a user to a local group as part of a documented task.
+    tags:
+      - attack.persistence
+      - attack.t1098.007
+
+  - id: win-privileged-group-universal
+    title: Member added to a universal group
+    level: High
+    description: An account was added to a universal security group.
+    logsource:
+      channel: Security
+      event_id: "4756"
+    detection:
+      selection:
+        event_id: "4756"
+      condition: selection
+    falsepositives:
+      - An approved change to a group membership.
+    tags:
+      - attack.persistence
+      - attack.t1098
+
+  - id: win-account-locked-out
+    title: User account locked out
+    level: High
+    description: >-
+      An account was locked out. On its own this is noise; in sequence with a
+      run of failed logons it is the end of a brute-force attempt.
+    logsource:
+      channel: Security
+      event_id: "4740"
+    detection:
+      selection:
+        event_id: "4740"
+      condition: selection
+    falsepositives:
+      - A user who has forgotten their password.
+    tags:
+      - attack.credential_access
+      - attack.t1110
+
+  - id: win-service-installed
+    title: Windows service installed
+    level: High
+    description: >-
+      A service was installed. Persistence as a service is a common way to
+      survive a reboot, and the service name and image path are in the event.
+    logsource:
+      channel: System
+      event_id: "7045"
+    detection:
+      selection:
+        event_id: "7045"
+      condition: selection
+    falsepositives:
+      - A legitimate software installation or update.
+    tags:
+      - attack.persistence
+      - attack.t1543.003
+
+  - id: win-defender-malware
+    title: Windows Defender detected malware
+    level: High
+    description: Defender acted on something it classified as malicious.
+    logsource:
+      channel: Microsoft-Windows-Windows Defender/Operational
+      event_id: "1116"
+    detection:
+      selection:
+        event_id: "1116"
+      condition: selection
+    falsepositives:
+      - A detection on a deliberately planted test file.
+    tags:
+      - attack.execution
+
+  - id: win-defender-remediation
+    title: Windows Defender remediation action
+    level: Medium
+    description: Defender took a remediation action.
+    logsource:
+      channel: Microsoft-Windows-Windows Defender/Operational
+      event_id: "1117"
+    detection:
+      selection:
+        event_id: "1117"
+      condition: selection
+    falsepositives:
+      - Routine quarantine of a lab sample.
+    tags:
+      - attack.defense_evasion
+
+  - id: win-suspicious-powershell-script-block
+    title: Suspicious PowerShell script block
+    level: High
+    description: >-
+      PowerShell logged a script block containing one of the constructs used to
+      fetch and run code without touching disk. The matched term is recorded on
+      the alert, so a false positive can be argued with specifically.
+    logsource:
+      channel: Microsoft-Windows-PowerShell/Operational
+      event_id: "4104"
+    detection:
+      selection:
+        event_id: "4104"
+      keywords:
+        message|contains:
+          - "-enc"
+          - "-encodedcommand"
+          - "downloadstring"
+          - "invoke-webrequest"
+          - "invoke-expression"
+          - "frombase64string"
+          - "iex "
+      condition: selection and keywords
+    falsepositives:
+      - A signed administrative script that uses Invoke-WebRequest.
+      - A management tool that base64-encodes its own commands.
+    tags:
+      - attack.execution
+      - attack.t1059.001

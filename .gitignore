@@ -8,3 +8,7 @@
 
 # File Integrity Monitor writes its baseline next to the folder it watches.
 baseline.json
+
+# The SIEM writes uploaded captures and alert logs beside the database.
+captures/
+*.jsonl

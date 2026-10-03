@@ -1,4 +1,14 @@
-"""Live Windows Event Log collection and event-based security rules."""
+"""Live Windows Event Log collection, including Sysmon.
+
+The collector reads the channels it can reach, converts each record into a
+payload, and hands it to the ingestion pipeline. Classification is not decided
+here any more: the payload goes to the rule engine, so a detection can be
+changed by editing a rule file rather than this module.
+
+Sysmon is in the channel list because it is where the useful host telemetry
+lives. The Security log says an account logged on; Sysmon says which process
+ran, with what command line, started by which parent, and what it connected to.
+"""
 from __future__ import annotations
 
 import json
@@ -10,36 +20,23 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 from xml.etree import ElementTree
 
-PayloadIngestor = Callable[[Path, Iterable[dict[str, Any]], str], int]
+from .rules import RuleEngine, RuleError, shared_engine
+
+PayloadIngestor = Callable[..., int]
 
 CHANNELS = (
     "Security",
     "System",
     "Application",
+    "Microsoft-Windows-Sysmon/Operational",
     "Microsoft-Windows-Windows Defender/Operational",
     "Microsoft-Windows-PowerShell/Operational",
 )
 
-RULES: dict[tuple[str, str], tuple[str, str]] = {
-    ("Security", "1102"): ("High", "Windows audit log cleared"),
-    ("Security", "4625"): ("Medium", "Failed Windows logon"),
-    ("Security", "4720"): ("Medium", "User account created"),
-    ("Security", "4726"): ("Medium", "User account deleted"),
-    ("Security", "4728"): ("High", "Member added to a privileged group"),
-    ("Security", "4732"): ("High", "Member added to a local privileged group"),
-    ("Security", "4756"): ("High", "Member added to a universal group"),
-    ("Security", "4740"): ("High", "User account locked out"),
-    ("System", "7045"): ("High", "Windows service installed"),
-    ("Microsoft-Windows-Windows Defender/Operational", "1116"): (
-        "High",
-        "Windows Defender detected malware",
-    ),
-    ("Microsoft-Windows-Windows Defender/Operational", "1117"): (
-        "Medium",
-        "Windows Defender remediation action",
-    ),
-}
+SYSMON_CHANNEL = "Microsoft-Windows-Sysmon/Operational"
 
+# Kept for callers that import it directly. The authoritative rules now live in
+# src/rules/*.yml; this is a view of the same data for older callers.
 SUSPICIOUS_POWERSHELL = (
     "-enc",
     "-encodedcommand",
@@ -49,6 +46,73 @@ SUSPICIOUS_POWERSHELL = (
     "frombase64string",
     "iex ",
 )
+
+
+def _legacy_rule_map() -> dict[tuple[str, str], tuple[str, str]]:
+    """A (channel, event_id) view of the loaded rules.
+
+    Built from the rule files so there is one source of truth. Only rules whose
+    condition is a single selection keyed on channel and event_id appear here.
+    """
+
+    mapping: dict[tuple[str, str], tuple[str, str]] = {}
+    try:
+        engine = shared_engine()
+    except RuleError:
+        return mapping
+
+    for rule in engine.rules:
+        channel = str(rule.logsource.get("channel") or "").strip()
+        event_id = str(rule.logsource.get("event_id") or "").strip()
+        selection = rule.detection.get("selection")
+        if not channel or not event_id or not isinstance(selection, dict):
+            continue
+        if rule.condition.strip() != "selection":
+            continue
+        if set(selection) != {"event_id"}:
+            continue
+        mapping[(channel, event_id)] = (rule.level, rule.title)
+    return mapping
+
+
+class _LazyRules(dict):
+    """A dict that builds itself from the rule files on first use."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._built = False
+
+    def _ensure(self) -> None:
+        if not self._built:
+            self._built = True
+            super().update(_legacy_rule_map())
+
+    def __contains__(self, key: object) -> bool:
+        self._ensure()
+        return super().__contains__(key)
+
+    def __getitem__(self, key: Any) -> Any:
+        self._ensure()
+        return super().__getitem__(key)
+
+    def __len__(self) -> int:
+        self._ensure()
+        return super().__len__()
+
+    def __iter__(self):
+        self._ensure()
+        return super().__iter__()
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        self._ensure()
+        return super().get(key, default)
+
+    def items(self):
+        self._ensure()
+        return super().items()
+
+
+RULES = _LazyRules()
 
 
 def severity_from_windows_level(level: str | None) -> str:
@@ -88,21 +152,29 @@ def classify_event(
     event_id: str,
     level: str,
     message: str,
+    fields: dict[str, str] | None = None,
 ) -> tuple[str, bool, str]:
-    """Apply small explainable rules to real Windows events."""
+    """Apply the loaded rules to one event.
 
-    key = (channel, event_id)
-    if key in RULES:
-        severity, rule_name = RULES[key]
-        return severity, True, rule_name
+    Returns ``(severity, is_alert, rule_name)``. The optional ``fields`` mapping
+    carries structured EventData, which is what lets a Sysmon rule match on a
+    command line rather than on an event id alone.
+    """
 
-    if (
-        channel == "Microsoft-Windows-PowerShell/Operational"
-        and event_id == "4104"
-    ):
-        lowered = message.lower()
-        if any(term in lowered for term in SUSPICIOUS_POWERSHELL):
-            return "High", True, "Suspicious PowerShell script block"
+    payload = {
+        "channel": channel,
+        "event_id": event_id,
+        "level": level,
+        "message": message,
+        "fields": fields or {},
+    }
+    try:
+        match = shared_engine().match(payload)
+    except RuleError:
+        match = None
+
+    if match is not None:
+        return match.severity, True, match.title
 
     return severity_from_windows_level(level), False, ""
 
@@ -122,12 +194,14 @@ def windows_event_to_payload(log_name: str, item: dict[str, Any]) -> dict[str, A
         data.get("TargetUserName")
         or data.get("SubjectUserName")
         or data.get("AccountName")
+        or data.get("User")
         or str(item.get("User") or "unknown")
     )
     source_ip = (
         data.get("IpAddress")
         or data.get("SourceNetworkAddress")
         or data.get("ClientAddress")
+        or data.get("SourceIp")
         or "local"
     )
     if source_ip in {"-", "::1", "127.0.0.1"}:
@@ -138,6 +212,7 @@ def windows_event_to_payload(log_name: str, item: dict[str, Any]) -> dict[str, A
         event_id,
         level,
         message,
+        data,
     )
 
     record_id = str(item.get("RecordId") or "")
@@ -161,6 +236,7 @@ def windows_event_to_payload(log_name: str, item: dict[str, Any]) -> dict[str, A
         "rule_name": rule_name,
         "external_id": f"{log_name}:{record_id}" if record_id else "",
         "raw_log": json.dumps(raw, ensure_ascii=False, sort_keys=True),
+        "fields": data,
     }
 
 
@@ -174,12 +250,14 @@ class WindowsEventCollector:
         channels: tuple[str, ...] = CHANNELS,
         interval: float = 2.0,
         backfill_per_channel: int = 25,
+        notifier: Any = None,
     ) -> None:
         self.db_path = db_path
         self.ingest = ingest
         self.channels = channels
         self.interval = interval
         self.backfill_per_channel = backfill_per_channel
+        self.notifier = notifier
         self.stop_event = threading.Event()
         self.thread: threading.Thread | None = None
         self.cursors: dict[str, int] = {}
@@ -188,6 +266,7 @@ class WindowsEventCollector:
             "running": False,
             "ingested": 0,
             "backfilled": 0,
+            "alerts": 0,
             "channels": {name: {"state": "waiting", "last_record": 0} for name in channels},
             "last_error": "",
             "last_poll": "",
@@ -294,11 +373,17 @@ class WindowsEventCollector:
             return
 
         payloads = [windows_event_to_payload(channel, item) for item in records]
-        inserted = self.ingest(self.db_path, payloads, "windows-event-log")
+        inserted = self.ingest(
+            self.db_path,
+            payloads,
+            "windows-event-log",
+            notifier=self.notifier,
+        )
         if backfill:
             self.status["backfilled"] += inserted
         else:
             self.status["ingested"] += inserted
+        self.status["alerts"] += sum(1 for payload in payloads if payload.get("is_alert"))
 
         record_ids = [
             int(item["RecordId"])

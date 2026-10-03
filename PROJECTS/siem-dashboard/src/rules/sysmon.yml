@@ -1,0 +1,199 @@
+# Detections for Sysmon, which is where the useful host telemetry lives.
+#
+# Sysmon records the command line of a new process, the process that started it,
+# and the connections that process makes. That is the difference between knowing
+# something happened and knowing how.
+rules:
+  - id: sysmon-encoded-powershell-command
+    title: Encoded PowerShell command line
+    level: High
+    description: >-
+      A process was created whose command line carries an encoded command. The
+      script is base64 in the argument, which is how a lot of fileless execution
+      hides from a plain-text search.
+    logsource:
+      channel: Microsoft-Windows-Sysmon/Operational
+      event_id: "1"
+    detection:
+      selection:
+        event_id: "1"
+        data.Image|endswith:
+          - "\\powershell.exe"
+          - "\\pwsh.exe"
+      keywords:
+        data.CommandLine|contains:
+          - "-enc "
+          - "-encodedcommand"
+          - "-e JAB"
+          - "frombase64string"
+      condition: selection and keywords
+    falsepositives:
+      - An administrative tool that encodes its own commands, such as some
+        configuration management agents.
+    tags:
+      - attack.execution
+      - attack.t1059.001
+
+  - id: sysmon-office-spawns-shell
+    title: Office application started a command shell
+    level: High
+    description: >-
+      Word, Excel or Outlook started a shell or a scripting host. A document
+      that does this is running a macro, and there are very few legitimate
+      reasons for it.
+    logsource:
+      channel: Microsoft-Windows-Sysmon/Operational
+      event_id: "1"
+    detection:
+      selection:
+        event_id: "1"
+        data.ParentImage|endswith:
+          - "\\winword.exe"
+          - "\\excel.exe"
+          - "\\outlook.exe"
+          - "\\powerpnt.exe"
+      child:
+        data.Image|endswith:
+          - "\\cmd.exe"
+          - "\\powershell.exe"
+          - "\\wscript.exe"
+          - "\\cscript.exe"
+          - "\\mshta.exe"
+          - "\\rundll32.exe"
+      condition: selection and child
+    falsepositives:
+      - A documented macro-driven business process.
+    tags:
+      - attack.execution
+      - attack.t1204.002
+
+  - id: sysmon-lolbin-download
+    title: Signed system binary used to fetch a remote file
+    level: High
+    description: >-
+      A trusted Windows binary is being used to download something. These are
+      the living-off-the-land binaries that let an attacker work without
+      dropping a tool.
+    logsource:
+      channel: Microsoft-Windows-Sysmon/Operational
+      event_id: "1"
+    detection:
+      selection:
+        event_id: "1"
+        data.Image|endswith:
+          - "\\certutil.exe"
+          - "\\bitsadmin.exe"
+          - "\\mshta.exe"
+          - "\\regsvr32.exe"
+          - "\\curl.exe"
+      keywords:
+        data.CommandLine|contains:
+          - "http://"
+          - "https://"
+          - "ftp://"
+      condition: selection and keywords
+    falsepositives:
+      - A signed installer that uses certutil for a certificate operation.
+    tags:
+      - attack.command_and_control
+      - attack.t1105
+
+  - id: sysmon-lsass-access
+    title: Process read the memory of LSASS
+    level: High
+    description: >-
+      Something opened LSASS with the access rights used to read credentials
+      out of memory. This is the technique behind most credential dumping.
+    logsource:
+      channel: Microsoft-Windows-Sysmon/Operational
+      event_id: "10"
+    detection:
+      selection:
+        event_id: "10"
+        data.TargetImage|endswith: "\\lsass.exe"
+      condition: selection
+    falsepositives:
+      - Endpoint security software and some backup agents legitimately read
+        LSASS. Compare the calling image before treating this as an incident.
+    tags:
+      - attack.credential_access
+      - attack.t1003.001
+
+  - id: sysmon-remote-thread-injection
+    title: Thread created inside another process
+    level: High
+    description: >-
+      A process created a thread in a different process. This is code injection,
+      and the source and target images are both in the event.
+    logsource:
+      channel: Microsoft-Windows-Sysmon/Operational
+      event_id: "8"
+    detection:
+      selection:
+        event_id: "8"
+      condition: selection
+    falsepositives:
+      - Debuggers, and some application compatibility shims.
+    tags:
+      - attack.defense_evasion
+      - attack.t1055
+
+  - id: sysmon-driver-loaded
+    title: Kernel driver loaded
+    level: Medium
+    description: >-
+      A driver was loaded. A driver that is not signed, or that was written
+      shortly before it appeared, deserves a look.
+    logsource:
+      channel: Microsoft-Windows-Sysmon/Operational
+      event_id: "6"
+    detection:
+      selection:
+        event_id: "6"
+      condition: selection
+    falsepositives:
+      - Any legitimate driver installation or Windows update.
+    tags:
+      - attack.persistence
+      - attack.t1543.003
+
+  - id: sysmon-dns-query-to-long-subdomain
+    title: DNS query with an unusually long name
+    level: Medium
+    description: >-
+      A very long DNS name is how some malware carries data out and commands in
+      without opening a connection of its own.
+    logsource:
+      channel: Microsoft-Windows-Sysmon/Operational
+      event_id: "22"
+    detection:
+      selection:
+        event_id: "22"
+      long_name:
+        data.QueryName|re: "^(?:[^.]{1,}\\.){3,}[^.]{20,}\\."
+      condition: selection and long_name
+    falsepositives:
+      - Content delivery networks and some telemetry endpoints use long names.
+    tags:
+      - attack.exfiltration
+      - attack.t1048.003
+
+  - id: sysmon-network-connection-to-remote-port
+    title: Process opened an outbound connection
+    level: Medium
+    description: >-
+      Sysmon recorded a network connection and named the process that made it.
+      Alone this is normal traffic; joined with a process event on the same host
+      it becomes the second half of an execution chain.
+    logsource:
+      channel: Microsoft-Windows-Sysmon/Operational
+      event_id: "3"
+    detection:
+      selection:
+        event_id: "3"
+      condition: selection
+    falsepositives:
+      - Every browser, updater and telemetry agent on the machine.
+    tags:
+      - attack.command_and_control
+      - attack.t1071.001

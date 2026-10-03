@@ -18,7 +18,7 @@ The two traffic tools answer the same question in different ways. The summary to
 
 | Project | Bring this | What you will practise |
 | --- | --- | --- |
-| [SIEM Dashboard](PROJECTS/siem-dashboard) | Windows Event Logs, or structured event files and API records | Connecting collection, validation, storage, detection and an analyst view. |
+| [SIEM Dashboard](PROJECTS/siem-dashboard) | Windows Event Logs and Sysmon, a packet capture, or structured event files and API records | Connecting collection, validation, storage, detection, correlation and an analyst view. |
 | [SSL/TLS Scanner](PROJECTS/ssl-tls-scanner) | A hostname and a TLS port | Reading one verified handshake without confusing it for a server audit. |
 | [Keylogger](PROJECTS/keylogger) | Your own foreground terminal | Consent, visible recording, and what keyboard events actually look like. |
 | [Web Vulnerability Scanner](PROJECTS/web-vulnerability-scanner) | A web application running on localhost | Checking response headers and form metadata without submitting anything. |

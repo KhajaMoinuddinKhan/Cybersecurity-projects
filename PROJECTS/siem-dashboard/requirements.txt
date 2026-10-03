@@ -1,2 +1,4 @@
 Flask>=3,<4
 psutil>=5.9,<8
+PyYAML>=6,<7
+scapy>=2.6,<3
