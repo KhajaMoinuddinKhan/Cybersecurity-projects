@@ -1,13 +1,14 @@
 # Concepts
 
-- Events are telemetry. Alerts are events that matched a rule. Context is an event that matched a rule which is not allowed to raise an alert on its own. Keeping those three apart is what stops a dashboard from being either silent or unreadable.
-- Detection rules are data. They live in files, they carry a stable id, and editing a detection means editing a file rather than the application.
-- A rule that matches normal background traffic records itself and stays out of the queue. Without a notion of what is normal for a host, treating that traffic as context is more honest than pretending a browser is an incident.
-- Filters apply to totals, charts, source rankings and the event table together, so what the numbers describe and what the table shows are always the same set.
-- Correlation matches on rule hits rather than on alerts, which is what lets a context rule be a step in a sequence.
-- Enrichment answers a different question from detection. A rule says an event looks wrong; threat intelligence says whether the address, domain or hash involved is already known to be bad.
-- Collector health and dashboard connectivity are separate. An accessible dashboard can have unavailable channels, and the page says which.
-- CPU, memory and disk values are measured on the machine running the application. Unavailable metrics are shown as unavailable rather than as zero.
+- A host is a machine in the registry, not just a name on an event. It is enrolled once, receives a key, and reports through an agent; its status is computed when it is read, so `online`, `stale` and `never-reported` describe a reporting relationship rather than a stored flag.
+- An enrolment key is shown once. The server stores only a salted PBKDF2 hash, so the plaintext exists only in the enrolment response and in the agent that received it. Losing it means rotating, not recovering.
+- A session and a bearer key are different kinds of proof. A session identifies a person who signed in with a password; a host key identifies a machine that was enrolled. The console keeps them apart, which is why `/api/ingest` stays reachable while every analyst route needs a login.
+- A role is a set of actions, and the matrix is one dict. A viewer watches, an analyst works the queue, an admin manages the console. The server enforces the matrix at each route; the database only stores the role name.
+- A detection is an event that matched a rule and was allowed to alert. Its triage status is separate from its severity: severity is how much attention the rule thinks the event deserves, status is where the investigation has got to.
+- Suppression is a tuning decision, not a detection decision. It hides a rule's detections from the queue; it does not stop the rule firing or the event being stored.
+- The canonical record is one shape every source is mapped onto, so a Windows event, a Sysmon event, a packet flow and a JSON line all reach storage with the same fields. Unknown fields survive in `raw`.
+- An unavailable metric is not a zero. CPU, memory and disk are measured on the machine running the application, and a panel that cannot reach its endpoint says so rather than drawing a bar at zero.
+- A failed login is worth recording. The audit log keeps successes and failures, because an authentication system that records only what worked cannot show an attack.
 
 ## Severity, alerts and time
 

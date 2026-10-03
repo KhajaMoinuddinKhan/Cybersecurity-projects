@@ -1,8 +1,8 @@
 # SIEM Dashboard
 
-This is the largest project here, and the only one that watches a live system. It collects Windows Event Log records and Sysmon telemetry, classifies them against rules loaded from files, correlates the results into sequences, stores everything in SQLite, and serves a dashboard you can filter while the data is still arriving.
+This is the largest project here, and the only one that watches live systems. It collects Windows Event Log and Sysmon telemetry from the machine it runs on and from agents enrolled on other machines, classifies each event against rules loaded from files, correlates the results into sequences, stores everything in one SQLite file, and serves a dashboard that has real accounts, a host inventory, an analyst triage queue and an audit trail, all filterable while the data is still arriving.
 
-If you want to see how collection, validation, classification, storage, correlation and an analyst view fit together, start here. If you only want to read a capture file, the traffic tools are a much smaller commitment.
+If you want to see how collection, validation, classification, storage, correlation, triage and an analyst view fit together, start here. If you only want to read a capture file, the traffic tools are a much smaller commitment.
 
 ## Running it
 
@@ -10,26 +10,43 @@ If you want to see how collection, validation, classification, storage, correlat
 python -m src.app
 ```
 
-That starts the dashboard on `http://127.0.0.1:5000` with a fresh store at `siem_live.db` and begins collecting from the available Windows channels. Useful variations:
+That starts the dashboard on `http://127.0.0.1:5000` with a fresh store at `siem_live.db` and begins collecting from the available Windows channels.
+
+Create the first account before you expose the console to anyone. The bootstrap password is read from `SIEM_ADMIN_PASSWORD` or from standard input, never from the command line, because a password in `argv` ends up in shell history and in the process table:
+
+```console
+SIEM_ADMIN_PASSWORD='...' python -m src.auth --init-admin analyst --db siem_live.db
+```
+
+The console is open on localhost until that first account exists, which is the documented lab default; once any account exists, every protected route requires a session. `--auth-token` still works as well, as a shared secret in front of the account system.
+
+Useful variations:
 
 ```console
 python -m src.app --db lab.db --port 5001          # different store and port
 python -m src.app --reset                          # clear the live store first
-python -m src.app --no-windows-events              # run the API without the collector
+python -m src.app --no-windows-events              # run the API without the local collector
 python -m src.app --intel-db ../threat-intelligence-aggregator/threat_intel.db
 python -m src.app --alert-log alerts.jsonl         # append new alerts as JSON lines
 python -m src.app --alert-webhook https://example.invalid/hook
 python -m src.app --retain-days 14                 # prune anything older than a fortnight
-python -m src.app --auth-token "$SIEM_AUTH_TOKEN"  # require a token on every route
+python -m src.app --auth-token "$SIEM_AUTH_TOKEN"  # an additional shared secret, not an account
 ```
 
-`--no-windows-events` is what you want on macOS or Linux, or on a Windows account that cannot read the security channel: the dashboard, the rule engine, the capture import and the filters all work, they simply have no live host source feeding them.
+`--no-windows-events` is what you want on macOS or Linux, or on a Windows account that cannot read the security channel: the dashboard, the rule engine, the capture import, the filters and the triage queue all work, they simply have no live local source feeding them. Events from other machines still arrive through an enrolled agent.
+
+An agent on another machine is one command, once the host has been enrolled:
+
+```console
+python -m src.agent --server http://siem.example:5000 --host-id web-01 --key hk_... --source windows --interval 30
+```
+
 
 ## What it looks like
 
 The page updates from the current contents of the database, so nothing on it is decorative. Counts, severity breakdowns, events-per-minute, timelines, providers, Event IDs, rule hits, ATT&CK techniques, the correlation panel and the event table are all computed from stored records, and the search, time, channel, provider, Event ID, user, rule, severity and alerts-only filters apply to everything on screen.
 
-The three views below are from a live run on one machine, which is why the numbers are odd and specific rather than round. Yours will differ; the panels will not.
+The console now has four parts beyond the overview, described at the end of this section: a sign-in view, a monitored-hosts panel, a detection triage queue with an investigation record, and a suppression manager with an audit log. The three screenshots below were taken on a run from before accounts and triage existed, so they show the collection, alerting and event-stream panels that are still on the page rather than the newer ones. The numbers are odd and specific because they come from one live machine; yours will differ, and the panels will not.
 
 ### The overview
 
@@ -68,6 +85,16 @@ Selecting **Details** on any row opens the record in full: the normalised fields
 **Export current view** writes exactly the rows on screen to CSV, which is the handover format: what you were looking at, when you were looking at it.
 
 At the bottom, the ingestion panel is where additional sources arrive — a JSON, JSONL or CSV file, a packet capture, or another local collector posting to the API. Those land in the same store as the collected events, which is what makes a network flow and a process event on the same host joinable at all.
+
+### The hosts, triage, suppression and audit panels
+
+**Monitored hosts** lists every enrolled agent with a computed status — `online`, `stale` or `never-reported` — how long ago it was last seen and how many events it has sent. A host that has never reported reads as `never-reported` rather than as a failure, and the status is computed from the last-seen time when the panel is read, so a machine that is switched off stays `online` until the stale window passes.
+
+**Detection triage** is the queue an analyst works. Each row is a stored detection with its status, its assignee and its notes; opening one shows the investigation record, and a note is appended, never edited. A detection moves through `new`, `acknowledged`, `investigating`, `closed` and `false_positive`, and every move is kept in the history.
+
+**Suppression rules** is the tuning loop: a rule hidden for one host or for every host, optionally with an expiry. The panel states plainly that a suppression hides a detection from the queue and does not stop the rule firing or the event being stored.
+
+**Activity audit** lists who did what — logins and failed logins, user and host changes, triage moves, suppressions and revocations — newest first, and is readable only by an admin. The page hides the suppression form and the audit table from a viewer and says why, rather than showing controls the server would refuse. When any of these endpoints cannot be reached, the panel says so instead of showing a zero.
 
 ## Detection rules are data, not code
 
@@ -144,30 +171,109 @@ A capture is read into **one event per flow** plus one per DNS name, with the pa
 
 Point `--intel-db` at the SQLite store written by the [Threat Intelligence Aggregator](../threat-intelligence-aggregator) and every event is checked against it as it arrives. An address, domain, hash or URL that matches raises an alert that names the indicator and the feed it came from. An event that was already an alert keeps the rule that fired and records the indicator alongside it, rather than having its reason replaced.
 
+## Accounts, roles and sessions
+
+The console keeps accounts, the host registry, the triage tables and the event store in the same SQLite file, so one file is still the whole console's state. The first administrator is created from the command line, taking the password from `SIEM_ADMIN_PASSWORD` or standard input and never from `argv`:
+
+```console
+python -m src.auth --init-admin analyst --db siem_live.db
+```
+
+Passwords are hashed with `hashlib.scrypt` (N=2**14, r=8, p=1, dklen=64) with a fresh `secrets` salt per user, and the parameters are stored on the user's own row so they can be raised later without invalidating existing hashes. An unknown username is verified against a dummy hash, so a missing account does not answer noticeably faster than a real one.
+
+There are three roles and one permission matrix, and it is the only place authority is defined:
+
+| Role | May |
+| --- | --- |
+| `viewer` | Read events and the host inventory. |
+| `analyst` | Everything a viewer may, plus triage detections, manage suppressions and export data. |
+| `admin` | Everything an analyst may, plus manage users, enrol hosts and read the audit log. |
+
+`has_permission` answers a question; the Flask route must ask it before serving. That separation is deliberate — the matrix lives in one dict, but enforcement is at the route, so a route that forgets to check is not protected by the matrix.
+
+Signing in creates a session: a random token from `secrets`, of which only the SHA-256 hash is stored, with an expiry (twelve hours by default) and a revocation flag. The token is returned to the browser in an HttpOnly cookie. Logging out revokes it, and disabling an account ends its sessions immediately, because a session is only valid while its user still exists and is enabled. There is no login rate limit, no lockout and no multi-factor authentication; the only brake on guessing is the scrypt cost.
+
+Every function that changes stored state writes an audit row, and both successful and failed logins are recorded. The log is readable at `GET /api/audit`, paged newest-first. It is append-only by convention, not by construction: SQLite does not stop a caller rewriting it and it is not signed.
+
+The console stays open until the first account exists. With no account, nothing is hidden and the page is a plain collector view; that is the documented default for a lab. Once any account exists, every protected route requires a session, while the page itself, `/health`, `/api/me`, `/login`, `/logout` and `/api/ingest` stay reachable without one. `/api/ingest` is reachable because it authenticates with a host key rather than a session.
+
+## Enrolling hosts and running an agent
+
+A host is enrolled by an administrator with `POST /api/hosts`, which returns a one-time plaintext key:
+
+```console
+curl -s -X POST http://127.0.0.1:5000/api/hosts -H 'Content-Type: application/json' -d '{"name": "web-01", "platform": "Windows"}'
+```
+
+The key is `hk_` followed by 32 bytes of URL-safe randomness. That response is the only moment the plaintext key exists outside the agent, exactly as real agent enrolment works: only a salted PBKDF2-HMAC-SHA256 hash is stored, so a lost key is replaced by rotation, not looked up. A host that is unknown, disabled or presenting the wrong key is refused before anything is stored, and an unknown host and a wrong key return the same reply, so the endpoint does not confirm which host names exist.
+
+One agent runs per machine:
+
+```console
+python -m src.agent --server http://siem.example:5000 --host-id web-01 --key hk_... --source windows --interval 30
+```
+
+`--source windows` reuses `windows_collector` to read the real Windows Event Log channels on that machine; `--source file` tails a JSONL or CSV file instead (`--file PATH`), which is how a host that is not Windows forwards whatever it can write as lines. Each cycle collects, drains any spooled backlog, ships in batches of `--batch-size` (default 500), and sleeps `--interval` seconds; `--once` runs a single collect-and-ship cycle and exits.
+
+The agent POSTs to `/api/ingest` with `Authorization: Bearer <key>` and a body of `{"host_id", "agent_version", "platform", "events"}`; the server normalises each event through `src/schema.py`, stores what it can and answers `{"accepted", "rejected", "errors"}`. If the server cannot be reached, the events are appended to a bounded JSONL spool (`--spool`, `--max-spool-bytes`) and drained oldest-first on the next successful cycle, so an outage delays delivery rather than losing it.
+
+The agent is a forwarder, not an endpoint agent. There is no installer, no service registration, no privilege separation and no tamper protection, and it does not sign its payloads. Anyone who can edit the agent, its arguments or its spool changes what the server sees, and the bearer key proves that a key was presented, not which machine sent a batch. The spool is ordinary unencrypted text; treat it as a log file that may contain credentials from event messages.
+
+`GET /api/hosts` lists every enrolled host with its computed status, last-seen age and event count. The status is computed when the host is read, not stored: `online` means it has reported and was last seen inside the stale window (five minutes by default), `stale` means it reported before but not since, and `never-reported` means it is enrolled but has never sent an event. That is a self-reported liveness signal — a machine switched off without telling anyone stays `online` until the window passes.
+
+## Triage and suppression
+
+A detection is a stored event with `is_alert = 1`. The triage workflow adds a status, an owner and an investigation record on top of it.
+
+`GET /api/detections` returns the queue, ordered by severity and then newest-first, each row carrying its status and assignee. `POST /api/detections/{id}/status` moves a detection through `new`, `acknowledged`, `investigating`, `closed` and `false_positive`. Every status change appends a row to the transition history, so the path through a detection stays visible after the fact. Notes are added with `POST /api/detections/{id}/notes` and read with `GET` on the same path; they are append-only, with no update or delete, because a note is the record of what an analyst thought and overwriting it would destroy the evidence the workflow exists to keep.
+
+Suppression is the tuning loop. A suppression is a rule scoped to one host or to every host, optionally with an expiry, and it hides that rule's detections from the queue. Expiry is evaluated when the suppression is read, so an expired one stops applying with no cleanup job. Marking a detection `false_positive` only **offers** a suppression; the analyst applies it as a separate, explicit call, so the judgement and the tuning are two decisions rather than one.
+
+Suppression is a workflow convenience, not a guarantee about detection quality. A suppressed rule still fires, still classifies the event, and the event is still stored with its rule id — it is only hidden from the triage queue. Nothing about a suppression changes what the rule engine decides, and suppressing a true positive hides it just as effectively as a false one.
+
+## The event schema
+
+Every source produces events in a different shape, so `src/schema.py` defines one canonical record and maps each producer onto it. The record has seventeen fields — `timestamp`, `host_id`, `source`, `event_type`, `severity`, `message`, `user`, `process`, `command_line`, `src_ip`, `dst_ip`, `dst_port`, `dns_query`, `file_hash`, `rule_id`, `techniques` and `raw`. Only `message` is required; every other field has a documented default, and a field the source does not supply is `None` rather than a placeholder. The producer strings `"unknown"` and `"localhost"` are normalised to `None` so a consumer can tell a known value from an absent one, and unknown input fields survive in `raw`, so nothing a source sent is lost.
+
+There are four mappers, auto-detected from the record when the caller does not name one: `windows-event-log`, `sysmon`, `pcap-flow` and `generic-json`. The Sysmon channel is checked before the declared source, because the Windows collector labels a Sysmon payload `windows-event-log` while the channel says otherwise. `GET /api/schema` returns this description so the page can document itself.
+
 ## Retention, alerting and authentication
 
 - **Retention, by age and by volume.** `--retain-days` prunes events older than the window; `--max-db-mb` deletes the oldest events once the store passes a size. Whichever limit is reached first wins, and both are off at `0`. The age default is 30 days and the size default is 500 MB. Both are needed: Sysmon on a working laptop produced about 63 events a minute after tuning, which is 91,000 a day and roughly 6.8 GB over a 30-day window — a problem the age limit alone never sees. The current size and the cap are reported on the dashboard. Correlation alerts expire with the events they were built from, because a sequence finding is only checkable while its events are still there.
 - **Alerting.** `--alert-log` appends every alert as a JSON line; `--alert-webhook` POSTs it. `--alert-min-severity` sets the floor (default `Medium`). A webhook that fails is recorded and shown on the dashboard rather than stopping collection.
-- **Authentication.** `--auth-token`, or the `SIEM_AUTH_TOKEN` environment variable, requires a bearer token on every route. Left unset, the console is open on `127.0.0.1`, which is the documented default for a lab. When a token is set, open the page as `/?token=...` and it will authenticate its own requests.
+- **Authentication.** `--auth-token`, or the `SIEM_AUTH_TOKEN` environment variable, requires a bearer token on every route, in addition to the account system described above. When a token is set, open the page as `/?token=...` and it will authenticate its own requests.
+
 
 ## Routes
 
 | Route | Purpose |
 | --- | --- |
-| `GET /health` | Confirms the app is up, and reports the rule and indicator counts. |
+| `GET /health` | Confirms the app is up, and reports the rule, indicator and auth counts. |
 | `GET /api/dashboard` | The whole dashboard snapshot, with every filter accepted as a query parameter. |
 | `GET /api/rules` | Every loaded detection and correlation rule, its ATT&CK techniques and its documented false positives. |
+| `GET /api/schema` | The canonical event schema, so the page can document itself. |
+| `GET /api/me` | The signed-in user's name and role, or 401. |
+| `POST /login`, `POST /logout` | Start and end a session. |
 | `POST /api/events` | Ingest one event object or a list of them. |
+| `POST /api/ingest` | Accept a batch from a collector agent, authenticated by host key. |
 | `POST /api/import` | Upload a JSON, JSONL, NDJSON or CSV file (3 MB limit). |
 | `POST /api/pcap` | Upload a `.pcap`, `.pcapng` or `.cap` capture. |
 | `POST /api/correlate` | Run the correlation rules over stored alerts now. |
 | `POST /api/events/clear` | Empty the live store. |
+| `GET /api/hosts` | Every enrolled host with its status, last-seen age and event count. |
+| `POST /api/hosts` | Enrol a host and return its one-time key. Admin only. |
+| `GET /api/detections` | The triage queue, filtered and paged. |
+| `POST /api/detections/{id}/status` | Move a detection to a new status. |
+| `GET`, `POST /api/detections/{id}/notes` | Read or append a detection's investigation notes. |
+| `GET`, `POST /api/suppressions` | List or create a suppression. |
+| `DELETE /api/suppressions/{id}` | Revoke a suppression. |
+| `GET /api/audit` | The audit log, newest first, paged. |
 
 Bad input comes back as JSON with a 400 and a sentence explaining the problem, never as an HTML error page: a missing message field, a severity outside High/Medium/Low, a CSV whose rows do not match the header width, a deeply nested JSON document, a `since` value that is not a whole number of minutes, or a file that is not a capture. A batch is validated before insertion, so one bad record does not leave half an import behind.
 
 ## How the collector works
 
-`windows_collector.py` reads records from the channels it can reach, converts each one into a payload, and hands it to the ingestion pipeline. Classification is not decided in the collector: the payload goes to the rule engine, so a detection changes by editing a rule file.
+`windows_collector.py` is used in two places. The console's own collector reads the machine it runs on; the agent's `--source windows` mode reuses the same reader to forward another machine's channels, so both produce the same payload shape. The module reads records from the channels it can reach, converts each one into a payload, and hands it to the ingestion pipeline. Classification is not decided in the collector: the payload goes to the rule engine, so a detection changes by editing a rule file.
 
 The channels are `Security`, `System`, `Application`, `Microsoft-Windows-Sysmon/Operational`, Windows Defender and PowerShell. **Sysmon is the one that matters most**, because it records the command line of a new process, the process that started it, and the connections it makes. The Security log tells you an account logged on; Sysmon tells you what ran and what it talked to.
 
@@ -195,10 +301,17 @@ Two places have to be checked, and installing Sysmon is what made the second one
 
 Read this before treating a clean dashboard as a clean machine.
 
-- **One host.** The collector reads the machine it runs on. Events from other machines have to be shipped in through `POST /api/events` or an import; there is no agent, no forwarding protocol and no multi-host enrolment. A real SIEM's defining feature is many sources correlated together, and this has one live source.
-- **No user accounts.** There is no concept of a user here: no logins, no roles, no sessions, and no record of who queried what. The page is a URL several people could have open at once, and none of them is distinguishable from any other. `--auth-token` adds one shared secret rather than identity — everyone holding it is the same person as far as the application is concerned.
-- **A local lab console, not a hardened service.** With no `--auth-token` there is no authentication at all, and the Flask development server is doing the serving. It is not designed to face a network you do not control.
-- **Scale.** SQLite with `LIKE` queries and a 300-row page is fine for a workstation's event log and will not survive millions of events. There is no hot/warm/cold tiering, no index beyond the two on the table, and no sharding.
+- **No TLS.** The Flask development server serves plain HTTP. Passwords and session cookies cross the network in cleartext the moment the console is bound to anything but localhost, and the session cookie is not marked `Secure` because there is no HTTPS for it to require. Sessions are only as safe as the transport that carries them.
+- **Roles are enforced by the routes, not the database.** `auth.has_permission` answers a question; the Flask route has to ask it. A route that forgets to check is not protected by the permission matrix, and the matrix is one Python dict rather than a database-enforced policy.
+- **Sessions are bearer tokens.** The cookie is `HttpOnly` and `SameSite=Lax`, but anyone who can read the cookie or the token can use the session until it expires or is revoked. There is no login rate limit, no lockout and no multi-factor authentication; the only brake on guessing is the scrypt cost, roughly 0.18 seconds per attempt at the default parameters.
+- **The console is open until the first account exists.** With no account, the protected routes are reachable on localhost without a session. That is the documented lab default, and it means the first thing to do before binding to anything but loopback is create an admin.
+- **The agent cannot be trusted about which machine it is.** The bearer key proves that a key was presented, not which machine sent a batch. The agent has no installer, no service registration, no privilege separation, no tamper protection and no payload signing, so anyone who can edit the agent, its arguments or its spool changes what the server sees. The key is the whole of its identity.
+- **The agent spool is unencrypted plain text.** Events that could not be shipped, including any credentials that were in their messages, sit in a JSONL file until delivered. Treat it as a sensitive log file.
+- **Suppression is a workflow convenience, not a detection-quality guarantee.** A suppressed rule still fires, still classifies the event, and the event is still stored with its rule id; it is only hidden from the triage queue. Suppressing a true positive hides it as effectively as a false one.
+- **No baselining.** The rules cannot say whether an event is unusual for a host, only whether it matches a pattern. That is why the noisiest rules record themselves as context instead of raising alerts.
+- **Search is SQL `LIKE` with paging.** Search matches a `LIKE ... ESCAPE` pattern across ten columns and pages the result with a limit and an offset; it is not an index-backed query language, and it will not stay fast over millions of rows.
+- **The store is a single SQLite file in a single process.** Events, accounts, hosts, triage state and the audit log all live in one file served by one process. There is no replication, no hot/warm/cold tiering, no backup and no high availability; the indexes on the table and a `LIKE` scan are the whole query strategy.
+- **A local lab console, not a hardened service.** The Flask development server is not designed to face a network you do not control, and the agent is a forwarder rather than an endpoint agent. Nothing here is a substitute for a hardened production service.
 - **Rule coverage is a documented subset of Sigma.** Unsupported keys are refused rather than ignored, so a rule that loads is a rule that works, but a Sigma rule using an unsupported feature will not load as-is.
 - **Correlation is sequence-only.** Ordered steps on a single grouping field inside a time window. There are no thresholds, no joins across fields, and no baselining of what is normal for a host.
 - **Several rules are noisy by design and marked as context.** The outbound-connection rule matches normal traffic, so it records rather than alerts. That is a workaround for having no baselining: without a notion of what is normal for a host, the honest option is to treat the behaviour as context instead of pretending a browser is an incident.
@@ -206,10 +319,11 @@ Read this before treating a clean dashboard as a clean machine.
 - **Sysmon is a large source.** Even tuned, it is the bulk of the store — 1,031 of 1,157 events in one measured run. That is the nature of endpoint telemetry, and it is why the store is bounded by size as well as age.
 - **The collector reads the log by running PowerShell.** Six channels are polled every two seconds, one process each. That works and it is what the platform gives without an extra dependency, but it is heavy, it produces the self-generated volume described above, and a machine with a slow PowerShell profile will poll slowly. A native API would be the right long-term answer.
 
+
 ## Tests
 
 ```console
 python -m pytest -q tests
 ```
 
-The suite covers empty startup, Windows and Sysmon event mapping, rule loading and matching, the condition operators, severity ordering, context rules that record without alerting, correlation sequencing and its window, grouping and step count, capture parsing into flows, threat-intelligence matching, retention by age and by volume, schema migration from an older store, notification, authentication, the collector's exclusion of its own processes, the channel-state classification, the API surface, the `since` bounds, and the JavaScript controls exercised in Node against a temporary API. A separate test reads real System events on Windows and is skipped elsewhere.
+327 tests pass. The suite covers empty startup, Windows and Sysmon event mapping, rule loading and matching, the condition operators, severity ordering, context rules that record without alerting, correlation sequencing and its window, grouping and step count, capture parsing into flows, threat-intelligence matching, retention by age and by volume, schema migration from an older store, notification, the collector's exclusion of its own processes, the channel-state classification, the API surface, the `since` bounds, and the JavaScript controls exercised in Node against a temporary API. It also covers the account and role model, the host registry and enrolment keys, the agent's batching, spool and file tailing, the triage status machine, append-only notes, suppression scoping and expiry, and the canonical event schema. A separate test reads real System events on Windows and is skipped elsewhere.

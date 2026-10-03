@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from . import auth, hosts, schema, triage
 from .correlation import CORRELATION_SOURCE, correlate
 from .enrichment import ThreatIntel, apply_enrichment
 from .notify import Notifier
@@ -27,6 +28,9 @@ from .rules import RuleEngine, RuleError, shared_engine
 from .windows_collector import WindowsEventCollector
 
 VALID_SEVERITIES = ("High", "Medium", "Low")
+
+# Name of the cookie carrying a signed-in user's session token.
+SESSION_COOKIE = "siem_session"
 
 # Ten years in minutes. SQLite cannot represent a window beyond its own date
 # range, so a larger value used to match no events at all.
@@ -64,6 +68,7 @@ MIGRATIONS = (
     ("techniques", "ALTER TABLE live_events ADD COLUMN techniques TEXT NOT NULL DEFAULT ''"),
     ("matched_on", "ALTER TABLE live_events ADD COLUMN matched_on TEXT NOT NULL DEFAULT ''"),
     ("enrichment", "ALTER TABLE live_events ADD COLUMN enrichment TEXT NOT NULL DEFAULT ''"),
+    ("host_id", "ALTER TABLE live_events ADD COLUMN host_id TEXT NOT NULL DEFAULT ''"),
 )
 
 DEFAULT_RETAIN_DAYS = 30
@@ -135,6 +140,16 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
         "CREATE INDEX IF NOT EXISTS ix_live_events_rule "
         "ON live_events(rule_id)"
     )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ix_live_events_host_id "
+        "ON live_events(host_id)"
+    )
+
+    # Accounts, the host registry and the triage tables live in the same store,
+    # so a single file is still the whole console's state.
+    auth.ensure_schema(connection)
+    hosts.ensure_schema(connection)
+    triage.ensure_schema(connection)
 
     connection.commit()
     return connection
@@ -225,14 +240,17 @@ def normalise_payload(
         _techniques_text(payload.get("techniques")),
         _json_text(payload.get("matched_on")),
         _json_text(payload.get("enrichment")),
+        # Which enrolled host this came from. Empty for anything that arrived
+        # without going through an agent, which is how local events look.
+        str(payload.get("host_id") or "").strip(),
     )
 
 
 INSERT_SQL = """INSERT OR IGNORE INTO live_events(
     timestamp,channel,provider,event_id,level,severity,username,host,
     source_ip,message,record_id,source,is_alert,rule_name,raw_log,external_id,
-    rule_id,techniques,matched_on,enrichment
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+    rule_id,techniques,matched_on,enrichment,host_id
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
 
 
 def classify_payloads(
@@ -480,6 +498,19 @@ def prune_to_size(db_path: Path, max_mb: int) -> int:
 
 def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _whole_number(value: Any, default: int) -> int:
+    """A whole number from a query string, falling back to the default.
+
+    Paging parameters come from the address bar, so a mistyped one should give
+    the default page rather than an error.
+    """
+
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
 
 
 def _as_bool(value: str | None) -> bool:
@@ -892,7 +923,7 @@ def dashboard_app(
     """
 
     try:
-        from flask import Flask, jsonify, render_template, request
+        from flask import Flask, jsonify, redirect, render_template, request
     except ImportError as exc:
         raise RuntimeError(
             "Flask is required. Run: python -m pip install -r requirements.txt"
@@ -916,15 +947,70 @@ def dashboard_app(
     def refused():
         return jsonify({"error": "Authentication required. Send the token as a bearer token."}), 401
 
+    # Routes that must work before anybody has signed in: the page itself, the
+    # health probe, the identity probe the page uses to decide whether to show
+    # the sign-in form, the form's own target, and agent ingestion, which
+    # authenticates with a host key instead of a session.
+    OPEN_PATHS = {"/", "/health", "/login", "/logout", "/api/me", "/api/ingest"}
+
+    # Whether accounts exist is asked once and then remembered, so the gate does
+    # not query on every request. Creating the first user clears it.
+    accounts = {"known": False, "required": False}
+
+    def accounts_required() -> bool:
+        if not accounts["known"]:
+            with closing(get_connection(db_path)) as connection:
+                accounts["required"] = bool(auth.list_users(connection))
+            accounts["known"] = True
+        return accounts["required"]
+
+    def current_user():
+        """The signed-in user, or None.
+
+        The console is open until the first account is created, which is the
+        documented lab default; after that every protected route needs a session.
+        """
+        token = request.cookies.get(SESSION_COOKIE, "")
+        if not token:
+            return None
+        with closing(get_connection(db_path)) as connection:
+            return auth.validate_session(connection, token)
+
+    def require(action: str):
+        """A refusal response when the signed-in user may not do this, else None."""
+
+        user = current_user()
+        if user is None:
+            return jsonify({"error": "Sign in to use this console."}), 401
+        if not auth.has_permission(str(user["role"]), action):
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            f"Your role ({user['role']}) may not "
+                            f"{action.replace('_', ' ')}."
+                        )
+                    }
+                ),
+                403,
+            )
+        return None
+
     @app.before_request
     def require_token():
         # The page itself is served without the header; it carries the token in
         # the query string so its own fetches can present it.
         if request.path == "/" and request.method == "GET":
             return None
-        if authorised():
+        if not authorised():
+            return refused()
+        if request.path in OPEN_PATHS:
             return None
-        return refused()
+        if not accounts_required():
+            return None
+        if current_user() is None:
+            return jsonify({"error": "Sign in to use this console."}), 401
+        return None
 
     @app.errorhandler(ValueError)
     def invalid_input(error):
@@ -1089,6 +1175,355 @@ def dashboard_app(
     def api_clear():
         reset_events(db_path)
         return jsonify({"cleared": True})
+
+    # ---------------------------------------------------------------- identity
+
+    @app.get("/api/me")
+    def api_me():
+        user = current_user()
+        if user is None:
+            return jsonify({"error": "Not signed in."}), 401
+        return jsonify({"username": user["username"], "role": user["role"]})
+
+    @app.post("/login")
+    def login():
+        data = request.form if request.form else (request.get_json(silent=True) or {})
+        if not isinstance(data, dict):
+            data = {}
+        username = str(data.get("username", "")).strip()
+        password = str(data.get("password", ""))
+        with closing(get_connection(db_path)) as connection:
+            user = auth.authenticate(connection, username, password)
+            if user is None:
+                connection.commit()  # the failed attempt is an audit row
+                return jsonify({"error": "Invalid username or password."}), 401
+            session = auth.create_session(connection, user["username"], actor=user["username"])
+            connection.commit()
+        response = redirect("/")
+        response.set_cookie(
+            SESSION_COOKIE, session["token"], httponly=True, samesite="Lax"
+        )
+        return response
+
+    @app.post("/logout")
+    def logout():
+        token = request.cookies.get(SESSION_COOKIE, "")
+        if token:
+            with closing(get_connection(db_path)) as connection:
+                auth.revoke_session(connection, token)
+                connection.commit()
+        response = redirect("/")
+        response.delete_cookie(SESSION_COOKIE)
+        return response
+
+    # ------------------------------------------------------------------ agents
+
+    def host_by_name(connection, name: str):
+        """The registry row for a host name, or None."""
+
+        return next(
+            (row for row in hosts.list_hosts(connection) if row["name"] == name), None
+        )
+
+    @app.post("/api/ingest")
+    def api_ingest():
+        """Accept a batch from a collector agent, authenticated by host key.
+
+        The body is the contract documented in ``agent.py``:
+        ``{"host_id", "agent_version", "platform", "events"}``, and the reply is
+        ``{"accepted", "rejected", "errors"}``. A host that is unknown, disabled
+        or presenting the wrong key is refused before anything is stored.
+        """
+
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"error": "Send one JSON object."}), 400
+        name = str(data.get("host_id", "")).strip()
+        events = data.get("events")
+        if not name:
+            return jsonify({"error": "host_id is required."}), 400
+        if not isinstance(events, list):
+            return jsonify({"error": "events must be a list."}), 400
+
+        key = _bearer_token(request)
+        with closing(get_connection(db_path)) as connection:
+            row = host_by_name(connection, name)
+            if row is None or not hosts.verify_host_key(connection, int(row["host_id"]), key):
+                # The same reply either way, so the endpoint does not confirm
+                # which host names exist to somebody guessing.
+                return jsonify({"error": "Unknown host or invalid key."}), 401
+            if not row["enabled"]:
+                return jsonify({"error": "This host is disabled."}), 403
+            registry_id = int(row["host_id"])
+            if data.get("agent_version") or data.get("platform"):
+                connection.execute(
+                    "UPDATE hosts SET agent_version = COALESCE(NULLIF(?, ''), agent_version), "
+                    "platform = COALESCE(NULLIF(?, ''), platform) WHERE host_id = ?",
+                    (
+                        str(data.get("agent_version", "")),
+                        str(data.get("platform", "")),
+                        registry_id,
+                    ),
+                )
+            connection.commit()
+
+        errors: list[str] = []
+        payloads: list[dict[str, Any]] = []
+        for index, raw in enumerate(events):
+            if not isinstance(raw, dict):
+                errors.append(f"event {index}: not an object")
+                continue
+            try:
+                event = schema.normalise_event(raw)
+            except ValueError as exc:
+                errors.append(f"event {index}: {exc}")
+                continue
+            payload = schema.to_payload(event, source_default="agent")
+            payload["host"] = name
+            payload["host_id"] = str(registry_id)
+            payloads.append(payload)
+
+        if payloads:
+            try:
+                ingest_payloads(db_path, payloads, f"agent:{name}", notifier=notifier)
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 400
+            with closing(get_connection(db_path)) as connection:
+                hosts.touch_host(connection, registry_id, len(payloads))
+                connection.commit()
+
+        return jsonify({"accepted": len(payloads), "rejected": len(errors), "errors": errors}), 202
+
+    @app.get("/api/hosts")
+    def api_hosts():
+        with closing(get_connection(db_path)) as connection:
+            rows = hosts.list_hosts(connection)
+            summary = hosts.host_summary(connection)
+        return jsonify({"hosts": rows, "summary": summary})
+
+    @app.post("/api/hosts")
+    def api_enrol_host():
+        denied = require("manage_users")
+        if denied:
+            return denied
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "Send one JSON object."}), 400
+        name = str(data.get("name", "")).strip()
+        if not name:
+            return jsonify({"error": "name is required."}), 400
+        user = current_user()
+        with closing(get_connection(db_path)) as connection:
+            if host_by_name(connection, name) is not None:
+                return jsonify({"error": f"A host called {name} is already enrolled."}), 400
+            enrolled = hosts.enrol_host(
+                connection,
+                name,
+                platform=str(data.get("platform", "")).strip() or None,
+                agent_version=str(data.get("agent_version", "")).strip() or None,
+            )
+            auth.record_audit(
+                connection,
+                str(user["username"]),
+                "enrol_host",
+                name,
+                f"host_id={enrolled['host_id']}",
+            )
+            connection.commit()
+        return jsonify(enrolled), 201
+
+    # ------------------------------------------------------------------ triage
+
+    def detection_by_id(connection, detection_id: int):
+        row = connection.execute(
+            "SELECT * FROM live_events WHERE id = ? AND is_alert = 1", (detection_id,)
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def detection_payload(connection, row: dict[str, Any]) -> dict[str, Any]:
+        """Shape a stored detection for the dashboard.
+
+        The triage tables identify a detection's host by its name, which is what
+        the queue filters on, so ``host_id`` in this payload is that name.
+        """
+
+        return {
+            "id": int(row["id"]),
+            "host_id": str(row.get("host", "")),
+            "host": str(row.get("host", "")),
+            "rule_id": str(row.get("rule_id", "")),
+            "title": str(row.get("rule_name") or row.get("rule_id") or ""),
+            "severity": str(row.get("severity", "")),
+            "technique": str(row.get("techniques", "")),
+            "timestamp": str(row.get("timestamp", "")),
+            "status": str(row.get("status", "new")),
+            "assignee": str(row.get("assignee", "")),
+            "note_count": len(triage.list_notes(connection, row)),
+        }
+
+    @app.get("/api/detections")
+    def api_detections():
+        with closing(get_connection(db_path)) as connection:
+            result = triage.list_detections(
+                connection,
+                status=request.args.get("status") or None,
+                host_id=request.args.get("host_id") or None,
+                assignee=request.args.get("assignee") or None,
+                limit=_whole_number(request.args.get("limit"), 50),
+                offset=_whole_number(request.args.get("offset"), 0),
+            )
+            summary = triage.triage_summary(connection)
+            detections = [detection_payload(connection, row) for row in result["detections"]]
+        return jsonify(
+            {"detections": detections, "summary": summary, "total": result["total"]}
+        )
+
+    @app.post("/api/detections/<int:detection_id>/status")
+    def api_detection_status(detection_id: int):
+        denied = require("triage_detection")
+        if denied:
+            return denied
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "Send one JSON object."}), 400
+        user = current_user()
+        with closing(get_connection(db_path)) as connection:
+            detection = detection_by_id(connection, detection_id)
+            if detection is None:
+                return jsonify({"error": "No such detection."}), 404
+            updated = triage.set_status(
+                connection,
+                detection,
+                str(data.get("status", "")),
+                str(user["username"]),
+                assignee=(str(data["assignee"]).strip() or None)
+                if data.get("assignee") is not None
+                else None,
+            )
+            connection.commit()
+        return jsonify({"ok": True, "status": updated.get("status", "")})
+
+    @app.get("/api/detections/<int:detection_id>/notes")
+    def api_detection_notes(detection_id: int):
+        with closing(get_connection(db_path)) as connection:
+            detection = detection_by_id(connection, detection_id)
+            if detection is None:
+                return jsonify({"error": "No such detection."}), 404
+            notes = triage.list_notes(connection, detection)
+        return jsonify({"notes": notes})
+
+    @app.post("/api/detections/<int:detection_id>/notes")
+    def api_add_detection_note(detection_id: int):
+        denied = require("triage_detection")
+        if denied:
+            return denied
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "Send one JSON object."}), 400
+        user = current_user()
+        with closing(get_connection(db_path)) as connection:
+            detection = detection_by_id(connection, detection_id)
+            if detection is None:
+                return jsonify({"error": "No such detection."}), 404
+            note = triage.add_note(
+                connection, detection, str(user["username"]), str(data.get("text", ""))
+            )
+            connection.commit()
+        return jsonify({"ok": True, "note": note}), 201
+
+    # ------------------------------------------------------------- suppressions
+
+    def suppression_payload(row: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(row)
+        payload["created_by"] = str(row.get("actor", ""))
+        return payload
+
+    @app.get("/api/suppressions")
+    def api_suppressions():
+        denied = require("view_events")
+        if denied:
+            return denied
+        with closing(get_connection(db_path)) as connection:
+            rows = triage.list_suppressions(connection)
+        return jsonify({"suppressions": [suppression_payload(row) for row in rows]})
+
+    @app.post("/api/suppressions")
+    def api_suppress():
+        denied = require("manage_suppressions")
+        if denied:
+            return denied
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "Send one JSON object."}), 400
+        user = current_user()
+        expires = data.get("expires_days")
+        try:
+            expires_days = int(expires) if expires not in (None, "") else None
+        except (TypeError, ValueError):
+            return jsonify({"error": "expires_days must be a whole number of days."}), 400
+        with closing(get_connection(db_path)) as connection:
+            created = triage.suppress(
+                connection,
+                str(data.get("rule_id", "")).strip(),
+                host_id=(str(data["host_id"]).strip() or None)
+                if data.get("host_id") is not None
+                else None,
+                scope=str(data.get("scope", "host")).strip() or "host",
+                reason=(str(data["reason"]).strip() or None)
+                if data.get("reason") is not None
+                else None,
+                actor=str(user["username"]),
+                expires_days=expires_days,
+            )
+            auth.record_audit(
+                connection,
+                str(user["username"]),
+                "suppress_rule",
+                str(created.get("rule_id", "")),
+                f"scope={created.get('scope', '')} host={created.get('host_id', '')}",
+            )
+            connection.commit()
+        return jsonify({"ok": True, "suppression": created}), 201
+
+    @app.delete("/api/suppressions/<int:suppression_id>")
+    def api_unsuppress(suppression_id: int):
+        denied = require("manage_suppressions")
+        if denied:
+            return denied
+        user = current_user()
+        with closing(get_connection(db_path)) as connection:
+            removed = triage.unsuppress(connection, suppression_id, str(user["username"]))
+            auth.record_audit(
+                connection,
+                str(user["username"]),
+                "unsuppress_rule",
+                str(removed.get("rule_id", "")),
+                f"suppression_id={suppression_id}",
+            )
+            connection.commit()
+        return jsonify({"ok": True, "suppression": removed})
+
+    # ------------------------------------------------------------------- audit
+
+    @app.get("/api/audit")
+    def api_audit():
+        denied = require("view_audit")
+        if denied:
+            return denied
+        limit = _whole_number(request.args.get("limit"), 100)
+        offset = _whole_number(request.args.get("offset"), 0)
+        with closing(get_connection(db_path)) as connection:
+            entries = auth.list_audit(connection, limit, offset)
+            total = connection.execute(
+                "SELECT COUNT(*) AS count FROM audit_log"
+            ).fetchone()["count"]
+        return jsonify({"entries": entries, "total": int(total)})
+
+    @app.get("/api/schema")
+    def api_schema():
+        """The event schema this console stores, so the page can document itself."""
+
+        return jsonify(schema.describe_schema())
 
     return app
 

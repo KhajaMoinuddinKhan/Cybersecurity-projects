@@ -12,7 +12,7 @@ Listed largest first.
 
 | Project | What it does |
 | --- | --- |
-| [SIEM Dashboard](PROJECTS/siem-dashboard) | Collects Windows Event Log and Sysmon telemetry, classifies it with rules loaded from files, correlates sequences across sources, and serves a live dashboard. |
+| [SIEM Dashboard](PROJECTS/siem-dashboard) | Collects Windows Event Log and Sysmon telemetry from agents on many machines, normalises it to one event schema, classifies and correlates it with rules loaded from files, and gives analysts a triage queue, suppression tuning, accounts with roles and an audit trail. |
 | [Threat Intelligence Aggregator](PROJECTS/threat-intelligence-aggregator) | Merges indicators from several feeds and URLs into one store, normalising by type, tracking which sources reported each one, scoring confidence and expiring stale entries. |
 | [SSL/TLS Scanner](PROJECTS/ssl-tls-scanner) | Enumerates the protocol versions a server accepts, flags weak cipher families, reads the whole certificate chain, checks hostname match, expiry and HSTS, and grades the result. |
 | [Web Vulnerability Scanner](PROJECTS/web-vulnerability-scanner) | Probes a localhost page for reflected input, error-based SQL injection, open redirects, cookie flags, dangerous HTTP methods, exposed paths and missing anti-CSRF tokens, alongside the security-header checks. |

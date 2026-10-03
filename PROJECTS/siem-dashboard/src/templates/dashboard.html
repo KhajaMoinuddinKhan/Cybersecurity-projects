@@ -6,12 +6,50 @@
   <title>MKMK Live SIEM</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
   <meta name="siem-token" content="{{ auth_token or '' }}">
+  <style>
+  .login-view{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:rgba(8,10,18,.92);padding:24px}
+  .login-view[hidden]{display:none}
+  .login-card{width:min(380px,100%);display:grid;gap:14px;padding:28px;border:1px solid var(--line,#2a2f3a);border-radius:14px;background:var(--panel,#11141d)}
+  .login-card h2{margin:0}
+  .login-card label{display:grid;gap:6px;font-size:.8rem}
+  .login-card input{padding:10px;border-radius:8px;border:1px solid var(--line,#2a2f3a);background:var(--field,#0b0e15);color:inherit}
+  .user-box{display:flex;align-items:center;gap:8px}
+  .user-box form{margin:0}
+  .host-status{padding:2px 8px;border-radius:999px;font-size:.75rem}
+  .host-online{background:rgba(46,204,113,.16);color:#3ddc84}
+  .host-stale{background:rgba(241,196,15,.16);color:#f1c40f}
+  .host-never,.host-unknown,.host-offline{background:rgba(149,165,166,.16);color:#9aa4b2}
+  .triage-summary{display:flex;flex-wrap:wrap;gap:14px;margin:8px 0;font-size:.85rem}
+  .notes-list{max-height:320px;overflow:auto;display:grid;gap:10px;margin:12px 0}
+  .note-row{padding:10px;border:1px solid var(--line,#2a2f3a);border-radius:10px}
+  .note-head{display:flex;justify-content:space-between;gap:10px;font-size:.8rem}
+  .note-row p{margin:6px 0 0}
+  .notes-form{display:grid;gap:8px}
+  .notes-form textarea{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line,#2a2f3a);background:var(--field,#0b0e15);color:inherit;resize:vertical}
+  .suppression-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;align-items:end;margin-top:14px}
+  .suppression-form label{display:grid;gap:6px;font-size:.8rem}
+  .suppression-form input,.suppression-form select{padding:9px;border-radius:8px;border:1px solid var(--line,#2a2f3a);background:var(--field,#0b0e15);color:inherit}
+  .suppression-form p{grid-column:1/-1;margin:0}
+  .pager{display:flex;align-items:center;gap:12px;margin-top:12px;font-size:.85rem}
+  .muted{opacity:.7}
+  </style>
 </head>
 <body>
+<section id="login-view" class="login-view" hidden aria-label="Sign in">
+  <form id="login-form" class="login-card" method="post" action="/login">
+    <span class="kicker">AUTHENTICATION REQUIRED</span>
+    <h2>Sign in to MKMK SIEM</h2>
+    <p>This console requires an account. Enter your credentials to continue.</p>
+    <label><span>Username</span><input id="login-username" name="username" type="text" autocomplete="username" required></label>
+    <label><span>Password</span><input id="login-password" name="password" type="password" autocomplete="current-password" required></label>
+    <button class="primary-button" type="submit">Sign in</button>
+    <p id="login-message" class="chart-note" aria-live="polite"></p>
+  </form>
+</section>
 <a class="skip-link" href="#overview">Skip to dashboard</a>
 <aside class="sidebar" aria-label="Dashboard navigation">
   <a class="brand-mark" href="#overview" aria-label="MKMK overview">M</a>
-  <nav><a href="#overview"><span>◈</span>Overview</a><a href="#alerts"><span>△</span>Alerts</a><a href="#sources"><span>▤</span>Sources</a><a href="#health"><span>▧</span>Health</a><a href="#events"><span>≡</span>Events</a><a href="#ingestion"><span>⇥</span>Import</a></nav>
+  <nav><a href="#overview"><span>◈</span>Overview</a><a href="#alerts"><span>△</span>Alerts</a><a href="#sources"><span>▤</span>Sources</a><a href="#health"><span>▧</span>Health</a><a href="#events"><span>≡</span>Events</a><a href="#ingestion"><span>⇥</span>Import</a><a href="#hosts"><span>▦</span>Hosts</a><a href="#triage"><span>⚑</span>Triage</a><a id="nav-suppressions" href="#suppressions"><span>⊘</span>Suppressions</a><a id="nav-audit" href="#audit"><span>▥</span>Audit</a></nav>
   <span class="sidebar-label">MKMK</span>
 </aside>
 <main class="shell" id="overview">
@@ -25,6 +63,7 @@
       <button id="live-toggle" class="live-toggle active" type="button"><span class="pulse"></span><span id="live-label">LIVE</span></button>
       <div class="status-box"><span>Collector</span><strong id="collector-state">Starting...</strong></div>
       <div class="status-box"><span>Updated</span><strong id="last-updated">--</strong></div>
+      <div id="user-box" class="user-box" hidden><span class="user-label">Signed in</span><strong id="user-name">--</strong><span id="user-role" class="muted">--</span><form id="logout-form" method="post" action="/logout"><button type="submit" class="ghost-button">Sign out</button></form></div>
     </div>
   </header>
 
@@ -186,6 +225,104 @@
     <div id="event-detail" class="detail-grid"></div>
     <div class="raw-block"><span>Raw event</span><pre id="detail-raw"></pre></div>
   </dialog>
+
+  <section class="panel hosts-panel" id="hosts">
+    <div class="panel-heading">
+      <div><span class="kicker">09 / AGENT HOSTS</span><h2>Monitored hosts</h2></div>
+      <span class="mini-chip" id="hosts-chip">--</span>
+    </div>
+    <p id="hosts-note" class="chart-note">Loading host inventory</p>
+    <div class="stats-grid host-summary">
+      <article class="stat-card"><span>Total hosts</span><strong id="host-total">--</strong><small>Agents known to this server</small></article>
+      <article class="stat-card"><span>Online</span><strong id="host-online">--</strong><small>Seen inside the freshness window</small></article>
+      <article class="stat-card"><span>Stale</span><strong id="host-stale">--</strong><small>Reported before but not recently</small></article>
+      <article class="stat-card"><span>Never seen</span><strong id="host-never">--</strong><small>Registered with no events yet</small></article>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Host</th><th>Platform</th><th>Agent</th><th>Status</th><th>Last seen</th><th>Events</th><th>First seen</th></tr></thead>
+        <tbody id="host-body"><tr><td colspan="7" class="table-empty">Loading host inventory...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel triage-panel" id="triage">
+    <div class="panel-heading">
+      <div><span class="kicker">10 / TRIAGE QUEUE</span><h2>Detection triage</h2></div>
+      <span class="mini-chip" id="triage-chip">--</span>
+    </div>
+    <p id="triage-note" class="chart-note">Loading detections</p>
+    <div class="filter-grid triage-filters">
+      <label><span>Status</span><select id="triage-status-filter"><option value="">All statuses</option><option value="new">New</option><option value="acknowledged">Acknowledged</option><option value="investigating">Investigating</option><option value="closed">Closed</option><option value="false_positive">False positive</option></select></label>
+      <label><span>Host</span><select id="triage-host-filter"><option value="">All hosts</option></select></label>
+    </div>
+    <div class="triage-summary">
+      <span>New <b id="triage-new">--</b></span>
+      <span>Acknowledged <b id="triage-acknowledged">--</b></span>
+      <span>Investigating <b id="triage-investigating">--</b></span>
+      <span>Closed <b id="triage-closed">--</b></span>
+      <span>False positive <b id="triage-false-positive">--</b></span>
+      <span>Total <b id="triage-total">--</b></span>
+    </div>
+    <div class="table-wrap alert-table-wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Severity</th><th>Host</th><th>Rule</th><th>ATT&amp;CK</th><th>Status</th><th>Assignee</th><th>Notes</th><th></th></tr></thead>
+        <tbody id="triage-body"><tr><td colspan="9" class="table-empty">Loading detections...</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pager"><button id="triage-prev" class="ghost-button" type="button">Previous</button><span id="triage-page">Page 1</span><button id="triage-next" class="ghost-button" type="button">Next</button></div>
+  </section>
+
+  <section class="panel suppressions-panel" id="suppressions">
+    <div class="panel-heading">
+      <div><span class="kicker">11 / SUPPRESSIONS</span><h2>Suppression rules</h2></div>
+      <span class="mini-chip" id="suppressions-chip">--</span>
+    </div>
+    <p class="chart-note">A suppression hides a rule's detections from the triage queue and from alerting for the chosen scope. It does <strong>not</strong> stop the rule from firing or the underlying events from being collected &mdash; the detection still happens, it is simply kept out of the queue.</p>
+    <p id="suppression-role-note" class="chart-note"></p>
+    <p id="suppression-note" class="chart-note">Loading suppressions</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Rule</th><th>Host</th><th>Scope</th><th>Reason</th><th>Created by</th><th>Created</th><th>Expires</th><th></th></tr></thead>
+        <tbody id="suppression-body"><tr><td colspan="8" class="table-empty">Loading suppressions...</td></tr></tbody>
+      </table>
+    </div>
+    <form id="suppression-form" class="suppression-form">
+      <label><span>Rule ID</span><input id="suppression-rule" type="text" placeholder="rule id to suppress" required></label>
+      <label><span>Host ID (optional)</span><input id="suppression-host" type="text" placeholder="blank = all hosts"></label>
+      <label><span>Scope</span><select id="suppression-scope"><option value="global">Global (all hosts)</option><option value="host">This host only</option></select></label>
+      <label><span>Reason</span><input id="suppression-reason" type="text" placeholder="why this is suppressed" required></label>
+      <label><span>Expires in days (optional)</span><input id="suppression-days" type="number" min="1" step="1" placeholder="never"></label>
+      <button class="primary-button" type="submit">Add suppression</button>
+      <p id="suppression-message" class="chart-note" aria-live="polite"></p>
+    </form>
+  </section>
+
+  <section class="panel audit-panel" id="audit">
+    <div class="panel-heading">
+      <div><span class="kicker">12 / AUDIT LOG</span><h2>Activity audit</h2></div>
+      <span class="mini-chip" id="audit-chip">--</span>
+    </div>
+    <p id="audit-role-note" class="chart-note"></p>
+    <p id="audit-note" class="chart-note">Loading audit entries</p>
+    <div class="table-wrap" id="audit-table">
+      <table>
+        <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
+        <tbody id="audit-body"><tr><td colspan="5" class="table-empty">Loading audit entries...</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pager" id="audit-pager"><button id="audit-prev" class="ghost-button" type="button">Previous</button><span id="audit-page">Page 1</span><button id="audit-next" class="ghost-button" type="button">Next</button></div>
+  </section>
+
+  <dialog id="notes-dialog">
+    <div class="dialog-head"><div><span class="kicker">DETECTION NOTES</span><h2 id="notes-title">Detection</h2></div><button id="close-notes" type="button">Close</button></div>
+    <div id="notes-list" class="notes-list"></div>
+    <form id="notes-form" class="notes-form">
+      <textarea id="note-text" rows="3" placeholder="Add a triage note..." required></textarea>
+      <button class="primary-button" type="submit">Add note</button>
+    </form>
+    <p id="notes-message" class="chart-note" aria-live="polite"></p>
+  </dialog>
 </main>
 
 <script>
@@ -193,7 +330,9 @@
   var state = {
     severity: "", search: "", since: "", channel: "", provider: "", eventId: "",
     username: "", ruleId: "", alertsOnly: false, live: true, timer: null, requestId: 0,
-    events: new Map()
+    events: new Map(),
+    me: null, triageStatus: "", triageHost: "", triageOffset: 0, notesDetection: null,
+    auditOffset: 0
   };
 
   var tokenMeta = document.querySelector('meta[name="siem-token"]');
@@ -538,6 +677,7 @@
       updateSelect("filter-rule", data.dimensions.rules || [], "All rules", state.ruleId);
 
       text("last-updated", new Date(data.generated_at).toLocaleTimeString());
+      await refreshOperations();
     } catch (error) {
       if (requestId !== state.requestId) return;
       text("collector-state", "connection error");
@@ -658,6 +798,407 @@
   el("close-dialog").addEventListener("click", function () { el("event-dialog").close(); });
   el("event-dialog").addEventListener("click", function (event) {
     if (event.target === el("event-dialog")) el("event-dialog").close();
+  });
+
+
+  // ---- Multi-host, multi-user and triage features ---------------------------------
+  var TRIAGE_LIMIT = 25;
+  var AUDIT_LIMIT = 25;
+  var UNAVAILABLE = "This feature is not available on this server.";
+  var STATUS_LABELS = {new:"New", acknowledged:"Acknowledged", investigating:"Investigating", closed:"Closed", false_positive:"False positive"};
+
+  function isViewer() { return !!(state.me && /viewer/i.test(String(state.me.role || ""))); }
+  function canManageSuppressions() { return !!state.me && !isViewer(); }
+
+  function statusLabel(value) {
+    return STATUS_LABELS[String(value || "").toLowerCase()] || (value ? String(value) : "Unknown");
+  }
+  function statusOptions(selected) {
+    var current = String(selected || "");
+    return Object.keys(STATUS_LABELS).map(function (key) {
+      return '<option value="' + key + '"' + (key === current ? ' selected' : '') + '>' + STATUS_LABELS[key] + '</option>';
+    }).join("");
+  }
+  function hostStatusLabel(value) {
+    var labels = {online:"Online", stale:"Stale", never:"Never seen", offline:"Offline"};
+    return labels[String(value || "").toLowerCase()] || (value ? String(value) : "Unknown");
+  }
+  function ageText(seconds) {
+    if (seconds == null || !Number.isFinite(Number(seconds))) return "unknown";
+    var value = Number(seconds);
+    if (value < 60) return Math.round(value) + "s ago";
+    if (value < 3600) return Math.round(value / 60) + "m ago";
+    if (value < 86400) return Math.round(value / 3600) + "h ago";
+    return Math.round(value / 86400) + "d ago";
+  }
+
+  async function apiJson(path, options) {
+    try {
+      var response = await fetch(path, options);
+      if (response.status === 401) return {ok:false, status:401, unauthorised:true};
+      if (!response.ok) return {ok:false, status:response.status};
+      try {
+        var data = await response.json();
+        return {ok:true, status:response.status, data:data};
+      } catch (parseError) {
+        return {ok:false, status:response.status, parseError:parseError};
+      }
+    } catch (error) {
+      return {ok:false, status:0, error:error};
+    }
+  }
+  function unavailableText(result) {
+    if (result.unauthorised) return "This panel requires sign-in.";
+    if (!result.status) return "This feature could not be reached on this server.";
+    return UNAVAILABLE;
+  }
+
+  function applyRole() {
+    var known = !!state.me;
+    var viewer = known && isViewer();
+    var restricted = !known || viewer;
+    el("nav-suppressions").hidden = restricted;
+    el("nav-audit").hidden = restricted;
+    el("suppression-form").hidden = restricted;
+    el("audit-table").hidden = restricted;
+    el("audit-pager").hidden = restricted;
+    var suppressionNote = "";
+    var auditNote = "";
+    if (!known) {
+      suppressionNote = "Management controls are hidden until sign-in is available on this server.";
+      auditNote = "The audit log is not available until sign-in is available on this server.";
+    } else if (viewer) {
+      suppressionNote = "Read-only: your role (" + (state.me.role || "viewer") + ") can view suppressions but cannot add or remove them.";
+      auditNote = "The audit log is not available for your role (" + (state.me.role || "viewer") + ").";
+    }
+    text("suppression-role-note", suppressionNote);
+    text("audit-role-note", auditNote);
+  }
+
+  async function refreshIdentity() {
+    var result = await apiJson("/api/me");
+    if (result.ok && result.data && typeof result.data === "object") {
+      state.me = {username:String(result.data.username || ""), role:String(result.data.role || "")};
+      el("login-view").hidden = true;
+      el("user-box").hidden = false;
+      text("user-name", state.me.username || "unknown user");
+      text("user-role", state.me.role || "no role");
+    } else if (result.unauthorised) {
+      state.me = null;
+      el("login-view").hidden = false;
+      el("user-box").hidden = true;
+      text("login-message", "");
+    } else {
+      state.me = null;
+      el("login-view").hidden = true;
+      el("user-box").hidden = true;
+    }
+    applyRole();
+  }
+
+  async function refreshHosts() {
+    var result = await apiJson("/api/hosts");
+    var body = el("host-body");
+    if (!result.ok || !result.data || !Array.isArray(result.data.hosts)) {
+      text("hosts-note", unavailableText(result));
+      text("hosts-chip", "unavailable");
+      ["host-total","host-online","host-stale","host-never"].forEach(function (id) { text(id, "--"); });
+      body.innerHTML = '<tr><td colspan="7" class="table-empty">Host inventory is not available on this server.</td></tr>';
+      return;
+    }
+    var hosts = result.data.hosts;
+    var summary = result.data.summary || {};
+    text("hosts-note", hosts.length ? "" : "No agent hosts have reported yet.");
+    text("hosts-chip", hosts.length + (hosts.length === 1 ? " host" : " hosts"));
+    text("host-total", summary.total != null ? summary.total : hosts.length);
+    text("host-online", summary.online != null ? summary.online : "--");
+    text("host-stale", summary.stale != null ? summary.stale : "--");
+    text("host-never", summary.never != null ? summary.never : "--");
+    updateSelect("triage-host-filter", hosts.map(function (host) { return host.host_id; }), "All hosts", state.triageHost);
+    if (!hosts.length) {
+      body.innerHTML = '<tr><td colspan="7" class="table-empty">No agent hosts have reported yet.</td></tr>';
+      return;
+    }
+    body.innerHTML = hosts.map(function (host) {
+      return '<tr><td><strong>' + esc(host.name || host.host_id) + '</strong><br><span class="muted mono">' + esc(host.host_id) + '</span></td>' +
+        '<td>' + esc(host.platform || "-") + '</td>' +
+        '<td><code>' + esc(host.agent_version || "-") + '</code></td>' +
+        '<td><span class="host-status host-' + esc(String(host.status || "").toLowerCase()) + '">' + esc(hostStatusLabel(host.status)) + '</span></td>' +
+        '<td>' + esc(ageText(host.age_seconds)) + '<br><span class="muted mono">' + esc(host.last_seen || "-") + '</span></td>' +
+        '<td>' + esc(host.event_count == null ? "-" : host.event_count) + '</td>' +
+        '<td class="mono">' + esc(host.first_seen || "-") + '</td></tr>';
+    }).join("");
+  }
+
+  async function refreshTriage() {
+    var params = new URLSearchParams();
+    if (state.triageStatus) params.set("status", state.triageStatus);
+    if (state.triageHost) params.set("host_id", state.triageHost);
+    params.set("limit", String(TRIAGE_LIMIT));
+    params.set("offset", String(state.triageOffset));
+    var result = await apiJson("/api/detections?" + params.toString());
+    var body = el("triage-body");
+    if (!result.ok || !result.data || !Array.isArray(result.data.detections)) {
+      text("triage-note", unavailableText(result));
+      text("triage-chip", "unavailable");
+      ["triage-new","triage-acknowledged","triage-investigating","triage-closed","triage-false-positive","triage-total"].forEach(function (id) { text(id, "--"); });
+      body.innerHTML = '<tr><td colspan="9" class="table-empty">Detection triage is not available on this server.</td></tr>';
+      return;
+    }
+    var items = result.data.detections;
+    var summary = result.data.summary || {};
+    var total = result.data.total != null ? result.data.total : items.length;
+    text("triage-note", items.length ? "" : "No detections match the current triage filters.");
+    text("triage-chip", total + (total === 1 ? " detection" : " detections"));
+    text("triage-new", summary.new != null ? summary.new : "--");
+    text("triage-acknowledged", summary.acknowledged != null ? summary.acknowledged : "--");
+    text("triage-investigating", summary.investigating != null ? summary.investigating : "--");
+    text("triage-closed", summary.closed != null ? summary.closed : "--");
+    text("triage-false-positive", summary.false_positive != null ? summary.false_positive : "--");
+    text("triage-total", total);
+    text("triage-page", "Page " + (Math.floor(state.triageOffset / TRIAGE_LIMIT) + 1) + " · showing " + items.length + " of " + total);
+    el("triage-prev").disabled = state.triageOffset <= 0;
+    el("triage-next").disabled = state.triageOffset + TRIAGE_LIMIT >= total;
+    if (!items.length) {
+      body.innerHTML = '<tr><td colspan="9" class="table-empty">No detections match the current triage filters.</td></tr>';
+      return;
+    }
+    body.innerHTML = items.map(function (item) {
+      return '<tr class="triage-row"><td>' + esc(item.timestamp || "-") + '</td>' +
+        '<td><span class="' + severityClass(item.severity) + '">' + esc(item.severity) + '</span></td>' +
+        '<td>' + esc(item.host_id || "-") + '</td>' +
+        '<td><strong class="rule-name">' + esc(item.title || "Detection") + '</strong><br><code class="rule-id">' + esc(item.rule_id || "-") + '</code></td>' +
+        '<td>' + techniquesCell(item.technique) + '</td>' +
+        '<td><select class="triage-status" data-id="' + esc(item.id) + '">' + statusOptions(item.status) + '</select></td>' +
+        '<td><input class="triage-assign" data-id="' + esc(item.id) + '" type="text" value="' + esc(item.assignee || "") + '" placeholder="unassigned"><button class="triage-save ghost-button" data-id="' + esc(item.id) + '" type="button">Set</button></td>' +
+        '<td><span class="note-count">' + esc(item.note_count || 0) + '</span></td>' +
+        '<td><button class="detail-button triage-notes" data-id="' + esc(item.id) + '" type="button">Notes</button></td></tr>';
+    }).join("");
+    bindTriage(body);
+  }
+
+  function bindTriage(root) {
+    root.querySelectorAll(".triage-status").forEach(function (control) {
+      control.addEventListener("change", function () { changeDetectionStatus(control.dataset.id, control.value, undefined); });
+    });
+    root.querySelectorAll(".triage-save").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var row = button.closest ? button.closest("tr") : null;
+        if (!row) return;
+        var statusNode = row.querySelector(".triage-status");
+        var assignNode = row.querySelector(".triage-assign");
+        changeDetectionStatus(button.dataset.id, statusNode ? statusNode.value : "new", assignNode ? assignNode.value : "");
+      });
+    });
+    root.querySelectorAll(".triage-notes").forEach(function (button) {
+      button.addEventListener("click", function () { openNotes(button.dataset.id); });
+    });
+  }
+
+  async function changeDetectionStatus(id, status, assignee) {
+    var payload = {status: status};
+    if (assignee !== undefined && assignee !== null) payload.assignee = assignee;
+    var result = await apiJson("/api/detections/" + encodeURIComponent(id) + "/status", {
+      method:"POST", headers: authHeaders({"Content-Type":"application/json"}), body: JSON.stringify(payload)
+    });
+    if (!result.ok) {
+      text("triage-note", "Could not update detection " + id + ": " + (result.status ? "server returned " + result.status : "connection unavailable") + ".");
+      return;
+    }
+    text("triage-note", "");
+    await refreshTriage();
+    await refreshAudit();
+  }
+
+  async function openNotes(id) {
+    state.notesDetection = id;
+    text("notes-title", "Detection " + id);
+    el("notes-list").innerHTML = '<div class="empty-inline">Loading notes...</div>';
+    text("notes-message", "");
+    el("notes-dialog").showModal();
+    await loadNotes(id);
+  }
+  async function loadNotes(id) {
+    var result = await apiJson("/api/detections/" + encodeURIComponent(id) + "/notes");
+    var box = el("notes-list");
+    if (!result.ok || !result.data || !Array.isArray(result.data.notes)) {
+      box.innerHTML = '<div class="empty-inline">' + esc(unavailableText(result)) + '</div>';
+      return;
+    }
+    var notes = result.data.notes;
+    if (!notes.length) { box.innerHTML = '<div class="empty-inline">No notes on this detection yet.</div>'; return; }
+    box.innerHTML = notes.map(function (note) {
+      return '<div class="note-row"><div class="note-head"><strong>' + esc(note.author || "unknown") + '</strong><span class="muted">' + esc(note.created_at || "") + '</span></div><p>' + esc(note.text || "") + '</p></div>';
+    }).join("");
+  }
+
+  async function refreshSuppressions() {
+    var result = await apiJson("/api/suppressions");
+    var body = el("suppression-body");
+    if (!result.ok || !result.data || !Array.isArray(result.data.suppressions)) {
+      text("suppression-note", unavailableText(result));
+      text("suppressions-chip", "unavailable");
+      body.innerHTML = '<tr><td colspan="8" class="table-empty">Suppression management is not available on this server.</td></tr>';
+      return;
+    }
+    var items = result.data.suppressions;
+    var canManage = canManageSuppressions();
+    text("suppression-note", items.length ? "" : "No suppressions are currently active.");
+    text("suppressions-chip", items.length + (items.length === 1 ? " suppression" : " suppressions"));
+    if (!items.length) {
+      body.innerHTML = '<tr><td colspan="8" class="table-empty">No suppressions are currently active.</td></tr>';
+      return;
+    }
+    body.innerHTML = items.map(function (item) {
+      var remove = canManage ? '<button class="suppression-remove danger-button" data-id="' + esc(item.id) + '" type="button">Remove</button>' : '<span class="muted">read-only</span>';
+      return '<tr><td><code>' + esc(item.rule_id || "-") + '</code></td>' +
+        '<td>' + esc(item.host_id || "all hosts") + '</td>' +
+        '<td>' + esc(item.scope || "-") + '</td>' +
+        '<td>' + esc(item.reason || "-") + '</td>' +
+        '<td>' + esc(item.created_by || "-") + '</td>' +
+        '<td class="mono">' + esc(item.created_at || "-") + '</td>' +
+        '<td class="mono">' + esc(item.expires_at || "never") + '</td>' +
+        '<td>' + remove + '</td></tr>';
+    }).join("");
+    bindSuppressionRemovals(body);
+  }
+  function bindSuppressionRemovals(root) {
+    root.querySelectorAll(".suppression-remove").forEach(function (button) {
+      button.addEventListener("click", function () { removeSuppression(button.dataset.id); });
+    });
+  }
+  async function removeSuppression(id) {
+    if (!confirm("Remove suppression " + id + "? The rule's detections will return to the triage queue.")) return;
+    var result = await apiJson("/api/suppressions/" + encodeURIComponent(id), {method:"DELETE", headers:authHeaders()});
+    if (!result.ok) {
+      text("suppression-message", "Could not remove suppression " + id + ": " + (result.status ? "server returned " + result.status : "connection unavailable") + ".");
+      return;
+    }
+    text("suppression-message", "Suppression removed. Its detections return to the triage queue.");
+    await refreshSuppressions();
+    await refreshAudit();
+  }
+
+  async function refreshAudit() {
+    var body = el("audit-body");
+    if (state.me && isViewer()) {
+      text("audit-note", "");
+      text("audit-chip", "restricted");
+      el("audit-prev").disabled = true;
+      el("audit-next").disabled = true;
+      body.innerHTML = '<tr><td colspan="5" class="table-empty">The audit log is not available for your role.</td></tr>';
+      return;
+    }
+    var params = new URLSearchParams();
+    params.set("limit", String(AUDIT_LIMIT));
+    params.set("offset", String(state.auditOffset));
+    var result = await apiJson("/api/audit?" + params.toString());
+    if (!result.ok || !result.data || !Array.isArray(result.data.entries)) {
+      text("audit-note", unavailableText(result));
+      text("audit-chip", "unavailable");
+      el("audit-prev").disabled = true;
+      el("audit-next").disabled = true;
+      body.innerHTML = '<tr><td colspan="5" class="table-empty">The audit log is not available on this server.</td></tr>';
+      return;
+    }
+    var entries = result.data.entries;
+    var total = result.data.total != null ? result.data.total : entries.length;
+    text("audit-note", entries.length ? "" : "No audit entries recorded.");
+    text("audit-chip", total + (total === 1 ? " entry" : " entries"));
+    text("audit-page", "Page " + (Math.floor(state.auditOffset / AUDIT_LIMIT) + 1) + " · showing " + entries.length + " of " + total);
+    el("audit-prev").disabled = state.auditOffset <= 0;
+    el("audit-next").disabled = state.auditOffset + AUDIT_LIMIT >= total;
+    if (!entries.length) {
+      body.innerHTML = '<tr><td colspan="5" class="table-empty">No audit entries recorded.</td></tr>';
+      return;
+    }
+    body.innerHTML = entries.map(function (entry) {
+      return '<tr><td class="mono">' + esc(entry.created_at || "-") + '</td>' +
+        '<td>' + esc(entry.actor || "-") + '</td>' +
+        '<td>' + esc(entry.action || "-") + '</td>' +
+        '<td>' + esc(entry.target || "-") + '</td>' +
+        '<td>' + esc(entry.detail || "-") + '</td></tr>';
+    }).join("");
+  }
+
+  async function refreshOperations() {
+    try { await refreshIdentity(); } catch (error) { console.error(error); }
+    try { await refreshHosts(); } catch (error) { console.error(error); }
+    try { await refreshTriage(); } catch (error) { console.error(error); }
+    try { await refreshSuppressions(); } catch (error) { console.error(error); }
+    try { await refreshAudit(); } catch (error) { console.error(error); }
+  }
+
+  el("triage-status-filter").addEventListener("change", function () {
+    state.triageStatus = el("triage-status-filter").value;
+    state.triageOffset = 0;
+    refreshTriage();
+  });
+  el("triage-host-filter").addEventListener("change", function () {
+    state.triageHost = el("triage-host-filter").value;
+    state.triageOffset = 0;
+    refreshTriage();
+  });
+  el("triage-prev").addEventListener("click", function () {
+    state.triageOffset = Math.max(0, state.triageOffset - TRIAGE_LIMIT);
+    refreshTriage();
+  });
+  el("triage-next").addEventListener("click", function () {
+    state.triageOffset += TRIAGE_LIMIT;
+    refreshTriage();
+  });
+  el("audit-prev").addEventListener("click", function () {
+    state.auditOffset = Math.max(0, state.auditOffset - AUDIT_LIMIT);
+    refreshAudit();
+  });
+  el("audit-next").addEventListener("click", function () {
+    state.auditOffset += AUDIT_LIMIT;
+    refreshAudit();
+  });
+  el("close-notes").addEventListener("click", function () { el("notes-dialog").close(); });
+  el("notes-form").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var value = el("note-text").value.trim();
+    if (!state.notesDetection || !value) return;
+    var result = await apiJson("/api/detections/" + encodeURIComponent(state.notesDetection) + "/notes", {
+      method:"POST", headers: authHeaders({"Content-Type":"application/json"}), body: JSON.stringify({text: value})
+    });
+    if (!result.ok) {
+      text("notes-message", "Could not add note: " + (result.status ? "server returned " + result.status : "connection unavailable") + ".");
+      return;
+    }
+    el("note-text").value = "";
+    text("notes-message", "Note added.");
+    await loadNotes(state.notesDetection);
+    await refreshTriage();
+  });
+  el("suppression-form").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    if (!canManageSuppressions()) { text("suppression-message", "Your role cannot add suppressions."); return; }
+    var payload = {
+      rule_id: el("suppression-rule").value.trim(),
+      scope: el("suppression-scope").value,
+      reason: el("suppression-reason").value.trim()
+    };
+    var host = el("suppression-host").value.trim();
+    if (host) payload.host_id = host;
+    var days = el("suppression-days").value;
+    if (days) payload.expires_days = Number(days);
+    if (!payload.rule_id || !payload.reason) {
+      text("suppression-message", "Rule ID and reason are required.");
+      return;
+    }
+    var result = await apiJson("/api/suppressions", {
+      method:"POST", headers: authHeaders({"Content-Type":"application/json"}), body: JSON.stringify(payload)
+    });
+    if (!result.ok) {
+      text("suppression-message", "Could not add suppression: " + (result.status ? "server returned " + result.status : "connection unavailable") + ".");
+      return;
+    }
+    text("suppression-message", "Suppression added. The rule's detections are hidden from the queue for that scope; the rule still fires.");
+    event.currentTarget.reset();
+    await refreshSuppressions();
+    await refreshAudit();
   });
 
   refresh();

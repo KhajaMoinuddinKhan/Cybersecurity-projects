@@ -1,20 +1,23 @@
 # Implementation
 
-- `rules.py` loads the rule files, evaluates conditions against event fields, and splits detection rules from correlation rules. A rule that cannot be parsed stops the process rather than being skipped.
-- `windows_collector.py` converts native records, extracts structured EventData, and excludes records the collector itself caused.
-- `correlation.py` finds ordered sequences across stored rule hits and writes an alert that names the events it was built from.
-- `pcap_ingest.py` turns a capture into one event per flow and one per DNS name, in the same store as the host events.
-- `enrichment.py` matches events against the indicator store written by the threat-intelligence project.
-- `notify.py` delivers alerts to a log file or a webhook, and reports a failure instead of stopping collection.
-- `app.py` owns storage, the HTTP surface, retention, authentication and the workers.
-- `ingest_payloads` validates and classifies a complete batch before inserting any of it.
-- The production application inserts no generated sample records. Tests use isolated temporary databases.
+- `agent.py` runs on a reporting machine. It collects through `windows_collector` or by tailing a file, ships batches to `/api/ingest` with the host key, and spools unsent events as JSONL when the server cannot be reached.
+- `schema.py` defines the canonical event record and the four per-source mappers, auto-detected from each record.
+- `auth.py` owns accounts, the role and permission matrix, scrypt password hashing, hashed session tokens and the audit log. It answers permission questions but enforces nothing itself.
+- `hosts.py` is the registry: enrolment, key hashing and verification, the last-seen clock and the computed online, stale and never-reported status.
+- `triage.py` adds status, assignee, append-only notes, transitions and suppressions on top of stored detections, in its own tables.
+- `rules.py`, `correlation.py`, `pcap_ingest.py`, `enrichment.py`, `notify.py` and `windows_collector.py` are unchanged in role: rules, sequences, captures, indicators, alerting and the native log reader.
+- `app.py` owns storage, the HTTP surface, retention, the shared token, the workers, and the route-level enforcement of the permission matrix.
+- `ingest_payloads` validates and classifies a complete batch before inserting any of it. The production application inserts no generated sample records.
 
-## Two decisions worth explaining
+## Decisions worth explaining
 
-**Excluding the collector's own output.** Reading a channel means running PowerShell, and a running PowerShell writes to the PowerShell channel, so without a filter the monitoring tool becomes the loudest source in its own store. The process ids of the PowerShell children the collector starts are recorded, and records that name one of them are counted and skipped. Two places have to be checked: a Windows channel record carries the process that raised it in the record header, while a Sysmon record carries Sysmon's own process id there and names the process the event is about in the event body. The skipped count is shown on the dashboard rather than hidden.
+**An enrolment key is shown once.** `POST /api/hosts` returns the plaintext key and stores only a salted PBKDF2-HMAC-SHA256 hash, the same shape as real agent enrolment. The key cannot be read back, so a lost key is rotated rather than looked up, and a stolen database does not yield a usable key.
 
-**Validation before persistence.** Each batch is normalised before the write begins. CSV is checked for consistent columns, alert flags must be booleans, invalid severities are rejected, and an unknown modifier in a rule is refused at load time. Database connections are explicitly closed after transactions, which matters when repeated polling would otherwise leave connections waiting for garbage collection.
+**Notes are append-only.** The triage module deliberately provides no update or delete for a detection note. An investigation record that could be silently rewritten would destroy the evidence the workflow exists to keep, so the only way to change the record is to append to it.
+
+**Suppression expiry is read-time.** A suppression stores an expiry and is tested when it is read, so an expired one stops applying with no cleanup job. A malformed expiry compares as expired, which fails closed.
+
+**Normalisation happens at ingest.** The agent forwards events in the payload shape the collector already produces; the server is what maps them onto the canonical record, so one schema governs every source.
 
 [Run instructions and troubleshooting](../README.md)
 

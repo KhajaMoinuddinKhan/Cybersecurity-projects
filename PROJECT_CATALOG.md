@@ -6,7 +6,7 @@ The projects, grouped by what you have to bring, largest group first and largest
 
 | Project | Bring this | What you will practise |
 | --- | --- | --- |
-| [SIEM Dashboard](PROJECTS/siem-dashboard) | Windows Event Logs and Sysmon, a packet capture, or structured event files and API records | Connecting collection, validation, storage, detection, correlation and an analyst view. |
+| [SIEM Dashboard](PROJECTS/siem-dashboard) | Windows Event Logs and Sysmon from one or more machines, a packet capture, or structured event files and API records | Connecting collection, validation, storage, detection, correlation, multi-host ingestion and an analyst workflow. |
 | [SSL/TLS Scanner](PROJECTS/ssl-tls-scanner) | A hostname and a TLS port | Enumerating what a server will actually negotiate, and deriving a grade only from the checks that were performed. |
 | [Web Vulnerability Scanner](PROJECTS/web-vulnerability-scanner) | A web application running on localhost | Submitting benign probes safely, and why a suspected finding is not a confirmed one. |
 | [Consent-based terminal key recorder](PROJECTS/keylogger) | Your own foreground terminal | Consent, visible recording, and what keyboard events actually look like. |
