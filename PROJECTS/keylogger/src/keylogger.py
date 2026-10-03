@@ -164,6 +164,13 @@ def main() -> None:
     if not args.consent:
         raise SystemExit("Pass --consent after confirming you are authorized to record this terminal.")
 
+    # Checked before the banner: a run that is about to be refused must not
+    # announce that recording has started.
+    try:
+        require_interactive_terminal()
+    except RuntimeError as exc:
+        raise SystemExit(f"Keyboard recording failed: {exc}") from exc
+
     print(
         "Visible terminal recording started. Press Esc (or Ctrl+C) to stop. "
         "Nothing is sent over the network."

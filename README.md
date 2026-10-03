@@ -15,7 +15,7 @@ Listed largest first.
 | [SIEM Dashboard](PROJECTS/siem-dashboard) | Collects Windows Event Log and Sysmon telemetry, classifies it with rules loaded from files, correlates sequences across sources, and serves a live dashboard. |
 | [PCAP Traffic Summary](PROJECTS/pcap-traffic-summary) | Reads a PCAP you supply and prints protocols, top talkers, destination ports and DNS names. |
 | [Network Traffic Analyzer](PROJECTS/network-traffic-analyzer) | Streams a PCAP packet by packet for the same summary, with a JSON output mode. |
-| [Keylogger](PROJECTS/keylogger) | Records visible, consent-based keystrokes from your own terminal into a local JSONL file. |
+| [Consent-based terminal key recorder](PROJECTS/keylogger) | Records visible keystrokes from the terminal that launched it into a local JSONL file, behind an explicit consent flag, with no background hook. |
 | [File Integrity Monitor](PROJECTS/file-integrity-monitor) | Baselines a folder with SHA-256 and reports files that were added, changed or removed. |
 | [Web Vulnerability Scanner](PROJECTS/web-vulnerability-scanner) | Runs passive checks against a localhost page for missing security headers and risky form settings. |
 | [Threat Intelligence Aggregator](PROJECTS/threat-intelligence-aggregator) | Imports IP, domain, hash and URL indicators from CSV or JSON into a searchable SQLite database. |

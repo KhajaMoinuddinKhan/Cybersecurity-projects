@@ -115,3 +115,22 @@ def test_windows_character_device_is_not_accepted_as_a_console(monkeypatch):
     assert nul.isatty() is True  # Windows reports NUL as a tty...
     with pytest.raises(RuntimeError, match="interactive terminal"):
         keylogger.require_interactive_terminal()  # ...but it has no console input buffer
+
+
+def test_a_refused_run_does_not_announce_that_recording_started(monkeypatch, tmp_path, capsys):
+    """The banner must not appear on a run that is going to be refused.
+
+    The refusal was already covered at record_session level, which left main()
+    free to print the start message first and fail afterwards.
+    """
+    output = tmp_path / "events.jsonl"
+    monkeypatch.setattr(sys, "argv", ["keylogger", "--consent", "--output", str(output)])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    with pytest.raises(SystemExit, match="interactive terminal"):
+        keylogger.main()
+
+    captured = capsys.readouterr()
+    assert "recording started" not in captured.out
+    assert "interactive terminal" in captured.err
+    assert not output.exists()
