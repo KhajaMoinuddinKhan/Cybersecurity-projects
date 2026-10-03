@@ -1256,7 +1256,10 @@ def dashboard_app(
 
     @app.get("/api/me")
     def api_me():
-        user = current_user()
+        # Uses the same identity the rest of the console does. Answering 401 here
+        # while the console is open made the page show a sign-in form for an
+        # account that does not exist and cannot be created from the form.
+        user = operator()
         if user is None:
             return jsonify({"error": "Not signed in."}), 401
         return jsonify({"username": user["username"], "role": user["role"]})

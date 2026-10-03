@@ -335,3 +335,27 @@ def test_an_analyst_is_still_refused_the_administrator_actions(tmp_path):
     assert client.post("/api/backups").status_code == 403
     assert client.post("/api/search/rebuild").status_code == 403
     assert client.post("/api/security/lockout/clear", json={"username": "x"}).status_code == 403
+
+
+def test_identity_is_reported_while_the_console_is_open(tmp_path):
+    """The page asks /api/me whether to show a sign-in form.
+
+    Answering 401 in open mode made it show one for an account that does not
+    exist, which is a prompt nobody can satisfy.
+    """
+
+    db, app = build(tmp_path)
+    client = app.test_client()
+    body = client.get("/api/me")
+    assert body.status_code == 200
+    assert body.get_json()["role"] == "admin"
+    assert body.get_json()["username"]
+
+
+def test_identity_requires_a_session_once_an_account_exists(tmp_path):
+    db, app = build(tmp_path)
+    add_user(db)
+    client = app.test_client()
+    assert client.get("/api/me").status_code == 401
+    sign_in(client)
+    assert client.get("/api/me").get_json()["username"] == "analyst1"

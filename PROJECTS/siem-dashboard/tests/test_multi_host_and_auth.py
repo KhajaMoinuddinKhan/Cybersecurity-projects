@@ -70,7 +70,12 @@ def test_the_console_is_open_until_the_first_account_exists(tmp_path):
     db, app = build(tmp_path)
     client = app.test_client()
     assert client.get("/api/dashboard").status_code == 200
-    assert client.get("/api/me").status_code == 401
+    # Identity is reported as the implicit local operator rather than refused.
+    # Answering 401 here made the page ask for credentials nobody can supply
+    # before an account exists.
+    identity = client.get("/api/me")
+    assert identity.status_code == 200
+    assert identity.get_json()["role"] == "admin"
 
 
 def test_a_created_account_makes_the_console_require_a_session(tmp_path):
