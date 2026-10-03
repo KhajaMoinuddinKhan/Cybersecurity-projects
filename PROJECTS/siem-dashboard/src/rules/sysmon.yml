@@ -181,6 +181,12 @@ rules:
   - id: sysmon-network-connection-to-remote-port
     title: Process opened an outbound connection
     level: Medium
+    # Context, not an alert. Measured on one laptop: 133 outbound connections in
+    # the most recent 200 Sysmon records, nearly all of them a browser, an
+    # updater or the dashboard talking to itself. Raising an alert for each one
+    # would bury the queue. The rule still names the behaviour, so it can be the
+    # second step of the correlation below.
+    alert: false
     description: >-
       Sysmon recorded a network connection and named the process that made it.
       Alone this is normal traffic; joined with a process event on the same host
@@ -191,7 +197,12 @@ rules:
     detection:
       selection:
         event_id: "3"
-      condition: selection
+      loopback:
+        data.DestinationIp|startswith:
+          - "127."
+          - "::1"
+          - "0.0.0.0"
+      condition: selection and not loopback
     falsepositives:
       - Every browser, updater and telemetry agent on the machine.
     tags:

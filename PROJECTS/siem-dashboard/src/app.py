@@ -264,7 +264,7 @@ def classify_payloads(
         updated["rule_name"] = match.title
         updated["techniques"] = list(match.techniques)
         updated["matched_on"] = list(match.matched_on)
-        if not already_judged:
+        if not already_judged and match.raises_alert:
             updated["is_alert"] = True
             updated["severity"] = match.severity
         judged.append(updated)
@@ -444,6 +444,7 @@ def _filters(
     since_minutes: int | None = None,
     alerts_only: bool = False,
     rule_id: str | None = None,
+    rule_matched: bool = False,
 ) -> tuple[list[str], list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -481,6 +482,11 @@ def _filters(
     if alerts_only:
         clauses.append("is_alert = 1")
 
+    # Correlation matches on rule hits, not on alerts: a rule marked alert: false
+    # still names the behaviour a sequence is built from.
+    if rule_matched:
+        clauses.append("rule_id != ''")
+
     return clauses, params
 
 
@@ -500,6 +506,7 @@ def query_events(
     since_minutes: int | None = None,
     alerts_only: bool = False,
     rule_id: str | None = None,
+    rule_matched: bool = False,
     limit: int = 300,
 ) -> list[dict[str, Any]]:
     """Return live events matching the active filters."""
@@ -514,6 +521,7 @@ def query_events(
         since_minutes,
         alerts_only,
         rule_id,
+        rule_matched,
     )
     query = "SELECT * FROM live_events" + _where(clauses)
     query += " ORDER BY datetime(timestamp) DESC, id DESC LIMIT ?"

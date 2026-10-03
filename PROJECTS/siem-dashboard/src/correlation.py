@@ -177,7 +177,7 @@ def correlate(db_path: Path, rules: Iterable[CorrelationRule], *, since_minutes:
     events = query_events(
         db_path,
         since_minutes=since_minutes,
-        alerts_only=True,
+        rule_matched=True,
         limit=2000,
     )
     payloads = build_correlation_payloads(events, rules)

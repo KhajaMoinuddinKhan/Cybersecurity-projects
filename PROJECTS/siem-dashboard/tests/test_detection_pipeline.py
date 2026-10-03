@@ -946,3 +946,80 @@ def test_the_summary_line_is_set_once_per_cycle_not_mid_poll(tmp_path, monkeypat
     assert collector.status["channels"]["Microsoft-Windows-Sysmon/Operational"]["state"] == "missing"
     # A reader asking at any point in the cycle gets the same answer.
     assert collector.status["last_error"] == ""
+
+
+# --- context rules: match, record, do not raise -----------------------------
+
+def test_a_rule_marked_alert_false_records_itself_without_raising(tmp_path):
+    db = tmp_path / "live.db"
+    ingest_payloads(
+        db,
+        [{
+            "message": "outbound connection",
+            "channel": "Microsoft-Windows-Sysmon/Operational",
+            "event_id": "3",
+            "host": "LAB-PC",
+            "fields": {"DestinationIp": "203.0.113.9", "DestinationPort": "443"},
+        }],
+        engine=shared_engine(),
+    )
+    stored = query_events(db)[0]
+    assert stored["rule_id"] == "sysmon-network-connection-to-remote-port"
+    assert stored["rule_name"] == "Process opened an outbound connection"
+    assert stored["is_alert"] == 0
+    assert stored["severity"] == "Low"
+    assert dashboard_snapshot(db)["alert_count"] == 0
+
+
+def test_loopback_connections_are_not_even_context(tmp_path):
+    db = tmp_path / "live.db"
+    ingest_payloads(
+        db,
+        [{
+            "message": "local connection",
+            "channel": "Microsoft-Windows-Sysmon/Operational",
+            "event_id": "3",
+            "host": "LAB-PC",
+            "fields": {"DestinationIp": "127.0.0.1", "DestinationPort": "5000"},
+        }],
+        engine=shared_engine(),
+    )
+    assert query_events(db)[0]["rule_id"] == ""
+
+
+def test_a_context_rule_can_still_be_the_step_of_a_correlation(tmp_path):
+    db = tmp_path / "live.db"
+    ingest_payloads(
+        db,
+        [
+            {"message": "powershell -enc AAAA",
+             "channel": "Microsoft-Windows-PowerShell/Operational", "event_id": "4104",
+             "host": "LAB-PC", "external_id": "ps:1"},
+            {"message": "outbound connection",
+             "channel": "Microsoft-Windows-Sysmon/Operational", "event_id": "3",
+             "host": "LAB-PC", "external_id": "sysmon:1",
+             "fields": {"DestinationIp": "203.0.113.9", "DestinationPort": "443"}},
+        ],
+        engine=shared_engine(),
+    )
+    # The second event is not an alert, but correlation reads rule hits.
+    assert dashboard_snapshot(db)["alert_count"] == 1
+    rules = [rule for rule in shared_engine().correlations if rule.id == "corr-powershell-then-egress"]
+    assert correlate(db, rules, since_minutes=1440) == 1
+
+
+def test_alert_must_be_a_boolean_in_a_rule_file(tmp_path):
+    body = (
+        "rules:\n"
+        "  - id: odd\n    title: Odd\n    level: Low\n    alert: sometimes\n"
+        "    detection:\n      selection:\n        event_id: '1'\n      condition: selection\n"
+    )
+    (tmp_path / "odd.yml").write_text(body, encoding="utf-8")
+    with pytest.raises(RuleError, match="alert must be true or false"):
+        load_rules(tmp_path)
+
+
+def test_the_rules_endpoint_says_which_rules_alert():
+    coverage = {item["rule_id"]: item for item in shared_engine().coverage()}
+    assert coverage["sysmon-network-connection-to-remote-port"]["raises_alert"] is False
+    assert coverage["win-failed-logon"]["raises_alert"] is True

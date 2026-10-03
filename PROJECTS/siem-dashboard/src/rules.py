@@ -65,6 +65,7 @@ class Rule:
     description: str = ""
     falsepositives: tuple[str, ...] = ()
     source_file: str = ""
+    raises_alert: bool = True
 
     @property
     def techniques(self) -> tuple[str, ...]:
@@ -347,6 +348,21 @@ def _level_of(raw: dict[str, Any], source_file: str) -> str:
     return level
 
 
+def _raises_alert(raw: dict[str, Any], source_file: str) -> bool:
+    """Whether a match on this rule is an alert in its own right.
+
+    A rule with ``alert: false`` still records its identity on the event, so it
+    can be the step of a correlation, but it does not raise an alert. This is
+    what a rule that matches normal background traffic needs: it is context, and
+    context should not fill the detection queue.
+    """
+
+    value = raw.get("alert", True)
+    if not isinstance(value, bool):
+        raise RuleError(f"{source_file}: alert must be true or false")
+    return value
+
+
 def _build_rule(raw: dict[str, Any], source_file: str) -> Rule:
     detection = raw.get("detection")
     if not isinstance(detection, dict) or not detection:
@@ -371,6 +387,7 @@ def _build_rule(raw: dict[str, Any], source_file: str) -> Rule:
         description=str(raw.get("description") or "").strip(),
         falsepositives=tuple(str(item) for item in _as_list(raw.get("falsepositives") or [])),
         source_file=source_file,
+        raises_alert=_raises_alert(raw, source_file),
     )
 
 
@@ -483,6 +500,7 @@ class RuleMatch:
     severity: str
     techniques: tuple[str, ...]
     matched_on: tuple[str, ...]
+    raises_alert: bool = True
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -539,6 +557,7 @@ class RuleEngine:
                         severity=rule.level,
                         techniques=rule.techniques,
                         matched_on=tuple(matched_conditions(fields, rule)),
+                        raises_alert=rule.raises_alert,
                     )
                 )
 
@@ -558,6 +577,7 @@ class RuleEngine:
                 "level": rule.level,
                 "techniques": list(rule.techniques),
                 "tags": list(rule.tags),
+                "raises_alert": rule.raises_alert,
                 "logsource": rule.logsource,
                 "source_file": rule.source_file,
                 "description": rule.description,

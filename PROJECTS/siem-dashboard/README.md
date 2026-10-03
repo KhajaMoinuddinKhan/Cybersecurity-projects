@@ -66,7 +66,10 @@ The format follows the Sigma convention closely enough that a Sigma rule is reco
 | List values | Any-of by default; `\|all` requires every value |
 | Condition operators | `and`, `or`, `not`, and parentheses |
 | Structured event data | Reachable bare (`CommandLine`) or namespaced (`data.CommandLine`) |
+| `alert: false` | Match and record the rule, but do not raise an alert. For rules that describe normal background traffic |
 | Anything else | Refused at load time with the file and the reason |
+
+**A rule can match without raising an alert.** `alert: false` is for the rules that describe normal background traffic — a rule that matches every outbound connection would otherwise put hundreds of Medium alerts on the dashboard and bury the queue. The match is still recorded on the event with its rule id, so the rule can be a step in a correlation; it just does not appear in the detection queue on its own. The `/api/rules` response reports which rules alert and which do not.
 
 A rule that cannot be parsed stops the process rather than being skipped. A detection that silently does not load is worse than one that fails loudly.
 
@@ -88,7 +91,7 @@ A single-event rule can say "an encoded PowerShell command ran". It cannot say "
     - rule: sysmon-network-connection-to-remote-port
 ```
 
-The engine groups stored alerts by host, user or address, looks for the ordered sequence inside the window, and writes a new alert that names the events it was built from. A rule can require fewer steps than it lists (`min_steps`), which is how "three failed logons and then a lockout" is expressed without listing every permutation. Re-running is safe: each correlation alert carries a deterministic external id, so the store's unique index absorbs the repeat.
+The engine groups stored **rule hits** — not only alerts, so a rule marked `alert: false` can still be a step — by host, user or address, looks for the ordered sequence inside the window, and writes a new alert that names the events it was built from. A rule can require fewer steps than it lists (`min_steps`), which is how "three failed logons and then a lockout" is expressed without listing every permutation. Re-running is safe: each correlation alert carries a deterministic external id, so the store's unique index absorbs the repeat.
 
 ## Importing a packet capture
 
@@ -154,6 +157,7 @@ Read this before treating a clean dashboard as a clean machine.
 - **Scale.** SQLite with `LIKE` queries and a 300-row page is fine for a workstation's event log and will not survive millions of events. There is no hot/warm/cold tiering, no index beyond the two on the table, and no sharding.
 - **Rule coverage is a documented subset of Sigma.** Unsupported keys are refused rather than ignored, so a rule that loads is a rule that works, but a Sigma rule using an unsupported feature will not load as-is.
 - **Correlation is sequence-only.** Ordered steps on a single grouping field inside a time window. There are no thresholds, no joins across fields, and no baselining of what is normal for a host.
+- **Several rules are noisy by design and marked as context.** The outbound-connection rule matches normal traffic, so it records rather than alerts. That is a workaround for having no baselining: without a notion of what is normal for a host, the honest option is to treat the behaviour as context instead of pretending a browser is an incident.
 - **Severity is not risk.** A severity on an alert is how much attention the rule thinks it deserves, not a measure of business impact. There is no asset criticality and no risk scoring.
 - **The collector reads the log by running PowerShell.** Six channels are polled every two seconds, one process each. That works and it is what the platform gives without an extra dependency, but it is heavy, it produces the self-generated volume described above, and a machine with a slow PowerShell profile will poll slowly. A native API would be the right long-term answer.
 
