@@ -788,3 +788,92 @@ def test_a_delivered_alert_names_the_host_and_address(tmp_path):
     assert record["source_ip"] == "10.0.0.5"
     assert record["rule_id"] == "win-suspicious-powershell-script-block"
     assert "attack.t1059.001" in record["techniques"]
+
+# --- the collector must not drown in its own output ------------------------
+
+def _collector(tmp_path, **kwargs):
+    from src.windows_collector import WindowsEventCollector
+
+    return WindowsEventCollector(tmp_path / "live.db", ingest_payloads, **kwargs)
+
+
+def _record(record_id, process_id, message="PowerShell console is starting up"):
+    return {
+        "RecordId": record_id,
+        "Id": 40961,
+        "TimeCreated": "2026-10-03T18:00:00+00:00",
+        "Level": "Information",
+        "Provider": "Microsoft-Windows-PowerShell",
+        "Machine": "LAB-PC",
+        "User": "unknown",
+        "ProcessId": process_id,
+        "Message": message,
+        "Xml": "",
+    }
+
+
+def test_the_collector_skips_events_from_its_own_powershell(tmp_path):
+    collector = _collector(tmp_path, channels=("Microsoft-Windows-PowerShell/Operational",))
+    collector._remember_pid(4242)
+
+    collector._ingest_records(
+        "Microsoft-Windows-PowerShell/Operational",
+        [_record(1, 4242), _record(2, 4242), _record(3, 9999)],
+        backfill=False,
+    )
+
+    assert collector.status["self_skipped"] == 2
+    assert collector.status["ingested"] == 1
+    stored = query_events(tmp_path / "live.db")
+    assert len(stored) == 1
+    assert stored[0]["record_id"] == "3"
+
+
+def test_the_cursor_still_advances_past_skipped_records(tmp_path):
+    collector = _collector(tmp_path, channels=("Microsoft-Windows-PowerShell/Operational",))
+    collector._remember_pid(4242)
+    collector._ingest_records(
+        "Microsoft-Windows-PowerShell/Operational",
+        [_record(10, 4242), _record(11, 4242)],
+        backfill=False,
+    )
+    # Nothing stored, but the next poll must ask for records after 11, or the
+    # same two would be read again on every cycle.
+    assert collector.cursors["Microsoft-Windows-PowerShell/Operational"] == 11
+    assert collector.status["channels"]["Microsoft-Windows-PowerShell/Operational"]["last_record"] == 11
+    assert query_events(tmp_path / "live.db") == []
+
+
+def test_a_record_without_a_process_id_is_kept(tmp_path):
+    collector = _collector(tmp_path, channels=("System",))
+    collector._remember_pid(4242)
+    collector._ingest_records(
+        "System",
+        [{"RecordId": 5, "Id": 7045, "TimeCreated": "2026-10-03T18:00:00+00:00",
+          "Level": "Information", "Provider": "Service Control Manager",
+          "Machine": "LAB-PC", "User": "SYSTEM", "Message": "A service was installed.", "Xml": ""}],
+        backfill=False,
+    )
+    assert collector.status["self_skipped"] == 0
+    assert len(query_events(tmp_path / "live.db")) == 1
+
+
+def test_the_remembered_process_ids_are_bounded(tmp_path):
+    from src.windows_collector import OWN_PID_MEMORY
+
+    collector = _collector(tmp_path, channels=("System",))
+    for pid in range(1, OWN_PID_MEMORY + 51):
+        collector._remember_pid(pid)
+    assert len(collector._own_pids) == OWN_PID_MEMORY
+    assert collector._is_own_pid(OWN_PID_MEMORY + 50)
+    assert not collector._is_own_pid(1)
+
+
+def test_the_projection_asks_windows_for_the_process_id():
+    from src.windows_collector import WindowsEventCollector
+
+    assert "ProcessId" in WindowsEventCollector._projection()
+
+
+def test_the_collector_starts_its_own_noise_counter_at_zero(tmp_path):
+    assert _collector(tmp_path).status["self_skipped"] == 0

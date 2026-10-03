@@ -286,7 +286,9 @@
       ? (collector.running ? connected + "/" + names.length + " channels live" : "collector stopped")
       : "collector unavailable";
     text("collector-state", stateText);
-    text("collector-ingested", (collector.ingested || 0) + " new · " + (collector.backfilled || 0) + " recent");
+    var activity = (collector.ingested || 0) + " new · " + (collector.backfilled || 0) + " recent";
+    if (collector.self_skipped) activity += " · " + collector.self_skipped + " own events skipped";
+    text("collector-ingested", activity);
 
     if (!names.length) {
       el("channel-status").innerHTML = '<div class="empty-inline">No collector channels reported.</div>';

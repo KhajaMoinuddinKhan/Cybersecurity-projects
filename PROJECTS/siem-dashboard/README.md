@@ -131,6 +131,8 @@ The channels are `Security`, `System`, `Application`, `Microsoft-Windows-Sysmon/
 
 Records are deduplicated on the way in, and the collector keeps retrying a channel that is temporarily unavailable instead of giving up. Reading the Security channel depends on the account and machine policy, so seeing fewer channels than your colleague is normal and does not mean the app is broken.
 
+**The collector excludes its own output.** Reading a channel means running PowerShell, and a running PowerShell writes to the PowerShell channel — so without a filter the monitoring tool becomes the loudest thing in its own store. Measured on a quiet workstation before this was fixed: 717 of 819 stored events were PowerShell console lifecycle records produced by the collector's own child processes, about nine in ten. Every PowerShell process the collector starts has its process id recorded, and records from those processes are counted and skipped. The dashboard reports the count next to the collector activity line, so the exclusion is visible rather than silent. Process ids are remembered to a bounded depth, because Windows reuses them.
+
 ## Limits
 
 Read this before treating a clean dashboard as a clean machine.
@@ -141,6 +143,7 @@ Read this before treating a clean dashboard as a clean machine.
 - **Rule coverage is a documented subset of Sigma.** Unsupported keys are refused rather than ignored, so a rule that loads is a rule that works, but a Sigma rule using an unsupported feature will not load as-is.
 - **Correlation is sequence-only.** Ordered steps on a single grouping field inside a time window. There are no thresholds, no joins across fields, and no baselining of what is normal for a host.
 - **Severity is not risk.** A severity on an alert is how much attention the rule thinks it deserves, not a measure of business impact. There is no asset criticality and no risk scoring.
+- **The collector reads the log by running PowerShell.** Six channels are polled every two seconds, one process each. That works and it is what the platform gives without an extra dependency, but it is heavy, it produces the self-generated volume described above, and a machine with a slow PowerShell profile will poll slowly. A native API would be the right long-term answer.
 
 ## Tests
 
@@ -148,4 +151,4 @@ Read this before treating a clean dashboard as a clean machine.
 python -m pytest -q tests
 ```
 
-The suite covers empty startup, Windows and Sysmon event mapping, rule loading and matching, the condition operators, severity ordering, correlation sequencing and its window and grouping, capture parsing into flows, threat-intelligence matching, retention, schema migration from an older store, notification, authentication, the API surface, the `since` bounds, and the JavaScript controls exercised in Node against a temporary API. A separate test reads real System events on Windows and is skipped elsewhere.
+The suite covers empty startup, Windows and Sysmon event mapping, rule loading and matching, the condition operators, severity ordering, correlation sequencing and its window and grouping, capture parsing into flows, threat-intelligence matching, retention, schema migration from an older store, notification, authentication, the collector's exclusion of its own processes, the API surface, the `since` bounds, and the JavaScript controls exercised in Node against a temporary API. A separate test reads real System events on Windows and is skipped elsewhere.

@@ -8,6 +8,14 @@ changed by editing a rule file rather than this module.
 Sysmon is in the channel list because it is where the useful host telemetry
 lives. The Security log says an account logged on; Sysmon says which process
 ran, with what command line, started by which parent, and what it connected to.
+
+One thing this module has to defend against is itself. Reading a channel means
+running PowerShell, and a running PowerShell writes to the PowerShell channel.
+Without a filter the collector's own command prompt becomes the loudest source
+in the store: on a quiet workstation it produced roughly nine of every ten
+events, all of them console lifecycle records from the collector talking to
+itself. Every PowerShell process this module starts has its process id recorded,
+and records from those processes are counted and skipped.
 """
 from __future__ import annotations
 
@@ -34,6 +42,11 @@ CHANNELS = (
 )
 
 SYSMON_CHANNEL = "Microsoft-Windows-Sysmon/Operational"
+
+# How many of our own child process ids to remember. Windows reuses process ids,
+# so this is a trade-off: too short and a recycled id lets our own noise back in,
+# too long and a recycled id could hide a real event from an unrelated process.
+OWN_PID_MEMORY = 400
 
 # Kept for callers that import it directly. The authoritative rules now live in
 # src/rules/*.yml; this is a view of the same data for older callers.
@@ -258,6 +271,9 @@ class WindowsEventCollector:
         self.interval = interval
         self.backfill_per_channel = backfill_per_channel
         self.notifier = notifier
+        # Process ids of the PowerShell children this collector has started, most
+        # recent last. Bounded, so a long run cannot grow it without limit.
+        self._own_pids: dict[int, None] = {}
         self.stop_event = threading.Event()
         self.thread: threading.Thread | None = None
         self.cursors: dict[str, int] = {}
@@ -267,6 +283,7 @@ class WindowsEventCollector:
             "ingested": 0,
             "backfilled": 0,
             "alerts": 0,
+            "self_skipped": 0,
             "channels": {name: {"state": "waiting", "last_record": 0} for name in channels},
             "last_error": "",
             "last_poll": "",
@@ -292,13 +309,21 @@ class WindowsEventCollector:
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=3)
 
+    def _remember_pid(self, pid: int) -> None:
+        self._own_pids[pid] = None
+        while len(self._own_pids) > OWN_PID_MEMORY:
+            self._own_pids.pop(next(iter(self._own_pids)))
+
+    def _is_own_pid(self, pid: int) -> bool:
+        return pid in self._own_pids
+
     def _powershell(self, script: str) -> str:
         prefix = (
             "$OutputEncoding=[Console]::OutputEncoding="
             "[System.Text.UTF8Encoding]::new();"
             "$ProgressPreference='SilentlyContinue';"
         )
-        result = subprocess.run(
+        process = subprocess.Popen(
             [
                 "powershell.exe",
                 "-NoLogo",
@@ -307,17 +332,26 @@ class WindowsEventCollector:
                 "-Command",
                 prefix + script,
             ],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=18,
-            check=False,
         )
-        if result.returncode != 0:
-            error = result.stderr.strip() or result.stdout.strip() or "PowerShell command failed"
+        # Record the child before waiting: it is already writing to the event log.
+        self._remember_pid(process.pid)
+
+        try:
+            stdout, stderr = process.communicate(timeout=18)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+            raise RuntimeError("PowerShell command timed out")
+
+        if process.returncode != 0:
+            error = (stderr or "").strip() or (stdout or "").strip() or "PowerShell command failed"
             raise RuntimeError(error)
-        return result.stdout.strip()
+        return (stdout or "").strip()
 
     @staticmethod
     def _projection() -> str:
@@ -328,6 +362,7 @@ class WindowsEventCollector:
             "@{N='Provider';E={$_.ProviderName}},"
             "@{N='Machine';E={$_.MachineName}},"
             "@{N='User';E={if($_.UserId){$_.UserId.Value}else{'unknown'}}},"
+            "@{N='ProcessId';E={$_.ProcessId}},"
             "Message,@{N='Xml';E={$_.ToXml()}}"
         )
 
@@ -372,7 +407,32 @@ class WindowsEventCollector:
         if not records:
             return
 
-        payloads = [windows_event_to_payload(channel, item) for item in records]
+        # Advance the cursor over every record, including the ones skipped below.
+        # Stopping short would leave the collector re-reading the same records on
+        # every poll.
+        record_ids = [
+            int(item["RecordId"])
+            for item in records
+            if str(item.get("RecordId") or "").isdigit()
+        ]
+        if record_ids:
+            latest = max(record_ids)
+            self.cursors[channel] = latest
+            self.status["channels"][channel]["last_record"] = latest
+
+        payloads: list[dict[str, Any]] = []
+        skipped = 0
+        for item in records:
+            process_id = str(item.get("ProcessId") or "").strip()
+            if process_id.isdigit() and self._is_own_pid(int(process_id)):
+                skipped += 1
+                continue
+            payloads.append(windows_event_to_payload(channel, item))
+
+        self.status["self_skipped"] += skipped
+        if not payloads:
+            return
+
         inserted = self.ingest(
             self.db_path,
             payloads,
@@ -384,16 +444,6 @@ class WindowsEventCollector:
         else:
             self.status["ingested"] += inserted
         self.status["alerts"] += sum(1 for payload in payloads if payload.get("is_alert"))
-
-        record_ids = [
-            int(item["RecordId"])
-            for item in records
-            if str(item.get("RecordId") or "").isdigit()
-        ]
-        if record_ids:
-            latest = max(record_ids)
-            self.cursors[channel] = latest
-            self.status["channels"][channel]["last_record"] = latest
 
     def _initialise(self) -> None:
         for channel in self.channels:
