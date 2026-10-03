@@ -519,7 +519,9 @@ class WindowsEventCollector:
                     state, message = describe_channel_error(channel, exc)
                     self.status["channels"][channel]["state"] = state
                     self.status["channels"][channel]["error"] = message
-                    self.status["last_error"] = message
+                    # The summary line is set once, after every channel has been
+                    # polled. Setting it here as well made it flap: a reader
+                    # asking mid-cycle would see whichever channel failed last.
 
             self.status["last_poll"] = datetime.now(timezone.utc).isoformat()
             # A missing or denied channel is a fact about the machine, not an

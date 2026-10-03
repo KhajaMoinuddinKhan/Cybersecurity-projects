@@ -930,3 +930,19 @@ def test_a_missing_channel_does_not_raise_the_summary_error(tmp_path, monkeypatc
     assert collector.status["channels"]["Microsoft-Windows-Sysmon/Operational"]["state"] == "missing"
     # The dashboard should not shout about a channel the machine simply does not have.
     assert collector.status["last_error"] == ""
+
+
+def test_the_summary_line_is_set_once_per_cycle_not_mid_poll(tmp_path, monkeypatch):
+    collector = _collector(tmp_path, channels=("Microsoft-Windows-Sysmon/Operational",))
+    monkeypatch.setattr(collector, "_recent_records", lambda channel: [])
+
+    def new_records(channel, after_record_id):
+        collector.stop_event.set()
+        raise RuntimeError(SYSMON_MISSING)
+
+    monkeypatch.setattr(collector, "_new_records", new_records)
+    collector._run()
+
+    assert collector.status["channels"]["Microsoft-Windows-Sysmon/Operational"]["state"] == "missing"
+    # A reader asking at any point in the cycle gets the same answer.
+    assert collector.status["last_error"] == ""
