@@ -7,7 +7,6 @@ If you want to see how collection, validation, classification, storage, correlat
 ## Running it
 
 ```console
-python -m pip install -r requirements.txt
 python -m src.app
 ```
 
@@ -141,35 +140,6 @@ curl -F "file=@lab.pcap" http://127.0.0.1:5000/api/pcap
 
 A capture is read into **one event per flow** plus one per DNS name, with the packet count and byte count on each flow, and written into the same store as the host events. That is what makes the two joinable: a Sysmon process event and a network flow can be correlated on host and time. Reading a capture needs Scapy; everything else runs without it.
 
-## Installing Sysmon
-
-Sysmon is not part of Windows. The channel does not exist until you install it, and until then the collector reports that channel as `missing` rather than as an error.
-
-A configuration for this project's rules is at [`sysmon-config.xml`](sysmon-config.xml). It enables exactly the event types the Sysmon rules can match on and nothing else, and it narrows two of them after measuring what they produce on a real laptop:
-
-```console
-sysmon64.exe -accepteula -i sysmon-config.xml
-```
-
-| Enabled | Why |
-| --- | --- |
-| `ProcessCreate` | Command line and parent image, which is what the execution rules match on |
-| `NetworkConnect` | The second half of the correlation rule. External destinations only |
-| `DnsQuery` | The long-name exfiltration rule |
-| `ProcessAccess` | LSASS reads, filtered to that one target |
-| `CreateRemoteThread` | The injection rule |
-| `DriverLoad` | The driver rule |
-| `ProcessTerminate` | **Off.** On by default, read by no rule, and the second-largest source of events |
-| `FileCreate`, `RegistryEvent`, `PipeEvent`, `WmiEvent` | **Off.** No rule reads them and they are the noisiest things Sysmon produces |
-
-Loopback, private and link-local destinations are excluded from `NetworkConnect`. A connection to `127.0.0.1` is not command and control, and on the measured machine those were most of the volume.
-
-Re-apply a changed configuration without reinstalling:
-
-```console
-sysmon64.exe -c sysmon-config.xml
-```
-
 ## Threat intelligence
 
 Point `--intel-db` at the SQLite store written by the [Threat Intelligence Aggregator](../threat-intelligence-aggregator) and every event is checked against it as it arrives. An address, domain, hash or URL that matches raises an alert that names the indicator and the feed it came from. An event that was already an alert keeps the rule that fired and records the indicator alongside it, rather than having its reason replaced.
@@ -199,7 +169,7 @@ Bad input comes back as JSON with a 400 and a sentence explaining the problem, n
 
 `windows_collector.py` reads records from the channels it can reach, converts each one into a payload, and hands it to the ingestion pipeline. Classification is not decided in the collector: the payload goes to the rule engine, so a detection changes by editing a rule file.
 
-The channels are `Security`, `System`, `Application`, `Microsoft-Windows-Sysmon/Operational`, Windows Defender and PowerShell. **Sysmon is the one that matters most**, because it records the command line of a new process, the process that started it, and the connections it makes. The Security log tells you an account logged on; Sysmon tells you what ran and what it talked to.
+The channels are `Security`, `System`, `Application`, `Microsoft-Windows-Sysmon/Operational`, Windows Defender and PowerShell. **Sysmon is the one that matters most**, because it records the command line of a new process, the process that started it, and the connections it makes. The Security log tells you an account logged on; Sysmon tells you what ran and what it talked to. The Sysmon rules match on event types that are off by default, so a configuration matched to them is kept at [`sysmon-config.xml`](sysmon-config.xml).
 
 Records are deduplicated on the way in, and the collector keeps retrying a channel that is temporarily unavailable instead of giving up.
 
