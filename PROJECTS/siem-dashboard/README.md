@@ -26,9 +26,49 @@ python -m src.app --auth-token "$SIEM_AUTH_TOKEN"  # require a token on every ro
 
 `--no-windows-events` is what you want on macOS or Linux, or on a Windows account that cannot read the security channel: the dashboard, the rule engine, the capture import and the filters all work, they simply have no live host source feeding them.
 
-## What you get
+## What it looks like
 
 The page updates from the current contents of the database, so nothing on it is decorative. Counts, severity breakdowns, events-per-minute, timelines, providers, Event IDs, rule hits, ATT&CK techniques, the correlation panel and the event table are all computed from stored records, and the search, time, channel, provider, Event ID, user, rule, severity and alerts-only filters apply to everything on screen.
+
+The three views below are from a live run on one machine, which is why the numbers are odd and specific rather than round. Yours will differ; the panels will not.
+
+### The overview
+
+![The overview, with the collector state, filters, counters, volume charts and channel health](docs/screenshots/01-overview.png)
+
+The top strip answers the first question an analyst asks: **is this thing actually collecting anything?** It reports how many channels are live, when the page last refreshed, and — in the collector panel further down — the state of each channel individually. A channel that is not installed on the machine reads as `not installed` rather than as a failure, and one this account cannot read reads as `access denied`, because neither is a fault in the console.
+
+The filter row is the workspace. Search covers the message, provider, event ID, user, host, address, rule name, rule id and ATT&CK technique in one box, and the dropdowns narrow by time window, channel, provider, event ID, user or rule. The severity buttons carry live counts of what each would show, so you can see the shape of the data before you filter it.
+
+The counters along the top are the summary: total events in the current filter, how many of them matched a rule, how many are High, the rate per minute, and how many correlations have fired. Note that **alerts and High-severity events are different numbers** — an event can be High because Windows called it an error without matching any rule, and a rule can match without raising an alert at all.
+
+Underneath, the volume timeline and the per-minute bars show *when* rather than *what*, the provider ranking shows where the data is coming from, and the severity donut shows the mix. The server-health panel measures the machine running the application, not the machine being monitored, and says so.
+
+### The detection queue
+
+![The detection queue, with rule ids and ATT&CK techniques, alongside technique and rule rankings](docs/screenshots/02-detection-queue.png)
+
+This is the part that makes it a detection pipeline rather than a log viewer. Every row names the **rule that fired**, the **stable rule id** behind it, and the **ATT&CK technique** that rule is tagged with. A reader can disagree with a specific rule instead of arguing with a verdict, and because the id is stable, a rule can be renamed without losing the history of what it fired on.
+
+The Event ID column is the raw Windows or Sysmon event that triggered it. In the screenshot the queue is showing LSASS memory reads, remote thread creation, and a signed system binary used to fetch a remote file — the techniques behind credential dumping, process injection and living-off-the-land downloads respectively. All three are real detections of real events, and all three are also the documented false positives for those rules, which is exactly why the rule files carry a `falsepositives` list: on a normal laptop, that is what these look like.
+
+Below the queue, two rankings answer different questions. **Techniques seen in alerts** shows which ATT&CK techniques your environment is actually producing, which is a coverage view — techniques that never appear are either not happening or not being detected, and the rule files tell you which of those it is. **Rules that fired** shows which of your detections are earning their place, and which are noise you should tune or mark as context.
+
+The correlation panel sits between them. It is empty in this screenshot, and an empty correlation panel is a real result rather than a broken one: no sequence of events matched a rule describing one. When it does fire, the row names the sequence and the host or user it happened on, and the events it was built from are recorded on the alert.
+
+At the bottom of the panel, the runtime line states the current configuration — how many detection and correlation rules are loaded, the retention settings, and whether authentication is on. That line exists so a screenshot of a dashboard can be read without guessing what produced it.
+
+### The live event stream
+
+![The live event stream, with per-event detail, alongside the technique and rule rankings and the ingestion panel](docs/screenshots/03-event-stream.png)
+
+Everything the rules did not flag is still here. The event table is the raw stream underneath the detections, filterable by the same controls, with the channel, provider, message, user and source address for each record. It is deliberately the largest panel on the page: an alert without the surrounding events is a claim, and the surrounding events are how you check it.
+
+Selecting **Details** on any row opens the record in full: the normalised fields, the rule id and ATT&CK techniques if one matched, **which selections in the rule matched**, any threat-intelligence hit, and the raw event as it arrived. That last part matters. The stored record keeps the original, so a detection can be re-examined later against the data that produced it rather than against a summary someone wrote at the time.
+
+**Export current view** writes exactly the rows on screen to CSV, which is the handover format: what you were looking at, when you were looking at it.
+
+At the bottom, the ingestion panel is where additional sources arrive — a JSON, JSONL or CSV file, a packet capture, or another local collector posting to the API. Those land in the same store as the collected events, which is what makes a network flow and a process event on the same host joinable at all.
 
 ## Detection rules are data, not code
 
@@ -201,4 +241,4 @@ Read this before treating a clean dashboard as a clean machine.
 python -m pytest -q tests
 ```
 
-The suite covers empty startup, Windows and Sysmon event mapping, rule loading and matching, the condition operators, severity ordering, correlation sequencing and its window and grouping, capture parsing into flows, threat-intelligence matching, retention, schema migration from an older store, notification, authentication, the collector's exclusion of its own processes, the API surface, the `since` bounds, and the JavaScript controls exercised in Node against a temporary API. A separate test reads real System events on Windows and is skipped elsewhere.
+The suite covers empty startup, Windows and Sysmon event mapping, rule loading and matching, the condition operators, severity ordering, context rules that record without alerting, correlation sequencing and its window, grouping and step count, capture parsing into flows, threat-intelligence matching, retention by age and by volume, schema migration from an older store, notification, authentication, the collector's exclusion of its own processes, the channel-state classification, the API surface, the `since` bounds, and the JavaScript controls exercised in Node against a temporary API. A separate test reads real System events on Windows and is skipped elsewhere.
