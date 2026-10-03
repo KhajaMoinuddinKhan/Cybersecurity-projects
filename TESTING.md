@@ -4,7 +4,7 @@ A test result is only as broad as the behaviour it exercises, and it is easy to 
 
 ## Running everything
 
-Create and activate a virtual environment as described in the root README, then install the test runner and the dependencies for the four projects that need them:
+Work from a virtual environment so the runner and the project dependencies stay out of your system Python. Install the test runner and the dependencies for the four projects that need them:
 
 ```console
 python -m pip install pytest
