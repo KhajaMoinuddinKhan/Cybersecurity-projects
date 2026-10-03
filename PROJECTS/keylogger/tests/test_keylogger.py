@@ -127,10 +127,13 @@ def test_a_refused_run_does_not_announce_that_recording_started(monkeypatch, tmp
     monkeypatch.setattr(sys, "argv", ["keylogger", "--consent", "--output", str(output)])
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
-    with pytest.raises(SystemExit, match="interactive terminal"):
+    with pytest.raises(SystemExit) as refusal:
         keylogger.main()
 
+    # SystemExit carries the message; it only reaches stderr when the interpreter
+    # actually exits, so under pytest it is read off the exception.
+    assert "interactive terminal" in str(refusal.value)
+
     captured = capsys.readouterr()
-    assert "recording started" not in captured.out
-    assert "interactive terminal" in captured.err
+    assert captured.out == ""  # nothing was announced
     assert not output.exists()
