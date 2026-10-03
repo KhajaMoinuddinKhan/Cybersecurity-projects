@@ -196,7 +196,8 @@ Two places have to be checked, and installing Sysmon is what made the second one
 Read this before treating a clean dashboard as a clean machine.
 
 - **One host.** The collector reads the machine it runs on. Events from other machines have to be shipped in through `POST /api/events` or an import; there is no agent, no forwarding protocol and no multi-host enrolment. A real SIEM's defining feature is many sources correlated together, and this has one live source.
-- **A local lab console, not a hardened service.** With no `--auth-token` there is no authentication, and the Flask development server is doing the serving. It is not designed to face a network you do not control.
+- **No user accounts.** There is no concept of a user here: no logins, no roles, no sessions, and no record of who queried what. The page is a URL several people could have open at once, and none of them is distinguishable from any other. `--auth-token` adds one shared secret rather than identity — everyone holding it is the same person as far as the application is concerned.
+- **A local lab console, not a hardened service.** With no `--auth-token` there is no authentication at all, and the Flask development server is doing the serving. It is not designed to face a network you do not control.
 - **Scale.** SQLite with `LIKE` queries and a 300-row page is fine for a workstation's event log and will not survive millions of events. There is no hot/warm/cold tiering, no index beyond the two on the table, and no sharding.
 - **Rule coverage is a documented subset of Sigma.** Unsupported keys are refused rather than ignored, so a rule that loads is a rule that works, but a Sigma rule using an unsupported feature will not load as-is.
 - **Correlation is sequence-only.** Ordered steps on a single grouping field inside a time window. There are no thresholds, no joins across fields, and no baselining of what is normal for a host.

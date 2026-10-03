@@ -4,7 +4,7 @@
 - Channels retry after failures; empty polls are normal and do not disable collection.
 - The timeline shows the latest active minute buckets, not a continuous zero-filled window. Event tables show a bounded number of matching events and CSV export exports that visible view.
 - Native PowerShell execution requires testing on Windows. Elsewhere the tests validate conversion, rule evaluation, query construction and retry behaviour with controlled inputs.
-- This is a local single-machine pipeline. Authentication is optional and off by default, and the development server binds to localhost.
+- This is a local single-machine pipeline with no concept of a user. Authentication is optional and off by default, one shared token is the only access control, and nothing records who queried what. The development server binds to localhost.
 
 ## Coverage is part of the result
 
