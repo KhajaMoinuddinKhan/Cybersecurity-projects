@@ -16,6 +16,7 @@ from src.app import (
 from src.correlation import build_correlation_payloads, correlate
 from src.enrichment import INDICATOR_RULE_ID, ThreatIntel, apply_enrichment
 from src.notify import Notifier
+from src.windows_collector import classify_event
 from src.rules import (
     CorrelationRule,
     RuleEngine,
@@ -1023,3 +1024,60 @@ def test_the_rules_endpoint_says_which_rules_alert():
     coverage = {item["rule_id"]: item for item in shared_engine().coverage()}
     assert coverage["sysmon-network-connection-to-remote-port"]["raises_alert"] is False
     assert coverage["win-failed-logon"]["raises_alert"] is True
+
+
+def test_a_context_rule_does_not_alert_on_a_collected_event():
+    severity, alert, rule = classify_event(
+        "Microsoft-Windows-Sysmon/Operational",
+        "3",
+        "Information",
+        "outbound connection",
+        {"DestinationIp": "203.0.113.9", "DestinationPort": "443"},
+    )
+    assert rule == "Process opened an outbound connection"
+    assert alert is False
+    # The severity falls back to what Windows recorded, not the rule's level.
+    assert severity == "Low"
+
+
+def test_a_sysmon_event_about_our_own_child_is_skipped(tmp_path):
+    collector = _collector(tmp_path, channels=("Microsoft-Windows-Sysmon/Operational",))
+    collector._remember_pid(4242)
+
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "<EventData>"
+        "<Data Name=\"Image\">C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe</Data>"
+        "<Data Name=\"ProcessId\">4242</Data>"
+        "<Data Name=\"ParentProcessId\">1111</Data>"
+        "</EventData></Event>"
+    )
+    own = {
+        "RecordId": 1, "Id": 1, "TimeCreated": "2026-10-04T00:00:00+00:00",
+        "Level": "Information", "Provider": "Microsoft-Windows-Sysmon",
+        "Machine": "LAB-PC", "User": "unknown",
+        "ProcessId": 4,  # the record header names Sysmon, not the created process
+        "Message": "Process Create", "Xml": xml,
+    }
+    other = dict(own, RecordId=2, Xml=xml.replace("4242", "9999"))
+
+    collector._ingest_records("Microsoft-Windows-Sysmon/Operational", [own, other], backfill=False)
+
+    assert collector.status["self_skipped"] == 1
+    stored = query_events(tmp_path / "live.db")
+    assert len(stored) == 1
+    assert stored[0]["record_id"] == "2"
+
+
+def test_an_event_without_structured_data_is_still_checked_on_the_header(tmp_path):
+    collector = _collector(tmp_path, channels=("System",))
+    collector._remember_pid(4242)
+    collector._ingest_records(
+        "System",
+        [{"RecordId": 1, "Id": 7045, "TimeCreated": "2026-10-04T00:00:00+00:00",
+          "Level": "Information", "Provider": "Service Control Manager", "Machine": "LAB-PC",
+          "User": "SYSTEM", "ProcessId": 4242, "Message": "service installed", "Xml": ""}],
+        backfill=False,
+    )
+    assert collector.status["self_skipped"] == 1
+    assert query_events(tmp_path / "live.db") == []

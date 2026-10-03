@@ -48,6 +48,12 @@ SYSMON_CHANNEL = "Microsoft-Windows-Sysmon/Operational"
 # too long and a recycled id could hide a real event from an unrelated process.
 OWN_PID_MEMORY = 400
 
+# Sysmon describes the process in the event body rather than in the record
+# header, and the header's process id is Sysmon's own. So the check for "did we
+# cause this" has to look at the structured fields: the process that was
+# created, the process that made a connection, the process that opened a handle.
+SELF_REFERENCING_FIELDS = ("ProcessId", "SourceProcessId", "ParentProcessId")
+
 # Kept for callers that import it directly. The authoritative rules now live in
 # src/rules/*.yml; this is a view of the same data for older callers.
 SUSPICIOUS_POWERSHELL = (
@@ -215,7 +221,11 @@ def classify_event(
         match = None
 
     if match is not None:
-        return match.severity, True, match.title
+        if match.raises_alert:
+            return match.severity, True, match.title
+        # A context rule names the behaviour without judging it. The severity
+        # falls back to what Windows recorded for the event.
+        return severity_from_windows_level(level), False, match.title
 
     return severity_from_windows_level(level), False, ""
 
@@ -425,6 +435,28 @@ class WindowsEventCollector:
         )
         return self._decode_records(self._powershell(script))
 
+    def _is_self_generated(self, item: dict[str, Any]) -> bool:
+        """True when this record describes something the collector itself did.
+
+        Two places have to be checked. The record header carries the process that
+        wrote the event, which for a Windows channel is the process that raised
+        it and for Sysmon is Sysmon. The event body carries the process the event
+        is *about*, which for Sysmon is the one that was created, connected or
+        opened a handle.
+        """
+
+        header_pid = str(item.get("ProcessId") or "").strip()
+        if header_pid.isdigit() and self._is_own_pid(int(header_pid)):
+            return True
+
+        data = _event_data(str(item.get("Xml") or ""))
+        for name in SELF_REFERENCING_FIELDS:
+            value = str(data.get(name) or "").strip()
+            if value.isdigit() and self._is_own_pid(int(value)):
+                return True
+
+        return False
+
     def _ingest_records(
         self,
         channel: str,
@@ -451,8 +483,7 @@ class WindowsEventCollector:
         payloads: list[dict[str, Any]] = []
         skipped = 0
         for item in records:
-            process_id = str(item.get("ProcessId") or "").strip()
-            if process_id.isdigit() and self._is_own_pid(int(process_id)):
+            if self._is_self_generated(item):
                 skipped += 1
                 continue
             payloads.append(windows_event_to_payload(channel, item))

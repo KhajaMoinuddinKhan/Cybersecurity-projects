@@ -146,7 +146,11 @@ Each channel reports one of five states, and only the last of them is a problem 
 
 Seeing fewer live channels than a colleague is normal and does not mean the app is broken.
 
-**The collector excludes its own output.** Reading a channel means running PowerShell, and a running PowerShell writes to the PowerShell channel — so without a filter the monitoring tool becomes the loudest thing in its own store. Measured on a quiet workstation before this was fixed: 717 of 819 stored events were PowerShell console lifecycle records produced by the collector's own child processes, about nine in ten. Every PowerShell process the collector starts has its process id recorded, and records from those processes are counted and skipped. The dashboard reports the count next to the collector activity line, so the exclusion is visible rather than silent. Process ids are remembered to a bounded depth, because Windows reuses them.
+**The collector excludes its own output.** Reading a channel means running PowerShell, and a running PowerShell writes to the PowerShell channel — so without a filter the monitoring tool becomes the loudest thing in its own store. Measured on a quiet workstation before this was fixed: 717 of 819 stored events were PowerShell console lifecycle records produced by the collector's own child processes, about nine in ten.
+
+Every PowerShell process the collector starts has its process id recorded, and records from those processes are counted and skipped. The dashboard reports the count next to the collector activity line, so the exclusion is visible rather than silent. Process ids are remembered to a bounded depth, because Windows reuses them.
+
+Two places have to be checked, and installing Sysmon is what made the second one obvious. A Windows channel record carries the process that raised it in the record header. A **Sysmon** record carries Sysmon's own process id there, and names the process the event is *about* in the event body — so a naive header check misses every Sysmon event about the collector's own children, and 87 of the first 107 process-creation events were the collector's PowerShell. The structured fields `ProcessId`, `SourceProcessId` and `ParentProcessId` are checked as well.
 
 ## Limits
 
