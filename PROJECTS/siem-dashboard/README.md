@@ -169,7 +169,7 @@ Bad input comes back as JSON with a 400 and a sentence explaining the problem, n
 
 `windows_collector.py` reads records from the channels it can reach, converts each one into a payload, and hands it to the ingestion pipeline. Classification is not decided in the collector: the payload goes to the rule engine, so a detection changes by editing a rule file.
 
-The channels are `Security`, `System`, `Application`, `Microsoft-Windows-Sysmon/Operational`, Windows Defender and PowerShell. **Sysmon is the one that matters most**, because it records the command line of a new process, the process that started it, and the connections it makes. The Security log tells you an account logged on; Sysmon tells you what ran and what it talked to. The Sysmon rules match on event types that are off by default, so a configuration matched to them is kept at [`sysmon-config.xml`](sysmon-config.xml).
+The channels are `Security`, `System`, `Application`, `Microsoft-Windows-Sysmon/Operational`, Windows Defender and PowerShell. **Sysmon is the one that matters most**, because it records the command line of a new process, the process that started it, and the connections it makes. The Security log tells you an account logged on; Sysmon tells you what ran and what it talked to.
 
 Records are deduplicated on the way in, and the collector keeps retrying a channel that is temporarily unavailable instead of giving up.
 
