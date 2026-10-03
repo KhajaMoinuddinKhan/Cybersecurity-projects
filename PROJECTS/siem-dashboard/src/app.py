@@ -1019,10 +1019,26 @@ def dashboard_app(
         with closing(get_connection(db_path)) as connection:
             return auth.validate_session(connection, token)
 
+    def operator():
+        """The signed-in user, or the implicit local operator while the console is open.
+
+        The console has no accounts until the first one is created, and the
+        documented default is that it is then open on loopback. Without this,
+        the account-related routes would answer 401 to everybody in that state
+        and three panels would be dead on a console that is otherwise open.
+        """
+
+        user = current_user()
+        if user is not None:
+            return user
+        if accounts_required():
+            return None
+        return {"username": "local", "role": "admin"}
+
     def require(action: str):
         """A refusal response when the signed-in user may not do this, else None."""
 
-        user = current_user()
+        user = operator()
         if user is None:
             return jsonify({"error": "Sign in to use this console."}), 401
         if not auth.has_permission(str(user["role"]), action):
@@ -1049,7 +1065,7 @@ def dashboard_app(
         trying to use.
         """
 
-        user = current_user()
+        user = operator()
         if user is None:
             return jsonify({"error": "Sign in to use this console."}), 401
         if not auth.has_permission(str(user["role"]), "manage_users"):
@@ -1427,7 +1443,7 @@ def dashboard_app(
         name = str(data.get("name", "")).strip()
         if not name:
             return jsonify({"error": "name is required."}), 400
-        user = current_user()
+        user = operator()
         with closing(get_connection(db_path)) as connection:
             if host_by_name(connection, name) is not None:
                 return jsonify({"error": f"A host called {name} is already enrolled."}), 400
@@ -1501,7 +1517,7 @@ def dashboard_app(
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return jsonify({"error": "Send one JSON object."}), 400
-        user = current_user()
+        user = operator()
         with closing(get_connection(db_path)) as connection:
             detection = detection_by_id(connection, detection_id)
             if detection is None:
@@ -1535,7 +1551,7 @@ def dashboard_app(
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return jsonify({"error": "Send one JSON object."}), 400
-        user = current_user()
+        user = operator()
         with closing(get_connection(db_path)) as connection:
             detection = detection_by_id(connection, detection_id)
             if detection is None:
@@ -1570,7 +1586,7 @@ def dashboard_app(
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return jsonify({"error": "Send one JSON object."}), 400
-        user = current_user()
+        user = operator()
         expires = data.get("expires_days")
         try:
             expires_days = int(expires) if expires not in (None, "") else None
@@ -1605,7 +1621,7 @@ def dashboard_app(
         denied = require("manage_suppressions")
         if denied:
             return denied
-        user = current_user()
+        user = operator()
         with closing(get_connection(db_path)) as connection:
             removed = triage.unsuppress(connection, suppression_id, str(user["username"]))
             auth.record_audit(
@@ -1739,7 +1755,7 @@ def dashboard_app(
 
     @app.get("/api/security")
     def api_security():
-        user = current_user()
+        user = operator()
         if user is None:
             return jsonify({"error": "Sign in to use this console."}), 401
         with closing(get_connection(db_path)) as connection:
@@ -1779,7 +1795,7 @@ def dashboard_app(
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return jsonify({"error": "Send one JSON object."}), 400
-        user = current_user()
+        user = operator()
         username = str(data.get("username", "")).strip() or None
         source_ip = str(data.get("source_ip", "")).strip() or None
         if username is None and source_ip is None:
@@ -1794,11 +1810,11 @@ def dashboard_app(
     # -------------------------------------------------------------------- mfa
 
     def own_username() -> str:
-        return str(current_user()["username"])
+        return str(operator()["username"])
 
     @app.get("/api/mfa")
     def api_mfa():
-        user = current_user()
+        user = operator()
         if user is None:
             return jsonify({"error": "Sign in to use this console."}), 401
         with closing(get_connection(db_path)) as connection:
@@ -1814,7 +1830,7 @@ def dashboard_app(
 
     @app.post("/api/mfa/setup")
     def api_mfa_setup():
-        user = current_user()
+        user = operator()
         if user is None:
             return jsonify({"error": "Sign in to use this console."}), 401
         with closing(get_connection(db_path)) as connection:
@@ -1831,7 +1847,7 @@ def dashboard_app(
 
     @app.post("/api/mfa/confirm")
     def api_mfa_confirm():
-        user = current_user()
+        user = operator()
         if user is None:
             return jsonify({"error": "Sign in to use this console."}), 401
         data = request.get_json(silent=True) or {}
@@ -1850,7 +1866,7 @@ def dashboard_app(
 
     @app.post("/api/mfa/disable")
     def api_mfa_disable():
-        user = current_user()
+        user = operator()
         if user is None:
             return jsonify({"error": "Sign in to use this console."}), 401
         data = request.get_json(silent=True) or {}
@@ -1871,7 +1887,7 @@ def dashboard_app(
 
     @app.get("/api/backups")
     def api_backups():
-        user = current_user()
+        user = operator()
         if user is None:
             return jsonify({"error": "Sign in to use this console."}), 401
         folder = backup_directory(db_path)
@@ -1897,7 +1913,7 @@ def dashboard_app(
         denied = require_admin("create a backup")
         if denied:
             return denied
-        user = current_user()
+        user = operator()
         with closing(get_connection(db_path)) as connection:
             auth.record_audit(
                 connection, str(user["username"]), "backup_create", str(db_path), None

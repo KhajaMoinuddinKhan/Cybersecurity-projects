@@ -294,3 +294,44 @@ def test_verifying_a_path_outside_the_backup_directory_is_refused(tmp_path):
     response = client.post("/api/backups/verify", json={"path": str(outside)})
     assert response.status_code == 400
     assert "not a backup written by this console" in response.get_json()["error"]
+
+
+# ------------------------------------------------- open mode and locked mode
+
+def test_the_account_panels_work_while_the_console_is_open(tmp_path):
+    """No accounts yet means the documented lab default: open on loopback.
+
+    Without an implicit local operator these routes answer 401 to everybody in
+    that state, which leaves three panels dead on an otherwise open console.
+    """
+
+    db, app = build(tmp_path)
+    client = app.test_client()
+    assert client.get("/api/security").status_code == 200
+    assert client.get("/api/mfa").status_code == 200
+    assert client.get("/api/backups").status_code == 200
+    assert client.post("/api/baseline/build").status_code == 200
+    assert client.post("/api/search/rebuild").status_code == 200
+    assert client.post("/api/backups").status_code == 201
+
+
+def test_the_same_routes_need_a_session_once_an_account_exists(tmp_path):
+    db, app = build(tmp_path)
+    add_user(db)
+    client = app.test_client()
+    for path in ("/api/security", "/api/mfa", "/api/backups"):
+        assert client.get(path).status_code == 401, path
+    assert client.post("/api/backups").status_code == 401
+    assert client.post("/api/baseline/build").status_code == 401
+
+
+def test_an_analyst_is_still_refused_the_administrator_actions(tmp_path):
+    """The implicit operator must not weaken the role checks once accounts exist."""
+
+    db, app = build(tmp_path)
+    add_user(db)
+    client = app.test_client()
+    sign_in(client)
+    assert client.post("/api/backups").status_code == 403
+    assert client.post("/api/search/rebuild").status_code == 403
+    assert client.post("/api/security/lockout/clear", json={"username": "x"}).status_code == 403
