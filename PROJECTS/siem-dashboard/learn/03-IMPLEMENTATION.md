@@ -24,6 +24,8 @@
 
 **A lockout is checked before the password.** The login route asks whether the pair is locked before it verifies anything, so a locked account cannot be used to tell a right password from a wrong one. The lockout carries its own expiry and a read never deletes it, so the audit trail survives.
 
+**The first-run door closes behind you.** `POST /api/setup` creates the first administrator and is refused the moment any account exists, so it is a way to claim an unclaimed console and not a way to mint an extra account; later accounts come from an administrator. The reply carries the session it just issued, so claiming the console lands the operator signed in rather than at a form. While no account exists the console reports identity as an implicit local administrator, because answering 401 there made the page ask for credentials that could not exist yet.
+
 **A backup is taken with SQLite, not copied.** The store is in WAL mode, so a byte copy of the file can miss committed transactions still in the log; the online backup API reads a consistent snapshot while the server keeps writing, and the result is one self-contained file with no sidecars.
 
 [Run instructions and troubleshooting](../README.md)

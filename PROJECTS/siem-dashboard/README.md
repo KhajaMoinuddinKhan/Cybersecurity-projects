@@ -188,7 +188,13 @@ Point `--intel-db` at the SQLite store written by the [Threat Intelligence Aggre
 
 ## Accounts, roles and sessions
 
-The console keeps accounts, the host registry, the triage tables and the event store in the same SQLite file, so one file is still the whole console's state. The first administrator is created from the command line, taking the password from `SIEM_ADMIN_PASSWORD` or standard input and never from `argv`:
+The console keeps accounts, the host registry, the triage tables and the event store in the same SQLite file, so one file is still the whole console's state.
+
+A console with no accounts is unclaimed, and the page offers to claim it. Rather than a sign-in form it shows a first-run card asking for a name and a password; submitting it creates the first administrator, issues the session in the reply and reloads signed in. The password is held to the same policy as any other account, and a refusal names what was wrong with it.
+
+That door closes behind you. Once any account exists the endpoint refuses, so it is a first-run door and not a way to mint yourself an extra account; later accounts are created by an administrator. Dismissing the card instead leaves the console open on loopback, which is the documented lab default.
+
+For a headless setup, or to create an account without a browser, the same thing is available from the command line, taking the password from `SIEM_ADMIN_PASSWORD` or standard input and never from `argv`:
 
 ```console
 python -m src.auth --init-admin analyst --db siem_live.db
@@ -319,6 +325,8 @@ There are four mappers, auto-detected from the record when the caller does not n
 | `GET /api/rules` | Every loaded detection and correlation rule, its ATT&CK techniques and its documented false positives. |
 | `GET /api/schema` | The canonical event schema, so the page can document itself. |
 | `GET /api/me` | The signed-in user's name and role, or 401. |
+| `GET /api/setup` | Whether this console still needs its first account. |
+| `POST /api/setup` | Create the first administrator and sign them in. Refused once any account exists. |
 | `POST /login`, `POST /logout` | Start and end a session. |
 | `POST /api/events` | Ingest one event object or a list of them. |
 | `POST /api/ingest` | Accept a batch from a collector agent, authenticated by host key. |
@@ -387,7 +395,7 @@ Read this before treating a clean dashboard as a clean machine.
 - **Sessions are bearer tokens.** The cookie is `HttpOnly` and `SameSite=Lax`, but anyone who can read the cookie or the token can use the session until it expires or is revoked. A second factor protects the login step, not a session that has already been issued, so it does nothing for a stolen cookie.
 - **The TOTP secret lives in the same file as the data.** MFA is stored as a plaintext base32 secret in the same SQLite file as the events, accounts and everything else, so anyone who can read the database can generate valid codes and anyone who can write it can disable the factor. It guards against a stolen password, not against an attacker who already has the file.
 - **Lockout is per username-and-address.** Five failures lock a username-and-address pair, not the account globally, so an attacker with a pool of addresses still gets the threshold from each, and an attacker who knows a username can lock that user out from their own address.
-- **The console is open until the first account exists.** With no account, the protected routes are reachable on localhost without a session. That is the documented lab default, and it means the first thing to do before binding to anything but loopback is create an admin.
+- **The console is open until the first account exists.** With no account, the protected routes are reachable on localhost without a session and identity is reported as an implicit local administrator rather than refused, so the page offers to create the first account instead of a form nothing could satisfy. That is the documented lab default, and it means the first thing to do before binding to anything but loopback is create an admin.
 - **The agent cannot be trusted about which machine it is.** The bearer key proves that a key was presented, not which machine sent a batch. The agent has no installer, no service registration, no privilege separation, no tamper protection and no payload signing, so anyone who can edit the agent, its arguments or its spool changes what the server sees. The key is the whole of its identity.
 - **The agent spool is unencrypted plain text.** Events that could not be shipped, including any credentials that were in their messages, sit in a JSONL file until delivered. Treat it as a sensitive log file.
 - **Suppression is a workflow convenience, not a detection-quality guarantee.** A suppressed rule still fires, still classifies the event, and the event is still stored with its rule id; it is only hidden from the triage queue. Suppressing a true positive hides it as effectively as a false one.

@@ -2,6 +2,8 @@
 
 MKMK Live SIEM collects Windows Event Log and Sysmon telemetry, classifies it against detection rules loaded from files, correlates the results into sequences, stores everything in one SQLite file, and serves a live analyst dashboard. It is no longer one machine. A console collects the host it runs on, agents on other machines forward theirs, and the server keeps accounts, a host inventory, a triage queue, an indexed search, per-host baselines, lockout and multi-factor authentication, and backups beside the events. Nothing on the page is decorative: every number comes from stored data, and when a panel cannot be reached it says so instead of showing a zero.
 
+An install starts unclaimed. There are no accounts, so the page offers to create the first administrator rather than asking for credentials that do not exist yet, and from the moment that account exists the console requires a sign-in and records who did what. That single decision is the difference between a dashboard anybody who can reach the port may read and one that keeps an account of its own use.
+
 The pipeline has five stages, and it is worth naming them because every panel on the page maps to one. Collection reads the event channels, locally or through an agent. Classification decides which events matter and why. Storage keeps them. Correlation looks across the stored results for sequences no single event could show. Presentation is the dashboard, now with the accounts, triage and the second wave of tools that turn a viewer into an analyst.
 
 ## From counts to evidence

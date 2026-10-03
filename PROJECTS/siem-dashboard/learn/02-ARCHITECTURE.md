@@ -5,7 +5,7 @@
 3. Classification applies threat intelligence and the rule engine, records the rule id, name, ATT&CK techniques and which selections matched, and decides whether the match may alert.
 4. Validation normalises the batch and inserts it, with SQLite enforcing source and external-id uniqueness so a repeated import or a re-read channel cannot duplicate.
 5. Correlation reads stored rule hits, groups them by host, user or address, and looks for the ordered sequence each correlation rule describes inside its window.
-6. Flask builds filtered snapshots and serves the dashboard, the rules and schema endpoints, the ingestion routes, the host registry, the triage queue, the suppression manager, the audit log, and the wave-two surface: the query-language search and its index, the baseline build and deviation endpoints, the lockout and MFA endpoints, and the backup list, create and verify routes. Accounts, hosts, triage state, baselines and events all live in the same file.
+6. Flask builds filtered snapshots and serves the dashboard, the rules and schema endpoints, the ingestion routes, the host registry, the triage queue, the suppression manager, the audit log, the first-run pair that claims an unclaimed console, and the wave-two surface: the query-language search and its index, the baseline build and deviation endpoints, the lockout and MFA endpoints, and the backup list, create and verify routes. Accounts, hosts, triage state, baselines and events all live in the same file.
 7. The browser polls every 1.5 seconds and renders the counters, charts, rankings, the triage queue, the host inventory, the suppression list, the audit table and the wave-two panels alongside the event stream.
 
 ## The loops
