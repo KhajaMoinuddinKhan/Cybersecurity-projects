@@ -31,7 +31,10 @@ python -m src.app --alert-log alerts.jsonl         # append new alerts as JSON l
 python -m src.app --alert-webhook https://example.invalid/hook
 python -m src.app --retain-days 14                 # prune anything older than a fortnight
 python -m src.app --auth-token "$SIEM_AUTH_TOKEN"  # an additional shared secret, not an account
+python -m src.app --tls-cert cert.pem --tls-key key.pem  # serve HTTPS instead of HTTP
 ```
+
+Passing both `--tls-cert` and `--tls-key` serves HTTPS; without them the console serves plain HTTP on loopback. The certificate pair is checked when the console starts, so a wrong path or a key that does not match its certificate fails at once rather than on the first connection. Producing the certificate is the operator’s job.
 
 `--no-windows-events` is what you want on macOS or Linux, or on a Windows account that cannot read the security channel: the dashboard, the rule engine, the capture import, the filters and the triage queue all work, they simply have no live local source feeding them. Events from other machines still arrive through an enrolled agent.
 
@@ -46,7 +49,7 @@ python -m src.agent --server http://siem.example:5000 --host-id web-01 --key hk_
 
 The page updates from the current contents of the database, so nothing on it is decorative. Counts, severity breakdowns, events-per-minute, timelines, providers, Event IDs, rule hits, ATT&CK techniques, the correlation panel and the event table are all computed from stored records, and the search, time, channel, provider, Event ID, user, rule, severity and alerts-only filters apply to everything on screen.
 
-The console now has four parts beyond the overview, described at the end of this section: a sign-in view, a monitored-hosts panel, a detection triage queue with an investigation record, and a suppression manager with an audit log. The three screenshots below were taken on a run from before accounts and triage existed, so they show the collection, alerting and event-stream panels that are still on the page rather than the newer ones. The numbers are odd and specific because they come from one live machine; yours will differ, and the panels will not.
+The console now has eight parts beyond the overview, described at the end of this section: a sign-in view, a monitored-hosts panel, a detection triage queue with an investigation record, a suppression manager with an audit log, and the four wave-two panels — indexed event search, per-host baselining, lockout and multi-factor authentication, and backups. The three screenshots below were taken on a run from before accounts and triage existed, so they show the collection, alerting and event-stream panels that are still on the page rather than the newer ones. The numbers are odd and specific because they come from one live machine; yours will differ, and the panels will not.
 
 ### The overview
 
@@ -95,6 +98,18 @@ At the bottom, the ingestion panel is where additional sources arrive — a JSON
 **Suppression rules** is the tuning loop: a rule hidden for one host or for every host, optionally with an expiry. The panel states plainly that a suppression hides a detection from the queue and does not stop the rule firing or the event being stored.
 
 **Activity audit** lists who did what — logins and failed logins, user and host changes, triage moves, suppressions and revocations — newest first, and is readable only by an admin. The page hides the suppression form and the audit table from a viewer and says why, rather than showing controls the server would refuse. When any of these endpoints cannot be reached, the panel says so instead of showing a zero.
+
+### The search, baseline, security and backup panels
+
+**Event search** is the indexed query language described below, a grammar over hosts, severity, channel, rule, user, source address, message and time, with wildcards, quoting and negation. It shows which engine answered the query, and when the fallback ran it says so rather than implying the search was indexed.
+
+**Baselining** lists what is normal for each host and key, and the deviations panel shows the keys whose recent volume sits furthest above their own baseline, with the observed and expected counts, the standard deviation and the sigma distance. A key with too little history is reported as insufficient rather than judged.
+
+**Lockouts and MFA** shows the accounts currently locked out, the recent failed sign-ins, and the controls to clear a lockout or enrol a second factor. The secret, the otpauth URI and the recovery codes are shown once, at setup.
+
+**Backups** lists the snapshots of the store, with a control to take one now and a control to verify one.
+
+These panels respect the role as the older ones do: a viewer sees the lockout-clear, MFA, rebuild and backup controls hidden, with the reason stated, rather than as buttons the server would refuse.
 
 ## Detection rules are data, not code
 
@@ -191,7 +206,7 @@ There are three roles and one permission matrix, and it is the only place author
 
 `has_permission` answers a question; the Flask route must ask it before serving. That separation is deliberate — the matrix lives in one dict, but enforcement is at the route, so a route that forgets to check is not protected by the matrix.
 
-Signing in creates a session: a random token from `secrets`, of which only the SHA-256 hash is stored, with an expiry (twelve hours by default) and a revocation flag. The token is returned to the browser in an HttpOnly cookie. Logging out revokes it, and disabling an account ends its sessions immediately, because a session is only valid while its user still exists and is enabled. There is no login rate limit, no lockout and no multi-factor authentication; the only brake on guessing is the scrypt cost.
+Signing in creates a session: a random token from `secrets`, of which only the SHA-256 hash is stored, with an expiry (twelve hours by default) and a revocation flag. The token is returned to the browser in an HttpOnly cookie. Logging out revokes it, and disabling an account ends its sessions immediately, because a session is only valid while its user still exists and is enabled. A run of failed logins now locks the username-and-address pair out, and an account can require a TOTP second factor; both are described under “Lockout and multi-factor authentication”.
 
 Every function that changes stored state writes an audit row, and both successful and failed logins are recorded. The log is readable at `GET /api/audit`, paged newest-first. It is append-only by convention, not by construction: SQLite does not stop a caller rewriting it and it is not signed.
 
@@ -231,6 +246,57 @@ Suppression is the tuning loop. A suppression is a rule scoped to one host or to
 
 Suppression is a workflow convenience, not a guarantee about detection quality. A suppressed rule still fires, still classifies the event, and the event is still stored with its rule id — it is only hidden from the triage queue. Nothing about a suppression changes what the rule engine decides, and suppressing a true positive hides it just as effectively as a false one.
 
+## Searching events
+
+The overview filter’s search box matches a substring across a handful of columns. The **Event search** panel is a different tool: a small query language over an index. A query is whitespace-separated tokens, and a token is free text, a `field:value` clause, or either of those negated with a leading `-`:
+
+| Clause | Filters |
+| --- | --- |
+| `host:`, `host_id:` | The reporting host’s name and id. |
+| `severity:` | `High`, `Medium` or `Low`. |
+| `channel:` | The event channel. |
+| `rule:` | The rule name or rule id. |
+| `user:` | The account in the event. |
+| `source_ip:` | The event’s source address. |
+| `message:` | The event message. |
+| `after:`, `before:` | The event time. `after:` is inclusive, `before:` exclusive; a date with no time is midnight UTC. |
+
+`*` is a wildcard, a value containing a space is quoted (`host:"LAB A"`), and a leading `-` negates a term or a clause. Free text searches the message, rule name, channel, provider, user and host at once.
+
+The query runs against a SQLite FTS5 index kept in step with the store by triggers, and the response names the engine that actually answered it. FTS5 indexes whole tokens, so a free-text term matches a token and a single trailing `*` is a prefix query; a term with an internal `*`, a query with no free text, or a build without FTS5 falls back to indexed-column predicates. The fallback is a scan rather than a full-text index, the response says which engine ran, and the panel prints it, so a search that looks like a full-text search but is not one is visible rather than assumed. Rows that existed before the index was first built are not indexed until the index is rebuilt; a search whose index is behind the store is answered by the scan rather than returning incomplete results, and the summary reports the shortfall.
+
+`GET /api/search?q=&limit=&offset=` runs a query and pages it; `GET /api/search/summary` reports the index state; `POST /api/search/rebuild` (administrator only) repopulates the index from the store. A malformed query is a `400` whose message names the offending token — an unknown field, a missing value, a bare `-`, an unclosed quote or an unreadable date.
+
+Three limits are worth stating. There is no relevance ranking: results are ordered newest-first and the total is an exact count. Tokens are only ever AND-ed, with no parentheses and no `or`. And the index lives in the same SQLite file as the events it copies, so it is not a distributed search service and it does not outlive the store.
+
+## Baselining
+
+Rules match patterns; they cannot say whether an event is unusual *for this host*. Baselining adds that half. `POST /api/baseline/build` (administrator only) computes, for each host and each key, the distribution of that key’s hourly event counts over a window. Two keys are built per host: one per detection rule (the rule id) and one per channel. Each stored baseline carries the sample count, the mean, the standard deviation, the minimum and maximum hourly count, and the first and last observation times.
+
+`GET /api/baseline` lists them with a summary, including how many keys seen in the window have too little history to be judged. `GET /api/baseline/deviations` compares each baselined key’s count in the recent window against `mean + sigma * stddev` and returns the keys above it, each carrying the observed count, the expected count (the mean), the standard deviation, the sigma distance and a severity.
+
+Two design choices matter. **A key with fewer than the minimum samples — 24 by default, a day’s worth of active hours — is reported as having insufficient history and is never judged**, because a standard deviation from a handful of hours is noise. And **hours in which a key produced no events are excluded rather than counted as zero**, so a host that is switched off at night does not drag its own mean down; the cost is that a key firing for the first time in a previously silent hour is not, by itself, a deviation.
+
+The honest limits belong here too. It is a simple per-key statistic: it knows nothing about correlation between keys, so a burst spread thinly across many keys is invisible; it counts volume, not intent, so an attack that stays inside normal volume is never reported; and a host quiet for most of the week produces a low baseline that ordinary daytime activity can sit above. It is a separate signal and does not feed back into the rule engine — a rule alerts exactly as it did before.
+
+## Lockout and multi-factor authentication
+
+Signing in now has two brakes beyond the scrypt cost. **Lockout:** five failed logins within fifteen minutes lock that username-and-address pair out for fifteen minutes. A locked pair is refused *before* the password is checked, so a lockout cannot be used as an oracle for guessing; the lockout expires on its own with no timer and no administrator, and an administrator can clear it with `POST /api/security/lockout/clear`. A successful sign-in clears the failure run for that pair.
+
+**Multi-factor authentication** is TOTP per RFC 6238, a six-digit code on a thirty-second step with a one-step drift window either side. `POST /api/mfa/setup` returns the secret, the `otpauth://` URI and ten one-time recovery codes, and that is the only moment any of them exists in plaintext: only the SHA-256 hashes of the recovery codes are stored, so a copy of the database holds no usable recovery code. `POST /api/mfa/confirm` verifies a code against the pending secret and enables the factor; `POST /api/mfa/disable` turns it off and **costs the account password**, because turning a second factor off is a downgrade. A login now accepts an optional `code` field and replies `mfa_required` when the password was right but a code is needed.
+
+`GET /api/security` lists the active lockouts and the recent failed sign-ins. The honest limits: TOTP protects the login step only, not a session token once issued; the secret sits in plaintext in the same SQLite file as everything else, so anyone who can read the file can generate valid codes; and the lockout is per username-and-address, not global, so an attacker with a pool of addresses still gets the threshold from each, and someone who knows a username can lock that user out from their own address.
+
+## Backups
+
+`GET /api/backups` lists the snapshots in the store’s backup directory; `POST /api/backups` takes one; both it and `POST /api/backups/verify` are administrator-only. Snapshots are taken with SQLite’s own online backup API rather than by copying the file, because the store runs in WAL mode and a plain copy can miss committed data still sitting in the write-ahead log; the snapshot is a single self-contained file with no `-wal`/`-shm` beside it. Verification runs `PRAGMA integrity_check` and counts the rows in every table, so a truncated or corrupt file is detected rather than trusted, and the verify route refuses any path outside the directory the console writes backups to, so it cannot be pointed at an arbitrary file on the machine.
+
+`restore_backup` lives in the module and is not on the HTTP surface. It refuses to overwrite an existing database without an explicit force, and when forced it takes a safety copy of the current file first. Stated plainly: this is a file-level snapshot, not replication and not high availability; a restore needs the server stopped, because SQLite will not let a live connection’s database be overwritten underneath it; and the backup directory is not encrypted, so a snapshot holds the same sensitive events as the store.
+
+## Serving HTTPS
+
+The console serves plain HTTP unless it is started with both `--tls-cert` and `--tls-key`, in which case Flask serves HTTPS. The certificate pair is validated at start-up, so a wrong path or a key that does not match its certificate fails immediately with a sentence rather than on the first connection with a traceback. The session cookie is marked `Secure` only when the console is actually on HTTPS, because a `Secure` cookie that can never be sent over plain HTTP would lock an operator out of their own lab. Generating the certificate is the operator’s job; the console does not produce one. TLS is opt-in, so the default remains plain HTTP on loopback.
+
 ## The event schema
 
 Every source produces events in a different shape, so `src/schema.py` defines one canonical record and maps each producer onto it. The record has seventeen fields — `timestamp`, `host_id`, `source`, `event_type`, `severity`, `message`, `user`, `process`, `command_line`, `src_ip`, `dst_ip`, `dst_port`, `dns_query`, `file_hash`, `rule_id`, `techniques` and `raw`. Only `message` is required; every other field has a documented default, and a field the source does not supply is `None` rather than a placeholder. The producer strings `"unknown"` and `"localhost"` are normalised to `None` so a consumer can tell a known value from an absent one, and unknown input fields survive in `raw`, so nothing a source sent is lost.
@@ -268,6 +334,21 @@ There are four mappers, auto-detected from the record when the caller does not n
 | `GET`, `POST /api/suppressions` | List or create a suppression. |
 | `DELETE /api/suppressions/{id}` | Revoke a suppression. |
 | `GET /api/audit` | The audit log, newest first, paged. |
+| `GET /api/search/summary` | The search index state: FTS5 availability, indexed rows and whether the index is behind. |
+| `GET /api/search` | Run a query-language search, paged, reporting which engine answered. |
+| `POST /api/search/rebuild` | Rebuild the FTS5 index from the store. Admin only. |
+| `GET /api/baseline` | The stored per-host baselines and a summary of what cannot be judged. |
+| `GET /api/baseline/deviations` | Baselined keys whose recent count exceeds their own mean plus sigma. |
+| `POST /api/baseline/build` | Recompute the per-host baselines. Admin only. |
+| `GET /api/security` | Active lockouts and recent failed sign-ins. |
+| `POST /api/security/lockout/clear` | Clear a lockout. Admin only. |
+| `GET /api/mfa` | Whether MFA is enabled for the signed-in user. |
+| `POST /api/mfa/setup` | Begin MFA enrolment; returns the secret, URI and recovery codes once. |
+| `POST /api/mfa/confirm` | Confirm enrolment with a code. |
+| `POST /api/mfa/disable` | Turn MFA off; costs the account password. |
+| `GET /api/backups` | List the backups in the store’s backup directory. |
+| `POST /api/backups` | Take a snapshot. Admin only. |
+| `POST /api/backups/verify` | Verify a snapshot written by this console. Admin only. |
 
 Bad input comes back as JSON with a 400 and a sentence explaining the problem, never as an HTML error page: a missing message field, a severity outside High/Medium/Low, a CSV whose rows do not match the header width, a deeply nested JSON document, a `since` value that is not a whole number of minutes, or a file that is not a capture. A batch is validated before insertion, so one bad record does not leave half an import behind.
 
@@ -301,20 +382,23 @@ Two places have to be checked, and installing Sysmon is what made the second one
 
 Read this before treating a clean dashboard as a clean machine.
 
-- **No TLS.** The Flask development server serves plain HTTP. Passwords and session cookies cross the network in cleartext the moment the console is bound to anything but localhost, and the session cookie is not marked `Secure` because there is no HTTPS for it to require. Sessions are only as safe as the transport that carries them.
+- **TLS is opt-in.** The console serves plain HTTP unless it is started with `--tls-cert` and `--tls-key`, so the default is cleartext on loopback, and passwords and session cookies cross the network in cleartext the moment it is bound to anything but localhost without those flags. The session cookie is marked `Secure` only when the console is actually on HTTPS. Sessions are only as safe as the transport that carries them.
 - **Roles are enforced by the routes, not the database.** `auth.has_permission` answers a question; the Flask route has to ask it. A route that forgets to check is not protected by the permission matrix, and the matrix is one Python dict rather than a database-enforced policy.
-- **Sessions are bearer tokens.** The cookie is `HttpOnly` and `SameSite=Lax`, but anyone who can read the cookie or the token can use the session until it expires or is revoked. There is no login rate limit, no lockout and no multi-factor authentication; the only brake on guessing is the scrypt cost, roughly 0.18 seconds per attempt at the default parameters.
+- **Sessions are bearer tokens.** The cookie is `HttpOnly` and `SameSite=Lax`, but anyone who can read the cookie or the token can use the session until it expires or is revoked. A second factor protects the login step, not a session that has already been issued, so it does nothing for a stolen cookie.
+- **The TOTP secret lives in the same file as the data.** MFA is stored as a plaintext base32 secret in the same SQLite file as the events, accounts and everything else, so anyone who can read the database can generate valid codes and anyone who can write it can disable the factor. It guards against a stolen password, not against an attacker who already has the file.
+- **Lockout is per username-and-address.** Five failures lock a username-and-address pair, not the account globally, so an attacker with a pool of addresses still gets the threshold from each, and an attacker who knows a username can lock that user out from their own address.
 - **The console is open until the first account exists.** With no account, the protected routes are reachable on localhost without a session. That is the documented lab default, and it means the first thing to do before binding to anything but loopback is create an admin.
 - **The agent cannot be trusted about which machine it is.** The bearer key proves that a key was presented, not which machine sent a batch. The agent has no installer, no service registration, no privilege separation, no tamper protection and no payload signing, so anyone who can edit the agent, its arguments or its spool changes what the server sees. The key is the whole of its identity.
 - **The agent spool is unencrypted plain text.** Events that could not be shipped, including any credentials that were in their messages, sit in a JSONL file until delivered. Treat it as a sensitive log file.
 - **Suppression is a workflow convenience, not a detection-quality guarantee.** A suppressed rule still fires, still classifies the event, and the event is still stored with its rule id; it is only hidden from the triage queue. Suppressing a true positive hides it as effectively as a false one.
-- **No baselining.** The rules cannot say whether an event is unusual for a host, only whether it matches a pattern. That is why the noisiest rules record themselves as context instead of raising alerts.
-- **Search is SQL `LIKE` with paging.** Search matches a `LIKE ... ESCAPE` pattern across ten columns and pages the result with a limit and an offset; it is not an index-backed query language, and it will not stay fast over millions of rows.
-- **The store is a single SQLite file in a single process.** Events, accounts, hosts, triage state and the audit log all live in one file served by one process. There is no replication, no hot/warm/cold tiering, no backup and no high availability; the indexes on the table and a `LIKE` scan are the whole query strategy.
+- **The baseline cannot see an attack inside normal volume.** Baselining now records what is normal per host and per key, but it is a volume statistic: a key that always fires a hundred times an hour has a high mean, and an attacker who stays under it is never reported. It knows nothing about correlation between keys, and it does not feed back into the rule engine, so the noisiest rules still record themselves as context rather than raising alerts.
+- **The search fallback is a scan, not a full-text index.** The query language runs against an FTS5 index when the build has one and the index is in step, but it falls back to indexed-column predicates whenever FTS5 is unavailable, the index is missing or behind, the query has no free-text terms, or a term uses an internal wildcard. The two engines are not identical — the scan matches substrings where FTS5 matches tokens — so the same query can return different rows on two machines, and the response names the engine that actually ran rather than hiding the difference.
+- **The store is a single SQLite file in a single process.** Events, accounts, hosts, triage state, baselines and the audit log all live in one file served by one process. There is no replication, no hot/warm/cold tiering and no high availability; a backup is a file-level snapshot, not a second copy kept in step.
+- **The backup directory is not encrypted.** A snapshot is an ordinary SQLite file holding the same events, password hashes and TOTP secrets as the store, protected only by the filesystem’s permissions. It is not shipped off the host and it is not encrypted.
 - **A local lab console, not a hardened service.** The Flask development server is not designed to face a network you do not control, and the agent is a forwarder rather than an endpoint agent. Nothing here is a substitute for a hardened production service.
 - **Rule coverage is a documented subset of Sigma.** Unsupported keys are refused rather than ignored, so a rule that loads is a rule that works, but a Sigma rule using an unsupported feature will not load as-is.
-- **Correlation is sequence-only.** Ordered steps on a single grouping field inside a time window. There are no thresholds, no joins across fields, and no baselining of what is normal for a host.
-- **Several rules are noisy by design and marked as context.** The outbound-connection rule matches normal traffic, so it records rather than alerts. That is a workaround for having no baselining: without a notion of what is normal for a host, the honest option is to treat the behaviour as context instead of pretending a browser is an incident.
+- **Correlation is sequence-only.** Ordered steps on a single grouping field inside a time window. There are no thresholds, no joins across fields, and it does not consult the baseline — a correlation rule cannot say a sequence is unusual for a host, only that it happened.
+- **Several rules are noisy by design and marked as context.** The outbound-connection rule matches normal traffic, so it records rather than alerts. The baseline is a separate signal and does not change how a rule alerts, so treating the behaviour as context is still the honest option instead of pretending a browser is an incident.
 - **Severity is not risk.** A severity on an alert is how much attention the rule thinks it deserves, not a measure of business impact. There is no asset criticality and no risk scoring.
 - **Sysmon is a large source.** Even tuned, it is the bulk of the store — 1,031 of 1,157 events in one measured run. That is the nature of endpoint telemetry, and it is why the store is bounded by size as well as age.
 - **The collector reads the log by running PowerShell.** Six channels are polled every two seconds, one process each. That works and it is what the platform gives without an extra dependency, but it is heavy, it produces the self-generated volume described above, and a machine with a slow PowerShell profile will poll slowly. A native API would be the right long-term answer.
@@ -326,4 +410,4 @@ Read this before treating a clean dashboard as a clean machine.
 python -m pytest -q tests
 ```
 
-327 tests pass. The suite covers empty startup, Windows and Sysmon event mapping, rule loading and matching, the condition operators, severity ordering, context rules that record without alerting, correlation sequencing and its window, grouping and step count, capture parsing into flows, threat-intelligence matching, retention by age and by volume, schema migration from an older store, notification, the collector's exclusion of its own processes, the channel-state classification, the API surface, the `since` bounds, and the JavaScript controls exercised in Node against a temporary API. It also covers the account and role model, the host registry and enrolment keys, the agent's batching, spool and file tailing, the triage status machine, append-only notes, suppression scoping and expiry, and the canonical event schema. A separate test reads real System events on Windows and is skipped elsewhere.
+581 tests pass, two skipped. The suite covers empty startup, Windows and Sysmon event mapping, rule loading and matching, the condition operators, severity ordering, context rules that record without alerting, correlation sequencing and its window, grouping and step count, capture parsing into flows, threat-intelligence matching, retention by age and by volume, schema migration from an older store, notification, the collector's exclusion of its own processes, the channel-state classification, the API surface, the `since` bounds, and the JavaScript controls exercised in Node against a temporary API. It also covers the account and role model, the host registry and enrolment keys, the agent's batching, spool and file tailing, the triage status machine, append-only notes, suppression scoping and expiry, and the canonical event schema. The wave-two work has its own suites: the query grammar, the FTS5 index and the scan fallback, the baseline build and deviation maths with its minimum-sample guard, the lockout window and its expiry, TOTP against the RFC vectors plus the recovery codes, the backup snapshot, verify and restore, the TLS pair validation, and the wave-two routes through the HTTP surface. The two skips are the TLS tests that shell out to `openssl` when the temporary directory cannot be used. A separate test reads real System events on Windows and is skipped elsewhere.

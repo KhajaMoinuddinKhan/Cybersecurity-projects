@@ -32,6 +32,14 @@
   .suppression-form p{grid-column:1/-1;margin:0}
   .pager{display:flex;align-items:center;gap:12px;margin-top:12px;font-size:.85rem}
   .muted{opacity:.7}
+  .wave-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;align-items:end;margin:12px 0}
+  .wave-form label{display:grid;gap:6px;font-size:.8rem}
+  .wave-form .wide{grid-column:1/-1}
+  .wave-form p{margin:0}
+  .code-block{display:block;margin:6px 0;padding:10px;border:1px solid var(--line,#2a2f3a);border-radius:8px;background:#050506;color:#ff8fa1;font-family:"Cascadia Code",Consolas,monospace;font-size:.72rem;word-break:break-all;white-space:pre-wrap}
+  .mfa-codes{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:6px;margin:8px 0}
+  .mfa-codes code{padding:6px;border:1px solid var(--line,#2a2f3a);border-radius:6px;background:#050506;color:#ff8fa1;text-align:center}
+  .warn-note{color:#f1c40f;font-size:.72rem;margin:6px 0}
   </style>
 </head>
 <body>
@@ -42,6 +50,7 @@
     <p>This console requires an account. Enter your credentials to continue.</p>
     <label><span>Username</span><input id="login-username" name="username" type="text" autocomplete="username" required></label>
     <label><span>Password</span><input id="login-password" name="password" type="password" autocomplete="current-password" required></label>
+    <label id="login-code-label" hidden><span>Authenticator code</span><input id="login-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits or a recovery code"></label>
     <button class="primary-button" type="submit">Sign in</button>
     <p id="login-message" class="chart-note" aria-live="polite"></p>
   </form>
@@ -49,7 +58,7 @@
 <a class="skip-link" href="#overview">Skip to dashboard</a>
 <aside class="sidebar" aria-label="Dashboard navigation">
   <a class="brand-mark" href="#overview" aria-label="MKMK overview">M</a>
-  <nav><a href="#overview"><span>◈</span>Overview</a><a href="#alerts"><span>△</span>Alerts</a><a href="#sources"><span>▤</span>Sources</a><a href="#health"><span>▧</span>Health</a><a href="#events"><span>≡</span>Events</a><a href="#ingestion"><span>⇥</span>Import</a><a href="#hosts"><span>▦</span>Hosts</a><a href="#triage"><span>⚑</span>Triage</a><a id="nav-suppressions" href="#suppressions"><span>⊘</span>Suppressions</a><a id="nav-audit" href="#audit"><span>▥</span>Audit</a></nav>
+  <nav><a href="#overview"><span>◈</span>Overview</a><a href="#alerts"><span>△</span>Alerts</a><a href="#sources"><span>▤</span>Sources</a><a href="#health"><span>▧</span>Health</a><a href="#events"><span>≡</span>Events</a><a href="#ingestion"><span>⇥</span>Import</a><a href="#hosts"><span>▦</span>Hosts</a><a href="#triage"><span>⚑</span>Triage</a><a id="nav-suppressions" href="#suppressions"><span>⊘</span>Suppressions</a><a id="nav-audit" href="#audit"><span>▥</span>Audit</a><a id="nav-search" href="#search"><span>⌕</span>Search</a><a id="nav-baseline" href="#baseline"><span>∿</span>Baseline</a><a id="nav-security" href="#security"><span>⛨</span>Security</a><a id="nav-backups" href="#backups"><span>⤓</span>Backups</a></nav>
   <span class="sidebar-label">MKMK</span>
 </aside>
 <main class="shell" id="overview">
@@ -323,6 +332,123 @@
     </form>
     <p id="notes-message" class="chart-note" aria-live="polite"></p>
   </dialog>
+
+  <section class="panel search-panel" id="search">
+    <div class="panel-heading">
+      <div><span class="kicker">13 / SEARCH</span><h2>Event search</h2></div>
+      <span class="mini-chip" id="search-chip">--</span>
+    </div>
+    <p id="search-index-note" class="chart-note">Loading index status</p>
+    <form id="search-form" class="wave-form">
+      <label class="wide"><span>Query</span><input id="search-query" type="search" placeholder="host:web01 severity:High message:failed after:2026-01-01"></label>
+      <button class="primary-button" type="submit">Search</button>
+      <button id="search-rebuild" class="ghost-button" type="button">Rebuild index</button>
+      <p id="search-help" class="chart-note wide">Grammar: <code>host:</code> <code>severity:</code> <code>channel:</code> <code>rule:</code> <code>user:</code> <code>message:</code> <code>after:</code> <code>before:</code>; values may be quoted, a leading <code>-</code> negates a term and <code>*</code> is a wildcard.</p>
+      <p id="search-role-note" class="chart-note wide"></p>
+    </form>
+    <p id="search-engine" class="chart-note"></p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Severity</th><th>Host</th><th>Channel</th><th>Event ID</th><th>Message</th><th>User</th><th></th></tr></thead>
+        <tbody id="search-body"><tr><td colspan="8" class="table-empty">Enter a query to search the event store.</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pager"><button id="search-prev" class="ghost-button" type="button">Previous</button><span id="search-page">Page 1</span><button id="search-next" class="ghost-button" type="button">Next</button></div>
+    <p id="search-message" class="chart-note" aria-live="polite"></p>
+  </section>
+
+  <section class="panel baseline-panel" id="baseline">
+    <div class="panel-heading">
+      <div><span class="kicker">14 / BASELINE</span><h2>Behaviour baselines</h2></div>
+      <span class="mini-chip" id="baseline-chip">--</span>
+    </div>
+    <p id="baseline-summary" class="chart-note">Loading baselines</p>
+    <p id="baseline-note" class="chart-note">A key with too little history is not judged: it is reported as insufficient rather than flagged as a deviation.</p>
+    <div class="wave-form">
+      <button id="baseline-build" class="ghost-button" type="button">Rebuild baseline</button>
+      <p id="baseline-role-note" class="chart-note wide"></p>
+    </div>
+    <p id="baseline-message" class="chart-note" aria-live="polite"></p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Host</th><th>Key</th><th>Samples</th><th>Mean</th><th>Std dev</th><th>Min</th><th>Max</th><th>Updated</th></tr></thead>
+        <tbody id="baseline-body"><tr><td colspan="8" class="table-empty">Loading baselines...</td></tr></tbody>
+      </table>
+    </div>
+    <div class="panel-heading"><div><span class="kicker">DEVIATIONS</span><h2>Observed versus expected</h2></div><span class="mini-chip" id="deviation-chip">--</span></div>
+    <p id="deviation-note" class="chart-note">Loading deviations</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Host</th><th>Key</th><th>Observed</th><th>Expected</th><th>Sigma</th><th>Severity</th><th>Window</th></tr></thead>
+        <tbody id="deviation-body"><tr><td colspan="7" class="table-empty">Loading deviations...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel security-panel" id="security">
+    <div class="panel-heading">
+      <div><span class="kicker">15 / SECURITY</span><h2>Lockouts and MFA</h2></div>
+      <span class="mini-chip" id="security-chip">--</span>
+    </div>
+    <p id="security-mfa-state" class="chart-note">Loading MFA state</p>
+    <p id="security-role-note" class="chart-note"></p>
+    <div class="panel-heading"><div><span class="kicker">LOCKOUTS</span><h2>Active lockouts</h2></div></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Username</th><th>Source IP</th><th>Failures</th><th>Locked until</th><th></th></tr></thead>
+        <tbody id="lockout-body"><tr><td colspan="5" class="table-empty">Loading lockouts...</td></tr></tbody>
+      </table>
+    </div>
+    <div class="panel-heading"><div><span class="kicker">RECENT FAILURES</span><h2>Failed sign-ins</h2></div></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Username</th><th>Source IP</th><th>Failures</th><th>Window</th></tr></thead>
+        <tbody id="failure-body"><tr><td colspan="4" class="table-empty">Loading recent failures...</td></tr></tbody>
+      </table>
+    </div>
+    <div id="mfa-controls">
+      <div class="panel-heading"><div><span class="kicker">MULTI-FACTOR</span><h2>Enrolment</h2></div></div>
+      <p class="warn-note">The secret, the otpauth URI and the recovery codes are shown once, immediately after setup. Store the recovery codes before leaving this page; they will not be shown again.</p>
+      <p id="mfa-message" class="chart-note" aria-live="polite"></p>
+      <div class="wave-form">
+        <button id="mfa-setup" class="ghost-button" type="button">Start MFA setup</button>
+        <label><span>Confirmation code</span><input id="mfa-code" type="text" inputmode="numeric" placeholder="123456"></label>
+        <button id="mfa-confirm" class="ghost-button" type="button">Confirm code</button>
+        <label><span>Password (to disable)</span><input id="mfa-password" type="password" autocomplete="current-password" placeholder="account password"></label>
+        <button id="mfa-disable" class="danger-button" type="button">Disable MFA</button>
+      </div>
+      <div id="mfa-setup-result" hidden>
+        <p class="warn-note">These recovery codes are shown once. They will not be shown again &mdash; store them now.</p>
+        <div><span class="muted">Secret</span><code id="mfa-secret" class="code-block"></code></div>
+        <div><span class="muted">otpauth URI</span><code id="mfa-uri" class="code-block"></code></div>
+        <div><span class="muted">Recovery codes</span><div id="mfa-recovery" class="mfa-codes"></div></div>
+      </div>
+    </div>
+    <p id="mfa-role-note" class="chart-note"></p>
+    <p id="security-message" class="chart-note" aria-live="polite"></p>
+  </section>
+
+  <section class="panel backups-panel" id="backups">
+    <div class="panel-heading">
+      <div><span class="kicker">16 / BACKUPS</span><h2>Database backups</h2></div>
+      <span class="mini-chip" id="backup-chip">--</span>
+    </div>
+    <p id="backup-summary" class="chart-note">Loading backups</p>
+    <p class="chart-note">A restore is not automatic: the server must be stopped before a backup file is put back in place.</p>
+    <div class="wave-form">
+      <button id="backup-create" class="ghost-button" type="button">Create backup</button>
+      <p id="backup-role-note" class="chart-note wide"></p>
+    </div>
+    <p id="backup-message" class="chart-note" aria-live="polite"></p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Path</th><th>Size</th><th>Created</th><th></th></tr></thead>
+        <tbody id="backup-body"><tr><td colspan="4" class="table-empty">Loading backups...</td></tr></tbody>
+      </table>
+    </div>
+    <p id="backup-verify-result" class="chart-note"></p>
+  </section>
+
 </main>
 
 <script>
@@ -332,7 +458,8 @@
     username: "", ruleId: "", alertsOnly: false, live: true, timer: null, requestId: 0,
     events: new Map(),
     me: null, triageStatus: "", triageHost: "", triageOffset: 0, notesDetection: null,
-    auditOffset: 0
+    auditOffset: 0,
+    searchQuery: "", searchOffset: 0, searchEngine: null, mfaSetup: null
   };
 
   var tokenMeta = document.querySelector('meta[name="siem-token"]');
@@ -853,6 +980,356 @@
     return UNAVAILABLE;
   }
 
+  // ---- Wave-two: search, baseline, security/MFA and backups -----------------------
+  var SEARCH_LIMIT = 25;
+  function canAdminister() { return !!state.me && !isViewer(); }
+  function num(value, digits) {
+    if (value == null || value === "" || !Number.isFinite(Number(value))) return "-";
+    var n = Number(value);
+    return digits == null ? String(n) : n.toFixed(digits);
+  }
+  function bytesText(value) {
+    if (value == null || !Number.isFinite(Number(value))) return "-";
+    var b = Number(value);
+    if (b < 1024) return b + " B";
+    if (b < 1048576) return (b / 1024).toFixed(1) + " KB";
+    if (b < 1073741824) return (b / 1048576).toFixed(1) + " MB";
+    return (b / 1073741824).toFixed(2) + " GB";
+  }
+  function engineText(engine) {
+    if (engine === "fts5") return "Engine: FTS5 full-text index.";
+    // The module reports "scan" when the index is unavailable, missing or behind;
+    // "columns" is the same path under another name, so both are described alike.
+    if (engine === "scan" || engine === "columns") return "Engine: indexed-column scan \u2014 this query was matched by scanning indexed columns rather than a full-text index.";
+    return engine ? ("Engine: " + String(engine) + ".") : "";
+  }
+  function parsedText(parsed) {
+    if (!parsed || typeof parsed !== "object") return "";
+    var keys = Object.keys(parsed);
+    if (!keys.length) return "";
+    var parts = keys.map(function (key) {
+      var value = parsed[key];
+      if (value == null) return key + "=none";
+      if (Array.isArray(value)) return key + "=[" + value.map(String).join(", ") + "]";
+      if (typeof value === "object") return key + "=" + JSON.stringify(value);
+      return key + "=" + String(value);
+    });
+    return "Parsed: " + parts.join(" \u00b7 ");
+  }
+  function postJson(path, payload) {
+    return apiJson(path, {
+      method: "POST", headers: authHeaders({"Content-Type": "application/json"}), body: JSON.stringify(payload)
+    });
+  }
+
+  async function refreshSearchSummary() {
+    var result = await apiJson("/api/search/summary");
+    if (!result.ok || !result.data || typeof result.data !== "object") {
+      text("search-index-note", unavailableText(result));
+      return;
+    }
+    var d = result.data;
+    var parts = [];
+    parts.push(d.fts5 ? "FTS5 full-text index available" : "no FTS5 full-text index on this server");
+    parts.push(d.indexed ? ("index built over " + num(d.indexed_events, 0) + " events") : "index not built yet");
+    text("search-index-note", parts.join(" \u00b7 "));
+  }
+
+  async function refreshSearch() {
+    if (!state.searchQuery) return;
+    var params = new URLSearchParams();
+    params.set("q", state.searchQuery);
+    params.set("limit", String(SEARCH_LIMIT));
+    params.set("offset", String(state.searchOffset));
+    var result = await apiJson("/api/search?" + params.toString());
+    var body = el("search-body");
+    if (!result.ok || !result.data || !Array.isArray(result.data.events)) {
+      text("search-engine", "");
+      text("search-chip", "unavailable");
+      text("search-message", unavailableText(result));
+      el("search-prev").disabled = true;
+      el("search-next").disabled = true;
+      body.innerHTML = '<tr><td colspan="8" class="table-empty">Event search is not available on this server.</td></tr>';
+      return;
+    }
+    var events = result.data.events;
+    var total = result.data.total != null ? result.data.total : events.length;
+    state.searchEngine = result.data.engine;
+    remember(events);
+    text("search-engine", engineText(result.data.engine));
+    text("search-chip", total + (total === 1 ? " result" : " results"));
+    text("search-page", "Page " + (Math.floor(state.searchOffset / SEARCH_LIMIT) + 1) + " \u00b7 showing " + events.length + " of " + total);
+    el("search-prev").disabled = state.searchOffset <= 0;
+    el("search-next").disabled = state.searchOffset + SEARCH_LIMIT >= total;
+    text("search-message", parsedText(result.data.parsed));
+    if (!events.length) {
+      body.innerHTML = '<tr><td colspan="8" class="table-empty">No events match this query.</td></tr>';
+      return;
+    }
+    body.innerHTML = events.map(function (event) {
+      return '<tr><td>' + esc(event.timestamp || "-") + '</td>' +
+        '<td><span class="' + severityClass(event.severity) + '">' + esc(event.severity) + '</span></td>' +
+        '<td>' + esc(event.host || "-") + '</td>' +
+        '<td>' + esc(event.channel || "-") + '</td>' +
+        '<td><code>' + esc(event.event_id || "-") + '</code></td>' +
+        '<td class="message-cell">' + esc(event.message || "") + '</td>' +
+        '<td>' + esc(event.username || "-") + '</td>' +
+        '<td><button class="detail-button" type="button" data-id="' + esc(event.id) + '">Details</button></td></tr>';
+    }).join("");
+    bindDetailButtons(body);
+  }
+
+  async function refreshBaseline() {
+    var result = await apiJson("/api/baseline");
+    var body = el("baseline-body");
+    if (!result.ok || !result.data || !Array.isArray(result.data.baselines)) {
+      text("baseline-summary", unavailableText(result));
+      text("baseline-chip", "unavailable");
+      body.innerHTML = '<tr><td colspan="8" class="table-empty">Baselines are not available on this server.</td></tr>';
+      await refreshDeviations();
+      return;
+    }
+    var items = result.data.baselines;
+    var summary = result.data.summary || {};
+    var keys = summary.keys != null ? summary.keys : items.length;
+    var hosts = summary.hosts != null ? summary.hosts : "-";
+    var insufficient = summary.insufficient != null ? summary.insufficient : "-";
+    text("baseline-summary", items.length
+      ? keys + " keys across " + hosts + " hosts \u00b7 " + insufficient + " lack enough history and are not judged."
+      : "No baselined keys yet.");
+    text("baseline-chip", keys + (keys === 1 ? " key" : " keys"));
+    if (!items.length) {
+      body.innerHTML = '<tr><td colspan="8" class="table-empty">No baselined keys yet. Rebuild the baseline to learn normal behaviour.</td></tr>';
+      await refreshDeviations();
+      return;
+    }
+    body.innerHTML = items.map(function (item) {
+      return '<tr><td>' + esc(item.host || "-") + '</td>' +
+        '<td><code>' + esc((item.key_kind || "") + ":" + (item.key_value || "")) + '</code></td>' +
+        '<td>' + esc(num(item.samples, 0)) + '</td>' +
+        '<td>' + esc(num(item.mean, 2)) + '</td>' +
+        '<td>' + esc(num(item.stddev, 2)) + '</td>' +
+        '<td>' + esc(num(item.minimum, 2)) + '</td>' +
+        '<td>' + esc(num(item.maximum, 2)) + '</td>' +
+        '<td class="mono">' + esc(item.updated_at || "-") + '</td></tr>';
+    }).join("");
+    await refreshDeviations();
+  }
+
+  async function refreshDeviations() {
+    var result = await apiJson("/api/baseline/deviations");
+    var body = el("deviation-body");
+    if (!result.ok || !result.data || !Array.isArray(result.data.deviations)) {
+      text("deviation-note", unavailableText(result));
+      text("deviation-chip", "unavailable");
+      body.innerHTML = '<tr><td colspan="7" class="table-empty">Deviations are not available on this server.</td></tr>';
+      return;
+    }
+    var items = result.data.deviations;
+    var total = result.data.total != null ? result.data.total : items.length;
+    text("deviation-chip", total + (total === 1 ? " deviation" : " deviations"));
+    text("deviation-note", items.length ? "" : "No deviations above the sigma threshold right now.");
+    if (!items.length) {
+      body.innerHTML = '<tr><td colspan="7" class="table-empty">No deviations above the sigma threshold right now.</td></tr>';
+      return;
+    }
+    body.innerHTML = items.map(function (item) {
+      return '<tr><td>' + esc(item.host || "-") + '</td>' +
+        '<td><code>' + esc((item.key_kind || "") + ":" + (item.key_value || "")) + '</code></td>' +
+        '<td>' + esc(num(item.observed, 2)) + '</td>' +
+        '<td>' + esc(num(item.expected, 2)) + '</td>' +
+        '<td>' + esc(num(item.sigma, 2)) + '\u03c3</td>' +
+        '<td><span class="' + severityClass(item.severity) + '">' + esc(item.severity || "-") + '</span></td>' +
+        '<td>' + esc(item.window_minutes != null ? item.window_minutes + " min" : "-") + '</td></tr>';
+    }).join("");
+  }
+
+  async function refreshSecurity() {
+    var result = await apiJson("/api/security");
+    var lockBody = el("lockout-body");
+    var failBody = el("failure-body");
+    if (!result.ok || !result.data || typeof result.data !== "object") {
+      text("security-chip", "unavailable");
+      text("security-message", unavailableText(result));
+      lockBody.innerHTML = '<tr><td colspan="5" class="table-empty">Lockout status is not available on this server.</td></tr>';
+      failBody.innerHTML = '<tr><td colspan="4" class="table-empty">Recent failures are not available on this server.</td></tr>';
+      await refreshMfa();
+      return;
+    }
+    var d = result.data;
+    var lockouts = Array.isArray(d.lockouts) ? d.lockouts : [];
+    var failures = Array.isArray(d.recent_failures) ? d.recent_failures : [];
+    var canClear = canAdminister();
+    text("security-chip", lockouts.length + (lockouts.length === 1 ? " lockout" : " lockouts"));
+    if (!lockouts.length) {
+      lockBody.innerHTML = '<tr><td colspan="5" class="table-empty">No accounts are currently locked out.</td></tr>';
+    } else {
+      lockBody.innerHTML = lockouts.map(function (item) {
+        var clear = canClear
+          ? '<button class="lockout-clear danger-button" type="button" data-username="' + esc(item.username || "") + '" data-ip="' + esc(item.source_ip || "") + '">Clear</button>'
+          : '<span class="muted">read-only</span>';
+        return '<tr><td>' + esc(item.username || "-") + '</td>' +
+          '<td class="mono">' + esc(item.source_ip || "-") + '</td>' +
+          '<td>' + esc(num(item.failures, 0)) + '</td>' +
+          '<td class="mono">' + esc(item.locked_until || "-") + '</td>' +
+          '<td>' + clear + '</td></tr>';
+      }).join("");
+      bindLockoutClears(lockBody);
+    }
+    if (!failures.length) {
+      failBody.innerHTML = '<tr><td colspan="4" class="table-empty">No recent failed sign-ins.</td></tr>';
+    } else {
+      failBody.innerHTML = failures.map(function (item) {
+        return '<tr><td>' + esc(item.username || "-") + '</td>' +
+          '<td class="mono">' + esc(item.source_ip || "-") + '</td>' +
+          '<td>' + esc(num(item.failures, 0)) + '</td>' +
+          '<td>' + esc(item.window_seconds != null ? item.window_seconds + "s" : "-") + '</td></tr>';
+      }).join("");
+    }
+    await refreshMfa();
+  }
+
+  function bindLockoutClears(root) {
+    root.querySelectorAll(".lockout-clear").forEach(function (button) {
+      button.addEventListener("click", function () { clearLockout(button.dataset.username, button.dataset.ip); });
+    });
+  }
+  async function clearLockout(username, sourceIp) {
+    if (!canAdminister()) { text("security-message", "Your role cannot clear lockouts."); return; }
+    var payload = {};
+    if (username) payload.username = username;
+    if (sourceIp) payload.source_ip = sourceIp;
+    var result = await postJson("/api/security/lockout/clear", payload);
+    if (!result.ok) {
+      text("security-message", "Could not clear lockout: " + (result.status ? "server returned " + result.status : "connection unavailable") + ".");
+      return;
+    }
+    text("security-message", "Lockout cleared for " + (username || sourceIp || "the account") + ".");
+    await refreshSecurity();
+    await refreshAudit();
+  }
+
+  async function refreshMfa() {
+    var result = await apiJson("/api/mfa");
+    if (!result.ok || !result.data || typeof result.data !== "object") {
+      text("security-mfa-state", unavailableText(result));
+      return;
+    }
+    var d = result.data;
+    var state = d.enabled ? (d.confirmed ? "enabled and confirmed" : "enabled but not confirmed") : "disabled";
+    text("security-mfa-state", "MFA is " + state + " for this account.");
+  }
+  async function startMfaSetup() {
+    if (!canAdminister()) { text("mfa-message", "Your role cannot manage MFA."); return; }
+    text("mfa-message", "Requesting a new secret...");
+    var result = await apiJson("/api/mfa/setup", {method: "POST", headers: authHeaders()});
+    if (!result.ok || !result.data || typeof result.data !== "object") {
+      text("mfa-message", "Could not start MFA setup: " + (result.status ? "server returned " + result.status : "connection unavailable") + ".");
+      return;
+    }
+    state.mfaSetup = result.data;
+    renderMfaSetup(result.data);
+    text("mfa-message", "Enter the secret in your authenticator app, then confirm with a code. The recovery codes are shown once only.");
+  }
+  function renderMfaSetup(data) {
+    text("mfa-secret", data.secret || "(no secret returned)");
+    text("mfa-uri", data.uri || "(no otpauth URI returned)");
+    var codes = Array.isArray(data.recovery_codes) ? data.recovery_codes : [];
+    el("mfa-recovery").innerHTML = codes.length
+      ? codes.map(function (code) { return '<code>' + esc(code) + '</code>'; }).join("")
+      : '<span class="muted">no recovery codes returned</span>';
+    el("mfa-setup-result").hidden = false;
+  }
+  async function confirmMfa() {
+    if (!canAdminister()) { text("mfa-message", "Your role cannot manage MFA."); return; }
+    var code = el("mfa-code").value.trim();
+    if (!code) { text("mfa-message", "Enter the one-time code from your authenticator app."); return; }
+    var result = await postJson("/api/mfa/confirm", {code: code});
+    if (!result.ok) {
+      text("mfa-message", "Could not confirm MFA: " + (result.status ? "server returned " + result.status : "connection unavailable") + ".");
+      return;
+    }
+    el("mfa-code").value = "";
+    text("mfa-message", "MFA confirmed. Keep the recovery codes you were shown.");
+    await refreshMfa();
+  }
+  async function disableMfa() {
+    if (!canAdminister()) { text("mfa-message", "Your role cannot manage MFA."); return; }
+    var password = el("mfa-password").value;
+    if (!password) { text("mfa-message", "Enter your account password to disable MFA."); return; }
+    var result = await postJson("/api/mfa/disable", {password: password});
+    if (!result.ok) {
+      text("mfa-message", "Could not disable MFA: " + (result.status ? "server returned " + result.status : "connection unavailable") + ".");
+      return;
+    }
+    el("mfa-password").value = "";
+    el("mfa-setup-result").hidden = true;
+    state.mfaSetup = null;
+    text("mfa-message", "MFA disabled.");
+    await refreshMfa();
+  }
+
+  async function refreshBackups() {
+    var result = await apiJson("/api/backups");
+    var body = el("backup-body");
+    if (!result.ok || !result.data || !Array.isArray(result.data.backups)) {
+      text("backup-summary", unavailableText(result));
+      text("backup-chip", "unavailable");
+      body.innerHTML = '<tr><td colspan="4" class="table-empty">Backups are not available on this server.</td></tr>';
+      return;
+    }
+    var items = result.data.backups;
+    var summary = result.data.summary || {};
+    var count = summary.count != null ? summary.count : items.length;
+    var totalBytes = summary.total_bytes != null ? bytesText(summary.total_bytes) : "-";
+    var newest = summary.newest_age_seconds != null ? ageText(summary.newest_age_seconds) : "unknown";
+    text("backup-summary", items.length
+      ? count + " backups \u00b7 " + totalBytes + " total \u00b7 newest " + newest
+      : "No backups have been created yet.");
+    text("backup-chip", count + (count === 1 ? " backup" : " backups"));
+    if (!items.length) {
+      body.innerHTML = '<tr><td colspan="4" class="table-empty">No backups have been created yet.</td></tr>';
+      return;
+    }
+    body.innerHTML = items.map(function (item) {
+      return '<tr><td class="mono">' + esc(item.path || "-") + '</td>' +
+        '<td>' + esc(bytesText(item.bytes)) + '</td>' +
+        '<td class="mono">' + esc(item.created_at || "-") + '</td>' +
+        '<td><button class="backup-verify ghost-button" type="button" data-path="' + esc(item.path || "") + '">Verify</button></td></tr>';
+    }).join("");
+    bindBackupVerifies(body);
+  }
+  function bindBackupVerifies(root) {
+    root.querySelectorAll(".backup-verify").forEach(function (button) {
+      button.addEventListener("click", function () { verifyBackup(button.dataset.path); });
+    });
+  }
+  async function createBackup() {
+    if (!canAdminister()) { text("backup-message", "Your role cannot create backups."); return; }
+    text("backup-message", "Creating backup...");
+    var result = await apiJson("/api/backups", {method: "POST", headers: authHeaders()});
+    if (!result.ok || !result.data || result.data.ok !== true) {
+      text("backup-message", "Could not create backup: " + (result.status ? "server returned " + result.status : "connection unavailable") + ".");
+      return;
+    }
+    text("backup-message", "Backup written to " + (result.data.path || "the backup directory") + " (" + bytesText(result.data.bytes) + ").");
+    await refreshBackups();
+  }
+  async function verifyBackup(path) {
+    if (!path) { text("backup-verify-result", "No backup path to verify."); return; }
+    text("backup-verify-result", "Verifying " + path + "...");
+    var result = await postJson("/api/backups/verify", {path: path});
+    if (!result.ok || !result.data || typeof result.data !== "object") {
+      text("backup-verify-result", "Could not verify backup: " + (result.status ? "server returned " + result.status : "connection unavailable") + ".");
+      return;
+    }
+    var d = result.data;
+    text("backup-verify-result", "Verification of " + path + ": integrity " + (d.ok ? "OK" : "FAILED") +
+      " \u00b7 tables " + (d.tables != null ? d.tables : "-") +
+      " \u00b7 events " + (d.events != null ? d.events : "-") + ".");
+  }
+
+
   function applyRole() {
     var known = !!state.me;
     var viewer = known && isViewer();
@@ -873,7 +1350,52 @@
     }
     text("suppression-role-note", suppressionNote);
     text("audit-role-note", auditNote);
+    var canWrite = canAdminister();
+    el("search-rebuild").hidden = !canWrite;
+    el("baseline-build").hidden = !canWrite;
+    el("backup-create").hidden = !canWrite;
+    el("mfa-controls").hidden = !canWrite;
+    var writeReason = "";
+    if (!known) {
+      writeReason = "Management controls are hidden until sign-in is available on this server.";
+    } else if (viewer) {
+      writeReason = "Read-only: your role (" + (state.me.role || "viewer") + ") can view this information but cannot run maintenance, clear lockouts, manage MFA or create backups.";
+    }
+    text("search-role-note", writeReason);
+    text("baseline-role-note", writeReason);
+    text("backup-role-note", writeReason);
+    text("security-role-note", writeReason);
+    text("mfa-role-note", writeReason);
   }
+
+  async function submitLogin(event) {
+    event.preventDefault();
+    var payload = new FormData();
+    payload.append("username", el("login-username").value);
+    payload.append("password", el("login-password").value);
+    if (!el("login-code-label").hidden) { payload.append("code", el("login-code").value); }
+    var response;
+    try {
+      response = await fetch("/login", {method: "POST", body: payload});
+    } catch (error) {
+      text("login-message", "Could not reach the server.");
+      return;
+    }
+    if (response.ok || response.redirected || response.status === 302 || response.type === "opaqueredirect") {
+      window.location.reload();
+      return;
+    }
+    var data = null;
+    try { data = await response.json(); } catch (error) { data = null; }
+    if (data && data.mfa_required) {
+      // The password was accepted; the account has a second factor, so ask for
+      // it here rather than making the operator reload and start again.
+      el("login-code-label").hidden = false;
+      el("login-code").focus();
+    }
+    text("login-message", (data && data.error) ? String(data.error) : "Sign-in failed.");
+  }
+  el("login-form").addEventListener("submit", submitLogin);
 
   async function refreshIdentity() {
     var result = await apiJson("/api/me");
@@ -1127,6 +1649,11 @@
     try { await refreshTriage(); } catch (error) { console.error(error); }
     try { await refreshSuppressions(); } catch (error) { console.error(error); }
     try { await refreshAudit(); } catch (error) { console.error(error); }
+    try { await refreshSearchSummary(); } catch (error) { console.error(error); }
+    try { await refreshSearch(); } catch (error) { console.error(error); }
+    try { await refreshBaseline(); } catch (error) { console.error(error); }
+    try { await refreshSecurity(); } catch (error) { console.error(error); }
+    try { await refreshBackups(); } catch (error) { console.error(error); }
   }
 
   el("triage-status-filter").addEventListener("change", function () {
@@ -1200,6 +1727,57 @@
     await refreshSuppressions();
     await refreshAudit();
   });
+
+
+  // ---- Wave-two controls ----------------------------------------------------------
+  el("search-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    state.searchQuery = el("search-query").value.trim();
+    state.searchOffset = 0;
+    if (!state.searchQuery) {
+      text("search-engine", "");
+      text("search-chip", "--");
+      text("search-message", "");
+      el("search-body").innerHTML = '<tr><td colspan="8" class="table-empty">Enter a query to search the event store.</td></tr>';
+      return;
+    }
+    refreshSearch();
+  });
+  el("search-rebuild").addEventListener("click", async function () {
+    if (!canAdminister()) { text("search-message", "Your role cannot rebuild the index."); return; }
+    text("search-message", "Rebuilding search index...");
+    var result = await apiJson("/api/search/rebuild", {method: "POST", headers: authHeaders()});
+    if (!result.ok || !result.data || result.data.ok !== true) {
+      text("search-message", "Could not rebuild the index: " + (result.status ? "server returned " + result.status : "connection unavailable") + ".");
+      return;
+    }
+    text("search-message", "Index rebuilt: " + (result.data.processed != null ? result.data.processed + " events processed." : "complete."));
+    await refreshSearchSummary();
+  });
+  el("search-prev").addEventListener("click", function () {
+    state.searchOffset = Math.max(0, state.searchOffset - SEARCH_LIMIT);
+    refreshSearch();
+  });
+  el("search-next").addEventListener("click", function () {
+    state.searchOffset += SEARCH_LIMIT;
+    refreshSearch();
+  });
+  el("baseline-build").addEventListener("click", async function () {
+    if (!canAdminister()) { text("baseline-message", "Your role cannot rebuild the baseline."); return; }
+    text("baseline-message", "Rebuilding baseline...");
+    var result = await apiJson("/api/baseline/build", {method: "POST", headers: authHeaders()});
+    if (!result.ok || !result.data || result.data.ok !== true) {
+      text("baseline-message", "Could not rebuild the baseline: " + (result.status ? "server returned " + result.status : "connection unavailable") + ".");
+      return;
+    }
+    text("baseline-message", "Baseline rebuilt: " + (result.data.keys != null ? result.data.keys + " keys" : "complete") +
+      (result.data.skipped != null ? ", " + result.data.skipped + " skipped for lack of history." : "."));
+    await refreshBaseline();
+  });
+  el("mfa-setup").addEventListener("click", startMfaSetup);
+  el("mfa-confirm").addEventListener("click", confirmMfa);
+  el("mfa-disable").addEventListener("click", disableMfa);
+  el("backup-create").addEventListener("click", createBackup);
 
   refresh();
   state.timer = setInterval(refresh, 1500);

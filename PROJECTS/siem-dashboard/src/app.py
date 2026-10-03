@@ -14,13 +14,14 @@ import io
 import json
 import os
 import sqlite3
+import ssl
 import threading
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from . import auth, hosts, schema, triage
+from . import auth, backup, baseline, hosts, schema, search, security, triage
 from .correlation import CORRELATION_SOURCE, correlate
 from .enrichment import ThreatIntel, apply_enrichment
 from .notify import Notifier
@@ -31,6 +32,16 @@ VALID_SEVERITIES = ("High", "Medium", "Low")
 
 # Name of the cookie carrying a signed-in user's session token.
 SESSION_COOKIE = "siem_session"
+
+
+def backup_directory(db_path: Path) -> Path:
+    """Where snapshots of this store are written.
+
+    Beside the database rather than inside it, so a backup is never part of what
+    it is copying.
+    """
+
+    return Path(db_path).parent / f"{Path(db_path).stem}-backups"
 
 # Ten years in minutes. SQLite cannot represent a window beyond its own date
 # range, so a larger value used to match no events at all.
@@ -150,6 +161,9 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
     auth.ensure_schema(connection)
     hosts.ensure_schema(connection)
     triage.ensure_schema(connection)
+    security.ensure_schema(connection)
+    baseline.ensure_schema(connection)
+    search.ensure_schema(connection)
 
     connection.commit()
     return connection
@@ -344,9 +358,11 @@ def ingest_payloads(
         return 0
 
     with closing(get_connection(db_path)) as connection, connection:
-        before = connection.total_changes
-        connection.executemany(INSERT_SQL, rows)
-        inserted = connection.total_changes - before
+        # Counted from the statement's own row count, not from total_changes:
+        # the search index is kept in step by triggers on this table, and
+        # total_changes includes what a trigger writes, which reported four
+        # stored events for every one that was actually stored.
+        inserted = connection.executemany(INSERT_SQL, rows).rowcount
 
     if notifier is not None and inserted:
         notifier.deliver(
@@ -440,12 +456,12 @@ def prune_events(db_path: Path, retain_days: int) -> int:
         "%Y-%m-%d %H:%M:%S"
     )
     with closing(get_connection(db_path)) as connection, connection:
-        before = connection.total_changes
-        connection.execute(
+        # Row count rather than total_changes, for the same reason as ingestion:
+        # the delete triggers on this table would otherwise be counted too.
+        return connection.execute(
             "DELETE FROM live_events WHERE datetime(timestamp) < datetime(?)",
             (cutoff,),
-        )
-        return connection.total_changes - before
+        ).rowcount
 
 
 def database_size_mb(db_path: Path) -> float:
@@ -498,6 +514,32 @@ def prune_to_size(db_path: Path, max_mb: int) -> int:
 
 def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def tls_context(cert: Path | None, key: Path | None) -> tuple[str, str] | None:
+    """Return Flask's ``ssl_context`` for a certificate pair, or None.
+
+    HTTPS is opt-in: the console serves plain HTTP unless both a certificate and
+    its key are given. The pair is loaded here so a wrong path or a key that does
+    not match its certificate fails at start-up with a sentence rather than at
+    the first connection with a traceback.
+    """
+
+    if cert is None and key is None:
+        return None
+    if cert is None or key is None:
+        raise ValueError(
+            "HTTPS needs both --tls-cert and --tls-key; give both or neither."
+        )
+    for path, label in ((cert, "certificate"), (key, "key")):
+        if not Path(path).is_file():
+            raise ValueError(f"TLS {label} not found: {path}")
+    probe = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    try:
+        probe.load_cert_chain(str(cert), str(key))
+    except ssl.SSLError as exc:
+        raise ValueError(f"Could not load the TLS certificate and key: {exc}") from exc
+    return (str(cert), str(key))
 
 
 def _whole_number(value: Any, default: int) -> int:
@@ -915,6 +957,7 @@ def dashboard_app(
     auth_token: str = "",
     notifier: Notifier | None = None,
     runtime: dict[str, Any] | None = None,
+    secure_cookies: bool = False,
 ):
     """Create the Flask application.
 
@@ -994,6 +1037,23 @@ def dashboard_app(
                 ),
                 403,
             )
+        return None
+
+    def require_admin(what: str):
+        """A refusal when the signed-in user is not an administrator.
+
+        The permission matrix has no dedicated system action, so the operational
+        routes - rebuilding an index or a baseline, taking a backup, clearing a
+        lockout - ask for the administrator permission and name the action in
+        the message, rather than reporting a permission the operator was never
+        trying to use.
+        """
+
+        user = current_user()
+        if user is None:
+            return jsonify({"error": "Sign in to use this console."}), 401
+        if not auth.has_permission(str(user["role"]), "manage_users"):
+            return jsonify({"error": f"Your role ({user['role']}) may not {what}."}), 403
         return None
 
     @app.before_request
@@ -1192,16 +1252,71 @@ def dashboard_app(
             data = {}
         username = str(data.get("username", "")).strip()
         password = str(data.get("password", ""))
+        code = str(data.get("code", "")).strip()
+        source_ip = request.remote_addr or ""
         with closing(get_connection(db_path)) as connection:
+            # Refused before the password is even checked, so a locked account
+            # cannot be used as an oracle for guessing.
+            locked = security.is_locked_out(connection, username, source_ip)
+            if locked["locked"]:
+                connection.commit()
+                return (
+                    jsonify(
+                        {
+                            "error": (
+                                "Too many failed attempts. Try again in "
+                                f"{locked['remaining_seconds']} seconds."
+                            ),
+                            "locked": True,
+                        }
+                    ),
+                    429,
+                )
+
             user = auth.authenticate(connection, username, password)
             if user is None:
+                security.record_failure(connection, username, source_ip)
                 connection.commit()  # the failed attempt is an audit row
                 return jsonify({"error": "Invalid username or password."}), 401
+
+            # A second factor is only demanded once the account has confirmed
+            # one; an unconfirmed enrolment is not yet a lock on the account.
+            state = security.mfa_status(connection, user["username"])
+            if state["enabled"]:
+                if not code:
+                    connection.commit()
+                    return (
+                        jsonify(
+                            {
+                                "error": "Enter the code from your authenticator app.",
+                                "mfa_required": True,
+                            }
+                        ),
+                        401,
+                    )
+                checked = security.verify_login_code(connection, user["username"], code)
+                if not checked.get("valid"):
+                    security.record_failure(connection, username, source_ip)
+                    connection.commit()
+                    return (
+                        jsonify(
+                            {"error": "That code was not accepted.", "mfa_required": True}
+                        ),
+                        401,
+                    )
+
+            security.record_success(connection, username, source_ip)
             session = auth.create_session(connection, user["username"], actor=user["username"])
             connection.commit()
         response = redirect("/")
         response.set_cookie(
-            SESSION_COOKIE, session["token"], httponly=True, samesite="Lax"
+            SESSION_COOKIE,
+            session["token"],
+            httponly=True,
+            samesite="Lax",
+            # Only asserted over HTTPS, because a Secure cookie that can never be
+            # sent over plain HTTP would lock the operator out of their own lab.
+            secure=secure_cookies,
         )
         return response
 
@@ -1525,6 +1640,304 @@ def dashboard_app(
 
         return jsonify(schema.describe_schema())
 
+    # ------------------------------------------------------------------ search
+
+    @app.get("/api/search/summary")
+    def api_search_summary():
+        with closing(get_connection(db_path)) as connection:
+            summary = search.search_summary(connection)
+        return jsonify(
+            {
+                "fts5": bool(summary["fts5_available"]),
+                "indexed": bool(summary["index_exists"]),
+                "indexed_events": int(summary["indexed_events"]),
+                "events_total": int(summary.get("events_total", 0)),
+                "index_behind": bool(summary.get("index_behind", False)),
+            }
+        )
+
+    @app.get("/api/search")
+    def api_search():
+        with closing(get_connection(db_path)) as connection:
+            result = search.search_events(
+                connection,
+                request.args.get("q", ""),
+                limit=_whole_number(request.args.get("limit"), 50),
+                offset=_whole_number(request.args.get("offset"), 0),
+            )
+        return jsonify(result)
+
+    @app.post("/api/search/rebuild")
+    def api_search_rebuild():
+        denied = require_admin("rebuild the search index")
+        if denied:
+            return denied
+        with closing(get_connection(db_path)) as connection:
+            result = search.rebuild_index(connection)
+            connection.commit()
+        return jsonify({"ok": True, "processed": int(result.get("rows_processed", 0))})
+
+    # ---------------------------------------------------------------- baseline
+
+    @app.get("/api/baseline")
+    def api_baseline():
+        with closing(get_connection(db_path)) as connection:
+            rows = baseline.list_baselines(
+                connection,
+                host=request.args.get("host") or None,
+                kind=request.args.get("kind") or None,
+            )
+            summary = baseline.baseline_summary(connection)
+        # The page names the column `samples`; the module calls it sample_count.
+        for row in rows:
+            row["samples"] = row.get("sample_count", 0)
+        return jsonify(
+            {
+                "baselines": rows,
+                "summary": {
+                    "keys": int(summary["baselined"]),
+                    "hosts": int(summary["hosts"]),
+                    "insufficient": int(summary["insufficient_history"]),
+                    "min_samples": int(summary["min_samples"]),
+                    "window_hours": int(summary["window_hours"]),
+                },
+            }
+        )
+
+    @app.get("/api/baseline/deviations")
+    def api_baseline_deviations():
+        with closing(get_connection(db_path)) as connection:
+            rows = baseline.detect_deviations(
+                connection,
+                window_minutes=_whole_number(request.args.get("window_minutes"), 60),
+                sigma=float(request.args.get("sigma", 3.0) or 3.0),
+            )
+        for row in rows:
+            row["sigma"] = row.get("sigma_distance")
+        return jsonify({"deviations": rows, "total": len(rows)})
+
+    @app.post("/api/baseline/build")
+    def api_baseline_build():
+        denied = require_admin("rebuild the baseline")
+        if denied:
+            return denied
+        with closing(get_connection(db_path)) as connection:
+            result = baseline.build_baseline(
+                connection,
+                hours=_whole_number(request.args.get("hours"), 168),
+            )
+            connection.commit()
+        return jsonify(
+            {
+                "ok": True,
+                "keys": int(result.get("built", 0)),
+                "skipped": int(result.get("skipped", 0)),
+            }
+        )
+
+    # ---------------------------------------------------------------- security
+
+    @app.get("/api/security")
+    def api_security():
+        user = current_user()
+        if user is None:
+            return jsonify({"error": "Sign in to use this console."}), 401
+        with closing(get_connection(db_path)) as connection:
+            summary = security.lockout_summary(connection)
+            mine = security.mfa_status(connection, str(user["username"]))
+        lockouts = [
+            {
+                "username": str(row.get("username", "")),
+                "source_ip": str(row.get("source_ip", "")),
+                "failures": int(row.get("failure_count", row.get("failures", 0)) or 0),
+                "locked_until": str(row.get("locked_until", "") or ""),
+            }
+            for row in summary.get("active_lockouts", [])
+        ]
+        recent = [
+            {
+                "username": str(row.get("username", "")),
+                "source_ip": str(row.get("source_ip", "")),
+                "failures": int(row.get("failure_count", row.get("failures", 0)) or 0),
+                "window_seconds": int(summary.get("window_seconds", 0)),
+            }
+            for row in summary.get("recent_failures", [])
+        ]
+        return jsonify(
+            {
+                "lockouts": lockouts,
+                "recent_failures": recent,
+                "mfa_enabled": bool(mine["enabled"]),
+            }
+        )
+
+    @app.post("/api/security/lockout/clear")
+    def api_lockout_clear():
+        denied = require_admin("clear a lockout")
+        if denied:
+            return denied
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "Send one JSON object."}), 400
+        user = current_user()
+        username = str(data.get("username", "")).strip() or None
+        source_ip = str(data.get("source_ip", "")).strip() or None
+        if username is None and source_ip is None:
+            return jsonify({"error": "Give a username, a source address, or both."}), 400
+        with closing(get_connection(db_path)) as connection:
+            cleared = security.clear_lockout(
+                connection, username=username, source_ip=source_ip, actor=str(user["username"])
+            )
+            connection.commit()
+        return jsonify({"ok": True, "cleared": cleared})
+
+    # -------------------------------------------------------------------- mfa
+
+    def own_username() -> str:
+        return str(current_user()["username"])
+
+    @app.get("/api/mfa")
+    def api_mfa():
+        user = current_user()
+        if user is None:
+            return jsonify({"error": "Sign in to use this console."}), 401
+        with closing(get_connection(db_path)) as connection:
+            state = security.mfa_status(connection, str(user["username"]))
+        return jsonify(
+            {
+                "enabled": bool(state["enabled"]),
+                "confirmed": bool(state["enabled"]),
+                "pending": bool(state["pending"]),
+                "recovery_codes_remaining": int(state["recovery_codes_remaining"]),
+            }
+        )
+
+    @app.post("/api/mfa/setup")
+    def api_mfa_setup():
+        user = current_user()
+        if user is None:
+            return jsonify({"error": "Sign in to use this console."}), 401
+        with closing(get_connection(db_path)) as connection:
+            started = security.start_enrolment(connection, str(user["username"]))
+            connection.commit()
+        # The secret and the recovery codes are returned exactly once, here.
+        return jsonify(
+            {
+                "secret": started["secret"],
+                "uri": started["provisioning_uri"],
+                "recovery_codes": started["recovery_codes"],
+            }
+        )
+
+    @app.post("/api/mfa/confirm")
+    def api_mfa_confirm():
+        user = current_user()
+        if user is None:
+            return jsonify({"error": "Sign in to use this console."}), 401
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "Send one JSON object."}), 400
+        with closing(get_connection(db_path)) as connection:
+            try:
+                state = security.confirm_enrolment(
+                    connection, str(user["username"]), str(data.get("code", ""))
+                )
+            except ValueError as exc:
+                connection.commit()
+                return jsonify({"error": str(exc)}), 400
+            connection.commit()
+        return jsonify({"ok": True, "enabled": bool(state["enabled"])})
+
+    @app.post("/api/mfa/disable")
+    def api_mfa_disable():
+        user = current_user()
+        if user is None:
+            return jsonify({"error": "Sign in to use this console."}), 401
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "Send one JSON object."}), 400
+        password = str(data.get("password", ""))
+        with closing(get_connection(db_path)) as connection:
+            # Turning a second factor off is a security downgrade, so it costs
+            # the password rather than just the session.
+            if auth.authenticate(connection, str(user["username"]), password) is None:
+                connection.commit()
+                return jsonify({"error": "That password was not accepted."}), 401
+            security.disable_mfa(connection, str(user["username"]), actor=str(user["username"]))
+            connection.commit()
+        return jsonify({"ok": True})
+
+    # ----------------------------------------------------------------- backups
+
+    @app.get("/api/backups")
+    def api_backups():
+        user = current_user()
+        if user is None:
+            return jsonify({"error": "Sign in to use this console."}), 401
+        folder = backup_directory(db_path)
+        rows = [
+            {"path": str(row["path"]), "bytes": int(row["size_bytes"]), "created_at": str(row["created_at"])}
+            for row in backup.list_backups(folder)
+        ]
+        summary = backup.backup_summary(folder)
+        return jsonify(
+            {
+                "backups": rows,
+                "summary": {
+                    "count": int(summary["count"]),
+                    "total_bytes": int(summary["total_bytes"]),
+                    "newest_age_seconds": summary["newest_age_seconds"],
+                },
+                "directory": str(folder),
+            }
+        )
+
+    @app.post("/api/backups")
+    def api_backup_create():
+        denied = require_admin("create a backup")
+        if denied:
+            return denied
+        user = current_user()
+        with closing(get_connection(db_path)) as connection:
+            auth.record_audit(
+                connection, str(user["username"]), "backup_create", str(db_path), None
+            )
+            connection.commit()
+        created = backup.create_backup(db_path, backup_directory(db_path), label="manual")
+        return jsonify({"ok": True, "path": str(created["path"]), "bytes": int(created["size_bytes"])}), 201
+
+    @app.post("/api/backups/verify")
+    def api_backup_verify():
+        denied = require_admin("verify a backup")
+        if denied:
+            return denied
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "Send one JSON object."}), 400
+        path = str(data.get("path", "")).strip()
+        if not path:
+            return jsonify({"error": "path is required."}), 400
+        folder = backup_directory(db_path)
+        # Only files this console wrote may be inspected, so the route cannot be
+        # pointed at an arbitrary path on the machine.
+        try:
+            inside = Path(path).resolve().parent == Path(folder).resolve()
+        except OSError:
+            inside = False
+        if not inside:
+            return jsonify({"error": "That is not a backup written by this console."}), 400
+        result = backup.verify_backup(path)
+        tables = result.get("tables") or {}
+        return jsonify(
+            {
+                "ok": bool(result["ok"]),
+                "integrity": str(result.get("integrity", "")),
+                "tables": len(tables),
+                "events": int(tables.get("live_events", 0)),
+                "error": result.get("error"),
+            }
+        )
+
     return app
 
 
@@ -1626,6 +2039,18 @@ def main() -> None:
         help="Require this token on every route. Empty leaves the console open on localhost.",
     )
     parser.add_argument(
+        "--tls-cert",
+        type=Path,
+        default=None,
+        help="Serve HTTPS with this certificate. Needs --tls-key as well.",
+    )
+    parser.add_argument(
+        "--tls-key",
+        type=Path,
+        default=None,
+        help="The private key for --tls-cert.",
+    )
+    parser.add_argument(
         "--correlate-seconds",
         type=float,
         default=20.0,
@@ -1702,13 +2127,28 @@ def main() -> None:
         )
         if not args.auth_token:
             print("Authentication is off. This console is for a local lab.")
+        try:
+            tls = tls_context(args.tls_cert, args.tls_key)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        if tls is None:
+            print("Serving plain HTTP. Pass --tls-cert and --tls-key to serve HTTPS.")
+        else:
+            print(f"HTTPS is on, using {args.tls_cert}.")
         dashboard_app(
             args.db,
             collector.status,
             auth_token=args.auth_token,
             notifier=notifier,
             runtime=runtime,
-        ).run(host=args.host, port=args.port, debug=False, threaded=True)
+            secure_cookies=tls is not None,
+        ).run(
+            host=args.host,
+            port=args.port,
+            debug=False,
+            threaded=True,
+            ssl_context=tls,
+        )
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from exc
     finally:
