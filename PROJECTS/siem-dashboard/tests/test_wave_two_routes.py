@@ -359,3 +359,67 @@ def test_identity_requires_a_session_once_an_account_exists(tmp_path):
     assert client.get("/api/me").status_code == 401
     sign_in(client)
     assert client.get("/api/me").get_json()["username"] == "analyst1"
+
+
+# ------------------------------------------------------------------ first run
+
+def test_a_fresh_console_says_it_needs_an_account(tmp_path):
+    db, app = build(tmp_path)
+    client = app.test_client()
+    body = client.get("/api/setup").get_json()
+    assert body == {"required": True, "accounts": 0}
+
+
+def test_creating_the_first_account_signs_you_in_and_locks_the_console(tmp_path):
+    db, app = build(tmp_path)
+    client = app.test_client()
+
+    created = client.post(
+        "/api/setup", json={"username": "khan", "password": "CorrectHorse9!"}
+    )
+    assert created.status_code == 201, created.data
+    assert created.get_json()["role"] == "admin"
+
+    # The same client carries the session the reply issued.
+    assert client.get("/api/me").get_json()["username"] == "khan"
+    assert client.get("/api/dashboard").status_code == 200
+
+    # Anybody else now needs to sign in.
+    stranger = app.test_client()
+    assert stranger.get("/api/dashboard").status_code == 401
+    assert stranger.get("/api/me").status_code == 401
+    assert stranger.get("/api/setup").get_json() == {"required": False, "accounts": 1}
+
+
+def test_the_first_run_door_closes_behind_you(tmp_path):
+    db, app = build(tmp_path)
+    client = app.test_client()
+    client.post("/api/setup", json={"username": "khan", "password": "CorrectHorse9!"})
+
+    again = app.test_client().post(
+        "/api/setup", json={"username": "someoneelse", "password": "CorrectHorse9!"}
+    )
+    assert again.status_code == 409
+    assert "already has accounts" in again.get_json()["error"]
+
+
+def test_a_weak_first_password_is_refused_with_the_reason(tmp_path):
+    db, app = build(tmp_path)
+    client = app.test_client()
+    refused = client.post("/api/setup", json={"username": "khan", "password": "short"})
+    assert refused.status_code == 400
+    assert "password" in refused.get_json()["error"].lower()
+    # Nothing was created, so the first-run door is still open.
+    assert client.get("/api/setup").get_json()["required"] is True
+
+
+def test_the_first_account_can_sign_in_again_later(tmp_path):
+    db, app = build(tmp_path)
+    app.test_client().post(
+        "/api/setup", json={"username": "khan", "password": "CorrectHorse9!"}
+    )
+    later = app.test_client()
+    assert later.post(
+        "/login", data={"username": "khan", "password": "CorrectHorse9!"}
+    ).status_code == 302
+    assert later.get("/api/me").get_json()["username"] == "khan"

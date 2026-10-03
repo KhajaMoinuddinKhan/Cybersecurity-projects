@@ -18,6 +18,7 @@
   .login-card h2{margin:0}
   .login-card label{display:grid;gap:6px;font-size:.8rem}
   .login-card input{padding:10px;border-radius:8px;border:1px solid var(--line,#2a2f3a);background:var(--field,#0b0e15);color:inherit}
+  .login-card .plain-button{background:none;border:none;color:inherit;font:inherit;text-decoration:underline;opacity:.75;cursor:pointer;padding:4px 0}
   .user-box{display:flex;align-items:center;gap:8px}
   .user-box form{margin:0}
   .host-status{padding:2px 8px;border-radius:999px;font-size:.75rem}
@@ -50,13 +51,15 @@
 <body>
 <section id="login-view" class="login-view" hidden aria-label="Sign in">
   <form id="login-form" class="login-card" method="post" action="/login">
-    <span class="kicker">AUTHENTICATION REQUIRED</span>
-    <h2>Sign in to MKMK SIEM</h2>
-    <p>This console requires an account. Enter your credentials to continue.</p>
+    <span class="kicker" id="login-kicker">AUTHENTICATION REQUIRED</span>
+    <h2 id="login-title">Sign in to MKMK SIEM</h2>
+    <p id="login-blurb">This console requires an account. Enter your credentials to continue.</p>
     <label><span>Username</span><input id="login-username" name="username" type="text" autocomplete="username" required></label>
     <label><span>Password</span><input id="login-password" name="password" type="password" autocomplete="current-password" required></label>
+    <label id="login-confirm-label" hidden><span>Confirm password</span><input id="login-confirm" name="confirm" type="password" autocomplete="new-password"></label>
     <label id="login-code-label" hidden><span>Authenticator code</span><input id="login-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits or a recovery code"></label>
-    <button class="primary-button" type="submit">Sign in</button>
+    <button class="primary-button" type="submit" id="login-submit">Sign in</button>
+    <button type="button" class="plain-button" id="login-skip" hidden>Continue without an account</button>
     <p id="login-message" class="chart-note" aria-live="polite"></p>
   </form>
 </section>
@@ -1373,8 +1376,67 @@
     text("mfa-role-note", writeReason);
   }
 
+  // "signin" once accounts exist, "setup" while the console has none, null when
+  // the overlay is not in use. Tracked so a refresh does not reset the form
+  // while the operator is part way through it.
+  var loginMode = null;
+  var setupDismissed = false;
+
+  function showSignIn() {
+    if (loginMode === "signin") { el("login-view").hidden = false; return; }
+    loginMode = "signin";
+    text("login-kicker", "AUTHENTICATION REQUIRED");
+    text("login-title", "Sign in to MKMK SIEM");
+    text("login-blurb", "This console requires an account. Enter your credentials to continue.");
+    text("login-submit", "Sign in");
+    el("login-confirm-label").hidden = true;
+    el("login-skip").hidden = true;
+    el("login-code-label").hidden = true;
+    el("login-view").hidden = false;
+  }
+
+  function showFirstRun() {
+    if (loginMode === "setup") { el("login-view").hidden = false; return; }
+    loginMode = "setup";
+    text("login-kicker", "FIRST RUN");
+    text("login-title", "Create the first administrator");
+    text("login-blurb", "This console has no accounts yet. Create one and you will be signed in with it from now on, or continue without one.");
+    text("login-submit", "Create account and sign in");
+    el("login-confirm-label").hidden = false;
+    el("login-skip").hidden = false;
+    el("login-code-label").hidden = true;
+    text("login-message", "");
+    el("login-view").hidden = false;
+  }
+
   async function submitLogin(event) {
     event.preventDefault();
+    text("login-message", "");
+    if (loginMode === "setup") {
+      if (el("login-password").value !== el("login-confirm").value) {
+        text("login-message", "The two passwords do not match.");
+        return;
+      }
+      var created;
+      try {
+        created = await fetch("/api/setup", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            username: el("login-username").value,
+            password: el("login-password").value,
+          }),
+        });
+      } catch (error) {
+        text("login-message", "Could not reach the server.");
+        return;
+      }
+      if (created.ok || created.redirected) { window.location.reload(); return; }
+      var refusal = null;
+      try { refusal = await created.json(); } catch (error) { refusal = null; }
+      text("login-message", (refusal && refusal.error) ? String(refusal.error) : "Could not create the account.");
+      return;
+    }
     var payload = new FormData();
     payload.append("username", el("login-username").value);
     payload.append("password", el("login-password").value);
@@ -1401,22 +1463,36 @@
     text("login-message", (data && data.error) ? String(data.error) : "Sign-in failed.");
   }
   el("login-form").addEventListener("submit", submitLogin);
+  el("login-skip").addEventListener("click", function () {
+    setupDismissed = true;
+    loginMode = null;
+    el("login-view").hidden = true;
+  });
 
   async function refreshIdentity() {
     var result = await apiJson("/api/me");
     if (result.ok && result.data && typeof result.data === "object") {
       state.me = {username:String(result.data.username || ""), role:String(result.data.role || "")};
-      el("login-view").hidden = true;
       el("user-box").hidden = false;
       text("user-name", state.me.username || "unknown user");
       text("user-role", state.me.role || "no role");
+      // The console is open, so there is no account to sign in with. If none
+      // has been created yet, offer to create the first one instead of showing
+      // a form that nothing could satisfy.
+      var setup = await apiJson("/api/setup");
+      if (setup.ok && setup.data && setup.data.required === true && !setupDismissed) {
+        showFirstRun();
+      } else {
+        loginMode = null;
+        el("login-view").hidden = true;
+      }
     } else if (result.unauthorised) {
       state.me = null;
-      el("login-view").hidden = false;
       el("user-box").hidden = true;
-      text("login-message", "");
+      showSignIn();
     } else {
       state.me = null;
+      loginMode = null;
       el("login-view").hidden = true;
       el("user-box").hidden = true;
     }

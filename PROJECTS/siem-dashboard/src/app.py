@@ -994,7 +994,7 @@ def dashboard_app(
     # health probe, the identity probe the page uses to decide whether to show
     # the sign-in form, the form's own target, and agent ingestion, which
     # authenticates with a host key instead of a session.
-    OPEN_PATHS = {"/", "/health", "/login", "/logout", "/api/me", "/api/ingest"}
+    OPEN_PATHS = {"/", "/health", "/login", "/logout", "/api/me", "/api/ingest", "/api/setup"}
 
     # Whether accounts exist is asked once and then remembered, so the gate does
     # not query on every request. Creating the first user clears it.
@@ -1658,6 +1658,69 @@ def dashboard_app(
         """The event schema this console stores, so the page can document itself."""
 
         return jsonify(schema.describe_schema())
+
+    # --------------------------------------------------------------- first run
+
+    @app.get("/api/setup")
+    def api_setup():
+        """Whether this console still needs its first account."""
+
+        with closing(get_connection(db_path)) as connection:
+            existing = auth.list_users(connection)
+        return jsonify({"required": not existing, "accounts": len(existing)})
+
+    @app.post("/api/setup")
+    def api_setup_create():
+        """Create the first administrator and sign them straight in.
+
+        Refused once any account exists, so this is a first-run door and not a
+        way to mint yourself another account; after the first, accounts are
+        created by an administrator.
+        """
+
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "Send one JSON object."}), 400
+        username = str(data.get("username", "")).strip()
+        password = str(data.get("password", ""))
+        with closing(get_connection(db_path)) as connection:
+            if auth.list_users(connection):
+                return (
+                    jsonify(
+                        {
+                            "error": (
+                                "This console already has accounts. Ask an "
+                                "administrator to create yours."
+                            )
+                        }
+                    ),
+                    409,
+                )
+            try:
+                user = auth.create_user(
+                    connection, username, password, "admin", actor="first-run"
+                )
+            except ValueError as exc:
+                connection.commit()  # the refusal is an audit row
+                return jsonify({"error": str(exc)}), 400
+            session = auth.create_session(
+                connection, user["username"], actor=user["username"]
+            )
+            connection.commit()
+
+        # From here the console is locked, and the reply carries the session it
+        # just issued so the operator lands signed in rather than at a form.
+        accounts["known"] = True
+        accounts["required"] = True
+        response = jsonify({"ok": True, "username": user["username"], "role": user["role"]})
+        response.set_cookie(
+            SESSION_COOKIE,
+            session["token"],
+            httponly=True,
+            samesite="Lax",
+            secure=secure_cookies,
+        )
+        return response, 201
 
     # ------------------------------------------------------------------ search
 
