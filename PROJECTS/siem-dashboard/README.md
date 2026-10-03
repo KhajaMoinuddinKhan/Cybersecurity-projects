@@ -41,6 +41,8 @@ Bad input comes back as JSON with a 400 and a sentence explaining the problem, n
 
 `windows_collector.py` reads records from the channels it can reach, maps the interesting event IDs to a severity, an alert flag and a rule name, and hands the result to the API for storage. Rules are event-based rather than text-based, so an audit log being cleared or a new service being installed is recognised from the event itself. Records are deduplicated on the way in, and the collector keeps retrying a channel that is temporarily unavailable instead of giving up.
 
+Those rules run on events the collector reads. An event that arrives through `POST /api/events` or an import carries its own `is_alert` and `rule_name` from the payload and is stored as given, so it is not re-classified against the rule table. Send `"is_alert": true` with a rule name if you want an imported event to appear in the alerts panel.
+
 The whole thing runs on `127.0.0.1` by default. It is a local lab console, not a hardened service: there is no authentication, and the Flask development server is doing the serving.
 
 ## Requirements and platform notes
@@ -53,4 +55,4 @@ Flask and psutil. The collector needs Windows; everything else runs anywhere. Re
 python -m pytest -q tests
 ```
 
-Twenty-nine tests cover empty startup, Windows event mapping and classification, deduplication, filters, JSON/JSONL/CSV import and its edge cases, atomic validation, dashboard metrics, the `since` bounds, and the JavaScript controls exercised in Node against a temporary API. A separate test reads real System events on Windows and is skipped elsewhere.
+The tests cover empty startup, Windows event mapping and classification, deduplication, filters, JSON/JSONL/CSV import and its edge cases, atomic validation, dashboard metrics, the `since` bounds, and the JavaScript controls exercised in Node against a temporary API. A separate test reads real System events on Windows and is skipped elsewhere.

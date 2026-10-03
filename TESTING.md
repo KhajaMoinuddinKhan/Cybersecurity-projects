@@ -4,11 +4,12 @@ A test result is only as broad as the behaviour it exercises, and it is easy to 
 
 ## Running everything
 
-Create and activate a virtual environment as described in the root README, then install the test runner and the three projects that have dependencies:
+Create and activate a virtual environment as described in the root README, then install the test runner and the dependencies for the four projects that need them:
 
 ```console
 python -m pip install pytest
 python -m pip install -r PROJECTS/pcap-traffic-summary/requirements.txt
+python -m pip install -r PROJECTS/network-traffic-analyzer/requirements.txt
 python -m pip install -r PROJECTS/siem-dashboard/requirements.txt
 python -m pip install -r PROJECTS/web-vulnerability-scanner/requirements.txt
 python scripts/check_all.py

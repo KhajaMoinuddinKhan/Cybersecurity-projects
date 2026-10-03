@@ -23,3 +23,32 @@ Each project is self-contained: its own source, tests, run instructions and lear
 | [Docker Security Audit](PROJECTS/docker-security-audit) | Reviews saved `docker inspect` data for privileged mode, host namespaces, sensitive mounts and published ports. |
 | [Web Vulnerability Scanner](PROJECTS/web-vulnerability-scanner) | Runs passive checks against a localhost page for missing security headers and risky form settings. |
 | [Cloud Asset Inventory](PROJECTS/cloud-asset-inventory) | Flags public assets, missing ownership tags and unrecorded regions in a JSON inventory export. |
+
+## Getting started
+
+Python 3.10 or newer. Each project is self-contained, so you install its dependencies and run it from inside its own directory:
+
+```console
+cd PROJECTS/password-policy-auditor
+python -m pip install -r requirements.txt
+python -m src.audit sample_policy.conf
+```
+
+Four projects need third-party packages: the two packet tools use Scapy, the SIEM dashboard uses Flask and psutil, and the web scanner uses requests. The remaining projects use the standard library alone, and a few of them ship a `requirements.txt` that is deliberately empty to make that explicit.
+
+To run every test suite in one go, install the runner and those four dependency files, then use the repository runner:
+
+```console
+python -m pip install pytest
+python -m pip install -r PROJECTS/pcap-traffic-summary/requirements.txt
+python -m pip install -r PROJECTS/network-traffic-analyzer/requirements.txt
+python -m pip install -r PROJECTS/siem-dashboard/requirements.txt
+python -m pip install -r PROJECTS/web-vulnerability-scanner/requirements.txt
+python scripts/check_all.py
+```
+
+## Where to go next
+
+- [Project catalog](PROJECT_CATALOG.md) groups the projects by the kind of input you have in front of you.
+- [Running and interpreting the checks](TESTING.md) explains what a green run does and does not establish.
+- Each project carries a `learn/` folder with notes on the concepts, the architecture, and the problems that came up while building it.
