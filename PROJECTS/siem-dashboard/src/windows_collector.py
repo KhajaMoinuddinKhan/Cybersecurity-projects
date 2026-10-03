@@ -128,6 +128,34 @@ class _LazyRules(dict):
 RULES = _LazyRules()
 
 
+# Windows reports a missing log and a log the account cannot read with different
+# error ids. Both are normal on a real machine and neither is a fault in this
+# application, so they are separated from genuine failures before they reach the
+# dashboard. A raw PowerShell stack trace in an operator's console is noise.
+CHANNEL_ERRORS = (
+    ("NoMatchingLogsFound", "missing", "does not exist on this machine"),
+    ("UnauthorizedAccess", "denied", "cannot be read by this account"),
+    ("AccessDenied", "denied", "cannot be read by this account"),
+    ("Attempted to perform an unauthorized operation", "denied", "cannot be read by this account"),
+    ("The system cannot find the file specified", "missing", "does not exist on this machine"),
+)
+
+
+def describe_channel_error(channel: str, error: object) -> tuple[str, str]:
+    """Turn a PowerShell failure into a state and a short sentence.
+
+    Returns ``(state, message)`` where state is one of ``missing``, ``denied`` or
+    ``error``. Only the last of those is a problem with this application.
+    """
+
+    text = str(error or "").strip()
+    for needle, state, explanation in CHANNEL_ERRORS:
+        if needle.lower() in text.lower():
+            return state, f"{channel} {explanation}."
+    first_line = text.splitlines()[0].strip() if text else "unknown failure"
+    return "error", f"{channel}: {first_line[:200]}"
+
+
 def severity_from_windows_level(level: str | None) -> str:
     """Map Windows operational levels to dashboard severity."""
 
@@ -460,8 +488,11 @@ class WindowsEventCollector:
                 subprocess.SubprocessError,
                 OSError,
             ) as exc:
-                self.status["channels"][channel]["state"] = "unavailable"
-                self.status["last_error"] = f"{channel}: {exc}"
+                state, message = describe_channel_error(channel, exc)
+                self.status["channels"][channel]["state"] = state
+                self.status["channels"][channel]["error"] = message
+                if state == "error":
+                    self.status["last_error"] = message
 
     def _run(self) -> None:
         self.status["running"] = True
@@ -485,13 +516,21 @@ class WindowsEventCollector:
                     subprocess.SubprocessError,
                     OSError,
                 ) as exc:
-                    self.status["channels"][channel]["state"] = "error"
-                    self.status["channels"][channel]["error"] = str(exc)
-                    self.status["last_error"] = f"{channel}: {exc}"
+                    state, message = describe_channel_error(channel, exc)
+                    self.status["channels"][channel]["state"] = state
+                    self.status["channels"][channel]["error"] = message
+                    self.status["last_error"] = message
 
             self.status["last_poll"] = datetime.now(timezone.utc).isoformat()
-            if all(item["state"] == "connected" for item in self.status["channels"].values()):
-                self.status["last_error"] = ""
+            # A missing or denied channel is a fact about the machine, not an
+            # error, so it does not raise the summary line. Only a genuine
+            # failure does.
+            faults = [
+                item["error"]
+                for item in self.status["channels"].values()
+                if item["state"] == "error"
+            ]
+            self.status["last_error"] = faults[0] if faults else ""
             self.stop_event.wait(self.interval)
 
         self.status["running"] = False

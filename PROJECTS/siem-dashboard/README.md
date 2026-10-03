@@ -129,7 +129,19 @@ Bad input comes back as JSON with a 400 and a sentence explaining the problem, n
 
 The channels are `Security`, `System`, `Application`, `Microsoft-Windows-Sysmon/Operational`, Windows Defender and PowerShell. **Sysmon is the one that matters most**, because it records the command line of a new process, the process that started it, and the connections it makes. The Security log tells you an account logged on; Sysmon tells you what ran and what it talked to.
 
-Records are deduplicated on the way in, and the collector keeps retrying a channel that is temporarily unavailable instead of giving up. Reading the Security channel depends on the account and machine policy, so seeing fewer channels than your colleague is normal and does not mean the app is broken.
+Records are deduplicated on the way in, and the collector keeps retrying a channel that is temporarily unavailable instead of giving up.
+
+Each channel reports one of five states, and only the last of them is a problem with this application:
+
+| State | Meaning |
+| --- | --- |
+| `connected` | Records are being read. |
+| `waiting` | Not polled yet. |
+| `missing` | The log does not exist on this machine. Sysmon shows this until Sysmon is installed. |
+| `denied` | The log exists but this account cannot read it, which is common for `Security` on a managed machine. |
+| `error` | A genuine failure. Only this state raises the summary line. |
+
+Seeing fewer live channels than a colleague is normal and does not mean the app is broken.
 
 **The collector excludes its own output.** Reading a channel means running PowerShell, and a running PowerShell writes to the PowerShell channel — so without a filter the monitoring tool becomes the loudest thing in its own store. Measured on a quiet workstation before this was fixed: 717 of 819 stored events were PowerShell console lifecycle records produced by the collector's own child processes, about nine in ten. Every PowerShell process the collector starts has its process id recorded, and records from those processes are counted and skipped. The dashboard reports the count next to the collector activity line, so the exclusion is visible rather than silent. Process ids are remembered to a bounded depth, because Windows reuses them.
 

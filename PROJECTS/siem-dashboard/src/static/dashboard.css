@@ -61,3 +61,9 @@ html{scroll-behavior:smooth;scroll-padding-top:18px}body{background:#08090b}body
   .rule-id{white-space:normal}
   .correlation-row .muted{max-width:100%}
 }
+
+/* A channel that is not present, or not readable, is a fact about the machine
+   rather than a fault in the console, so it is shown quietly. */
+.channel-card.missing,.channel-card.denied{border-color:var(--line);opacity:.72}
+.channel-card.missing span,.channel-card.denied span{color:var(--muted)}
+.channel-card.missing code,.channel-card.denied code{color:var(--muted)}

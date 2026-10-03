@@ -877,3 +877,56 @@ def test_the_projection_asks_windows_for_the_process_id():
 
 def test_the_collector_starts_its_own_noise_counter_at_zero(tmp_path):
     assert _collector(tmp_path).status["self_skipped"] == 0
+
+
+# --- a channel that is not there is not a fault -----------------------------
+
+SYSMON_MISSING = (
+    "Get-WinEvent : There is not an event log on the localhost computer that matches "
+    "\"Microsoft-Windows-Sysmon/Operational\".\nAt line:1 char:153\n"
+    "+ ... top';try {@(Get-WinEvent -LogName 'Microsoft-Windows-Sysmon/Operation ...\n"
+    "+ CategoryInfo          : ObjectNotFound: (Microsoft-Windows-Sysmon/Operational:String)\n"
+    "+ FullyQualifiedErrorId : NoMatchingLogsFound,Microsoft.PowerShell.Commands.GetWinEventCommand"
+)
+
+
+def test_a_channel_that_is_not_installed_is_reported_as_missing():
+    from src.windows_collector import describe_channel_error
+
+    state, message = describe_channel_error("Microsoft-Windows-Sysmon/Operational", SYSMON_MISSING)
+    assert state == "missing"
+    assert "does not exist on this machine" in message
+    assert "FullyQualifiedErrorId" not in message
+    assert "CategoryInfo" not in message
+
+
+def test_a_channel_the_account_cannot_read_is_reported_as_denied():
+    from src.windows_collector import describe_channel_error
+
+    state, message = describe_channel_error(
+        "Security", "Attempted to perform an unauthorized operation."
+    )
+    assert state == "denied"
+    assert "cannot be read by this account" in message
+
+
+def test_a_genuine_failure_is_still_an_error_and_only_one_line():
+    from src.windows_collector import describe_channel_error
+
+    state, message = describe_channel_error(
+        "System", "PowerShell command failed\nsecond line\nthird line"
+    )
+    assert state == "error"
+    assert message == "System: PowerShell command failed"
+
+
+def test_a_missing_channel_does_not_raise_the_summary_error(tmp_path, monkeypatch):
+    collector = _collector(tmp_path, channels=("Microsoft-Windows-Sysmon/Operational",))
+    monkeypatch.setattr(
+        collector, "_recent_records", lambda channel: (_ for _ in ()).throw(RuntimeError(SYSMON_MISSING))
+    )
+    collector.stop_event.set()
+    collector._run()
+    assert collector.status["channels"]["Microsoft-Windows-Sysmon/Operational"]["state"] == "missing"
+    # The dashboard should not shout about a channel the machine simply does not have.
+    assert collector.status["last_error"] == ""

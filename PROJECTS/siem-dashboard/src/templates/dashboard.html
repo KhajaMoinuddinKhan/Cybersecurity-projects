@@ -278,13 +278,26 @@
     text("severity-note", total ? "Current filtered event set" : "No events for the current filters");
   }
 
+  var channelLabels = {
+    connected: "connected", waiting: "waiting", missing: "not installed",
+    denied: "access denied", error: "error"
+  };
+  function channelLabel(value) { return channelLabels[value] || value; }
+
   function renderCollector(collector) {
     var channels = collector.channels || {};
     var names = Object.keys(channels);
     var connected = names.filter(function (name) { return channels[name].state === "connected"; }).length;
+    var absent = names.filter(function (name) {
+      var state = channels[name].state;
+      return state === "missing" || state === "denied";
+    }).length;
     var stateText = collector.enabled
       ? (collector.running ? connected + "/" + names.length + " channels live" : "collector stopped")
       : "collector unavailable";
+    if (collector.enabled && collector.running && absent) {
+      stateText += " · " + absent + " not on this machine";
+    }
     text("collector-state", stateText);
     var activity = (collector.ingested || 0) + " new · " + (collector.backfilled || 0) + " recent";
     if (collector.self_skipped) activity += " · " + collector.self_skipped + " own events skipped";
@@ -296,7 +309,7 @@
       el("channel-status").innerHTML = names.map(function (name) {
         var item = channels[name];
         var channelState = collector.enabled ? item.state : "unavailable";
-        return '<div class="channel-card ' + esc(channelState) + '"><div><strong title="' + esc(name) + '">' + esc(name) + '</strong><span>' + esc(channelState) + '</span></div><code>' + (item.last_record ? '#' + esc(item.last_record) : '--') + '</code></div>';
+        return '<div class="channel-card ' + esc(channelState) + '" title="' + esc(item.error || '') + '"><div><strong title="' + esc(name) + '">' + esc(name) + '</strong><span>' + esc(channelLabel(channelState)) + '</span></div><code>' + (item.last_record ? '#' + esc(item.last_record) : '--') + '</code></div>';
       }).join("");
     }
     text("collector-error", collector.last_error || "");
