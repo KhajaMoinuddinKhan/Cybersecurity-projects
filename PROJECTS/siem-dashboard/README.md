@@ -101,13 +101,42 @@ curl -F "file=@lab.pcap" http://127.0.0.1:5000/api/pcap
 
 A capture is read into **one event per flow** plus one per DNS name, with the packet count and byte count on each flow, and written into the same store as the host events. That is what makes the two joinable: a Sysmon process event and a network flow can be correlated on host and time. Reading a capture needs Scapy; everything else runs without it.
 
+## Installing Sysmon
+
+Sysmon is not part of Windows. The channel does not exist until you install it, and until then the collector reports that channel as `missing` rather than as an error.
+
+A configuration for this project's rules is at [`sysmon-config.xml`](sysmon-config.xml). It enables exactly the event types the Sysmon rules can match on and nothing else, and it narrows two of them after measuring what they produce on a real laptop:
+
+```console
+sysmon64.exe -accepteula -i sysmon-config.xml
+```
+
+| Enabled | Why |
+| --- | --- |
+| `ProcessCreate` | Command line and parent image, which is what the execution rules match on |
+| `NetworkConnect` | The second half of the correlation rule. External destinations only |
+| `DnsQuery` | The long-name exfiltration rule |
+| `ProcessAccess` | LSASS reads, filtered to that one target |
+| `CreateRemoteThread` | The injection rule |
+| `DriverLoad` | The driver rule |
+| `ProcessTerminate` | **Off.** On by default, read by no rule, and the second-largest source of events |
+| `FileCreate`, `RegistryEvent`, `PipeEvent`, `WmiEvent` | **Off.** No rule reads them and they are the noisiest things Sysmon produces |
+
+Loopback, private and link-local destinations are excluded from `NetworkConnect`. A connection to `127.0.0.1` is not command and control, and on the measured machine those were most of the volume.
+
+Re-apply a changed configuration without reinstalling:
+
+```console
+sysmon64.exe -c sysmon-config.xml
+```
+
 ## Threat intelligence
 
 Point `--intel-db` at the SQLite store written by the [Threat Intelligence Aggregator](../threat-intelligence-aggregator) and every event is checked against it as it arrives. An address, domain, hash or URL that matches raises an alert that names the indicator and the feed it came from. An event that was already an alert keeps the rule that fired and records the indicator alongside it, rather than having its reason replaced.
 
 ## Retention, alerting and authentication
 
-- **Retention.** `--retain-days` prunes events older than the window, on a timer, so the store does not grow without limit. The default is 30 days; `0` disables it. Correlation alerts expire with the events they were built from, because a sequence finding is only checkable while its events are still there.
+- **Retention, by age and by volume.** `--retain-days` prunes events older than the window; `--max-db-mb` deletes the oldest events once the store passes a size. Whichever limit is reached first wins, and both are off at `0`. The age default is 30 days and the size default is 500 MB. Both are needed: Sysmon on a working laptop produced about 63 events a minute after tuning, which is 91,000 a day and roughly 6.8 GB over a 30-day window — a problem the age limit alone never sees. The current size and the cap are reported on the dashboard. Correlation alerts expire with the events they were built from, because a sequence finding is only checkable while its events are still there.
 - **Alerting.** `--alert-log` appends every alert as a JSON line; `--alert-webhook` POSTs it. `--alert-min-severity` sets the floor (default `Medium`). A webhook that fails is recorded and shown on the dashboard rather than stopping collection.
 - **Authentication.** `--auth-token`, or the `SIEM_AUTH_TOKEN` environment variable, requires a bearer token on every route. Left unset, the console is open on `127.0.0.1`, which is the documented default for a lab. When a token is set, open the page as `/?token=...` and it will authenticate its own requests.
 
@@ -163,6 +192,7 @@ Read this before treating a clean dashboard as a clean machine.
 - **Correlation is sequence-only.** Ordered steps on a single grouping field inside a time window. There are no thresholds, no joins across fields, and no baselining of what is normal for a host.
 - **Several rules are noisy by design and marked as context.** The outbound-connection rule matches normal traffic, so it records rather than alerts. That is a workaround for having no baselining: without a notion of what is normal for a host, the honest option is to treat the behaviour as context instead of pretending a browser is an incident.
 - **Severity is not risk.** A severity on an alert is how much attention the rule thinks it deserves, not a measure of business impact. There is no asset criticality and no risk scoring.
+- **Sysmon is a large source.** Even tuned, it is the bulk of the store — 1,031 of 1,157 events in one measured run. That is the nature of endpoint telemetry, and it is why the store is bounded by size as well as age.
 - **The collector reads the log by running PowerShell.** Six channels are polled every two seconds, one process each. That works and it is what the platform gives without an extra dependency, but it is heavy, it produces the self-generated volume described above, and a machine with a slow PowerShell profile will poll slowly. A native API would be the right long-term answer.
 
 ## Tests

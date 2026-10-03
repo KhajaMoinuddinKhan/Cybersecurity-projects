@@ -7,6 +7,8 @@ import pytest
 
 from src.app import (
     dashboard_app,
+    database_size_mb,
+    prune_to_size,
     dashboard_snapshot,
     get_connection,
     ingest_payloads,
@@ -1081,3 +1083,73 @@ def test_an_event_without_structured_data_is_still_checked_on_the_header(tmp_pat
     )
     assert collector.status["self_skipped"] == 1
     assert query_events(tmp_path / "live.db") == []
+
+
+# --- the store is bounded by volume as well as by age ----------------------
+
+def test_the_store_is_trimmed_to_a_size_cap(tmp_path):
+    db = tmp_path / "live.db"
+    # Long messages so the file grows quickly without needing a huge row count.
+    padding = "x" * 4000
+    ingest_payloads(
+        db,
+        [
+            {"message": f"{index} {padding}", "channel": "System",
+             "external_id": f"e:{index}", "timestamp": f"2026-10-0{1 + index % 3}T0{index % 10}:00:00Z"}
+            for index in range(400)
+        ],
+        engine=None,
+    )
+    before_rows = dashboard_snapshot(db)["counts"]["Total"]
+    before_mb = database_size_mb(db)
+    assert before_rows == 400
+    assert before_mb > 1, "the fixture should have produced a store worth trimming"
+
+    removed = prune_to_size(db, 1)
+    assert removed > 0
+    assert dashboard_snapshot(db)["counts"]["Total"] < before_rows
+    # The file itself has to shrink, not just the row count.
+    assert database_size_mb(db) < before_mb
+
+
+def test_the_oldest_events_are_the_ones_removed(tmp_path):
+    db = tmp_path / "live.db"
+    padding = "y" * 4000
+    ingest_payloads(
+        db,
+        [
+            {"message": f"row {index} {padding}", "channel": "System",
+             "external_id": f"e:{index}",
+             "timestamp": f"2026-01-01T00:{index // 60:02d}:{index % 60:02d}Z"}
+            for index in range(300)
+        ],
+        engine=None,
+    )
+    prune_to_size(db, 1)
+    remaining = query_events(db, limit=2000)
+    assert remaining
+    # Whatever is left must be the newer end of the range.
+    # Timestamps are stored with a space separator, not the ISO "T".
+    newest = max(event["timestamp"] for event in remaining)
+    assert newest.startswith("2026-01-01 00:04"), newest
+    assert min(event["timestamp"] for event in remaining) > "2026-01-01 00:00:00"
+
+
+def test_a_size_cap_of_zero_keeps_everything(tmp_path):
+    db = tmp_path / "live.db"
+    ingest_payloads(db, [{"message": "kept", "channel": "System"}], engine=None)
+    assert prune_to_size(db, 0) == 0
+    assert dashboard_snapshot(db)["counts"]["Total"] == 1
+
+
+def test_an_under_cap_store_is_left_alone(tmp_path):
+    db = tmp_path / "live.db"
+    ingest_payloads(db, [{"message": "small", "channel": "System"}], engine=None)
+    assert prune_to_size(db, 500) == 0
+    assert dashboard_snapshot(db)["counts"]["Total"] == 1
+
+
+def test_the_size_helper_counts_the_write_ahead_log(tmp_path):
+    db = tmp_path / "live.db"
+    ingest_payloads(db, [{"message": "one", "channel": "System"}], engine=None)
+    assert database_size_mb(db) > 0

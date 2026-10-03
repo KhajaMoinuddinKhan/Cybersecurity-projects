@@ -1,0 +1,61 @@
+<!-- Sysmon configuration for the MKMK SIEM dashboard.
+
+     It enables the event types the rules in
+     PROJECTS/siem-dashboard/src/rules/sysmon.yml can match on, and nothing
+     else. Each block exists because a rule needs it:
+
+       ProcessCreate       command line and parent image for the execution rules
+       NetworkConnect      the second half of the correlation rule, external only
+       DnsQuery            the long-name exfiltration rule
+       ProcessAccess       LSASS reads, filtered to that one target
+       CreateRemoteThread  the injection rule
+       DriverLoad          the driver rule
+
+     Two of these are deliberately narrowed after measuring what they produce on
+     a real laptop:
+
+       ProcessTerminate    switched off. It is on by default, no rule reads it,
+                           and it was the second-largest source of events.
+                           An include rule that can never match is how a
+                           default-on event is disabled.
+
+       NetworkConnect      external destinations only. Loopback, private and
+                           link-local addresses are excluded: a connection to
+                           127.0.0.1 or to the local network is not command and
+                           control, and on the measured machine they were most
+                           of the volume.
+
+     FileCreate, RegistryEvent, PipeEvent and the WMI events are left excluded.
+     No rule reads them and they are the noisiest things Sysmon can produce.
+-->
+
+<Sysmon schemaversion="4.91">
+  <HashAlgorithms>SHA256</HashAlgorithms>
+
+  <EventFiltering>
+    <ProcessCreate onmatch="exclude" />
+
+    <ProcessTerminate onmatch="include">
+      <Image condition="is">DISABLED-BY-SIEM-CONFIG</Image>
+    </ProcessTerminate>
+
+    <NetworkConnect onmatch="exclude">
+      <DestinationIp condition="is">127.0.0.1</DestinationIp>
+      <DestinationIp condition="is">::1</DestinationIp>
+      <DestinationIp condition="begin with">10.</DestinationIp>
+      <DestinationIp condition="begin with">192.168.</DestinationIp>
+      <DestinationIp condition="begin with">169.254.</DestinationIp>
+      <DestinationIp condition="begin with">fe80:</DestinationIp>
+      <DestinationIp condition="begin with">::ffff:127.</DestinationIp>
+    </NetworkConnect>
+
+    <DnsQuery onmatch="exclude" />
+
+    <ProcessAccess onmatch="include">
+      <TargetImage condition="end with">lsass.exe</TargetImage>
+    </ProcessAccess>
+
+    <CreateRemoteThread onmatch="exclude" />
+    <DriverLoad onmatch="exclude" />
+  </EventFiltering>
+</Sysmon>

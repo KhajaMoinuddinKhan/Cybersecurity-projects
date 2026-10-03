@@ -68,6 +68,12 @@ MIGRATIONS = (
 
 DEFAULT_RETAIN_DAYS = 30
 
+# A second bound, by volume. Age alone is not enough: Sysmon on a working laptop
+# produced about 63 events a minute after tuning, which is 91,000 a day and
+# roughly 6.8 GB over a 30-day window. On a machine with 33 GB free that is a
+# problem the age limit never sees. Whichever limit is reached first wins.
+DEFAULT_MAX_DB_MB = 500
+
 
 class _Unset:
     """Sentinel: 'the caller did not say', as distinct from 'use none'."""
@@ -422,6 +428,54 @@ def prune_events(db_path: Path, retain_days: int) -> int:
             (cutoff,),
         )
         return connection.total_changes - before
+
+
+def database_size_mb(db_path: Path) -> float:
+    """The size of the store on disk, including its write-ahead log."""
+
+    total = 0
+    for suffix in ("", "-wal", "-shm"):
+        candidate = Path(f"{db_path}{suffix}")
+        if candidate.exists():
+            total += candidate.stat().st_size
+    return round(total / (1024 * 1024), 2)
+
+
+def prune_to_size(db_path: Path, max_mb: int) -> int:
+    """Delete the oldest events until the store is under a size cap.
+
+    The row count to remove is estimated from the current bytes per row, then
+    the space is reclaimed with a vacuum, because deleting rows in SQLite frees
+    pages for reuse without shrinking the file. The vacuum is the expensive part
+    and only runs when something was actually deleted.
+    """
+
+    if max_mb <= 0:
+        return 0
+
+    path = Path(db_path)
+    limit_bytes = max_mb * 1024 * 1024
+    if not path.exists() or database_size_mb(db_path) * 1024 * 1024 <= limit_bytes:
+        return 0
+
+    with closing(get_connection(db_path)) as connection, connection:
+        total = int(connection.execute("SELECT COUNT(*) FROM live_events").fetchone()[0])
+        if total == 0:
+            return 0
+        bytes_per_row = max(1.0, path.stat().st_size / total)
+        target_rows = int(limit_bytes / bytes_per_row)
+        excess = total - target_rows
+        if excess <= 0:
+            return 0
+        connection.execute(
+            "DELETE FROM live_events WHERE id IN ("
+            " SELECT id FROM live_events ORDER BY datetime(timestamp) ASC, id ASC LIMIT ?)",
+            (excess,),
+        )
+
+    with closing(sqlite3.connect(path)) as vacuum:
+        vacuum.execute("VACUUM")
+    return excess
 
 
 def _escape_like(value: str) -> str:
@@ -1061,6 +1115,7 @@ def _correlation_worker(
 def _retention_worker(
     db_path: Path,
     retain_days: int,
+    max_db_mb: int,
     interval: float,
     stop_event: threading.Event,
     status: dict[str, Any],
@@ -1070,7 +1125,10 @@ def _retention_worker(
     while not stop_event.is_set():
         try:
             removed = prune_events(db_path, retain_days)
+            removed += prune_to_size(db_path, max_db_mb)
             status["removed"] = status.get("removed", 0) + removed
+            status["size_mb"] = database_size_mb(db_path)
+            status["max_db_mb"] = max_db_mb
             status["last_run"] = datetime.now(timezone.utc).isoformat()
             status["last_error"] = ""
         except (sqlite3.Error, OSError) as exc:
@@ -1100,6 +1158,15 @@ def main() -> None:
         type=int,
         default=DEFAULT_RETAIN_DAYS,
         help=f"Delete events older than this many days (0 disables). Default {DEFAULT_RETAIN_DAYS}.",
+    )
+    parser.add_argument(
+        "--max-db-mb",
+        type=int,
+        default=DEFAULT_MAX_DB_MB,
+        help=(
+            "Delete the oldest events once the store passes this size (0 disables). "
+            f"Default {DEFAULT_MAX_DB_MB}."
+        ),
     )
     parser.add_argument(
         "--alert-webhook",
@@ -1157,11 +1224,11 @@ def main() -> None:
                 daemon=True,
             )
         )
-    if args.retain_days > 0:
+    if args.retain_days > 0 or args.max_db_mb > 0:
         threads.append(
             threading.Thread(
                 target=_retention_worker,
-                args=(args.db, args.retain_days, 900.0, stop_event, retention_status),
+                args=(args.db, args.retain_days, args.max_db_mb, 900.0, stop_event, retention_status),
                 name="retention",
                 daemon=True,
             )
@@ -1177,8 +1244,12 @@ def main() -> None:
     if not args.no_windows_events:
         collector.start()
 
+    retention_status["size_mb"] = database_size_mb(args.db)
+    retention_status["max_db_mb"] = args.max_db_mb
     runtime = {
         "retain_days": args.retain_days,
+        "max_db_mb": args.max_db_mb,
+        "size_mb": database_size_mb(args.db),
         "correlation": correlation_status,
         "retention": retention_status,
         "rules": len(default_engine().rules),

@@ -450,6 +450,10 @@
     }
     if (runtime && runtime.intel_indicators) parts.push(runtime.intel_indicators + " threat indicators loaded");
     if (runtime && runtime.retain_days) parts.push("retention " + runtime.retain_days + " days");
+    if (runtime && runtime.size_mb) {
+      parts.push("store " + runtime.size_mb + " MB" +
+        (runtime.max_db_mb ? " of " + runtime.max_db_mb + " MB cap" : ""));
+    }
     parts.push(runtime && runtime.auth_enabled ? "token required" : "no authentication (local lab)");
     if (notifier && notifier.enabled) {
       parts.push("alerts delivered: " + (notifier.sent || 0));
