@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -17,26 +19,85 @@ class TrafficRecord:
     destination_port: int | None = None
     dns_query: str | None = None
     dns_queries: tuple[str, ...] = ()
+    source_port: int | None = None
+    length: int = 0
+    timestamp: float | None = None
+
+def flow_key(record: TrafficRecord) -> str:
+    """Return the record's unidirectional five-tuple as a readable string."""
+
+    source = f"{record.source}:{record.source_port}" if record.source_port is not None else str(record.source)
+    destination = (
+        f"{record.destination}:{record.destination_port}"
+        if record.destination_port is not None
+        else str(record.destination)
+    )
+    return f"{source} -> {destination} {record.protocol.upper()}"
 
 def summarize_records(records: Iterable[TrafficRecord]) -> dict[str, Any]:
-    """Count protocols, hosts, ports, and DNS names."""
+    """Count protocols, hosts, ports, flows, bytes, and DNS names."""
 
     records = list(records)
+
+    protocols: Counter[str] = Counter()
+    protocol_bytes: Counter[str] = Counter()
+    source_hosts: Counter[str] = Counter()
+    source_bytes: Counter[str] = Counter()
+    destination_ports: Counter[int] = Counter()
+    port_bytes: Counter[int] = Counter()
+    flows: Counter[str] = Counter()
+    flow_bytes: Counter[str] = Counter()
+    dns_queries: list[str] = []
+
+    total_bytes = 0
+    first: float | None = None
+    last: float | None = None
+
+    for record in records:
+        protocol = record.protocol.upper()
+        size = record.length or 0
+        total_bytes += size
+
+        protocols[protocol] += 1
+        protocol_bytes[protocol] += size
+
+        if record.source:
+            source_hosts[record.source] += 1
+            source_bytes[record.source] += size
+        if record.destination_port is not None:
+            destination_ports[record.destination_port] += 1
+            port_bytes[record.destination_port] += size
+
+        if record.source or record.destination:
+            key = flow_key(record)
+            flows[key] += 1
+            flow_bytes[key] += size
+
+        # Every question is reported; a packet can ask more than one name.
+        for name in (record.dns_queries or ((record.dns_query,) if record.dns_query else ())):
+            dns_queries.append(name.rstrip("."))
+
+        if record.timestamp is not None:
+            first = record.timestamp if first is None else min(first, record.timestamp)
+            last = record.timestamp if last is None else max(last, record.timestamp)
+
+    duration = None if first is None or last is None else max(0.0, last - first)
+
     return {
         "packet_count": len(records),
-        "protocols": Counter(record.protocol.upper() for record in records),
-        "source_hosts": Counter(record.source for record in records if record.source),
-        "destination_ports": Counter(
-            record.destination_port
-            for record in records
-            if record.destination_port is not None
-        ),
-        # Every question is reported; a packet can ask more than one name.
-        "dns_queries": [
-            name.rstrip(".")
-            for record in records
-            for name in (record.dns_queries or ((record.dns_query,) if record.dns_query else ()))
-        ],
+        "byte_count": total_bytes,
+        "protocols": protocols,
+        "protocol_bytes": protocol_bytes,
+        "source_hosts": source_hosts,
+        "source_bytes": source_bytes,
+        "destination_ports": destination_ports,
+        "destination_port_bytes": port_bytes,
+        "flows": flows,
+        "flow_bytes": flow_bytes,
+        "dns_queries": dns_queries,
+        "first_timestamp": first,
+        "last_timestamp": last,
+        "duration_seconds": duration,
     }
 
 def port_number(value: Any) -> int | None:
@@ -143,13 +204,16 @@ def packet_to_record(packet: Any) -> TrafficRecord:
     # or carried inside a tunnel belongs to a different packet.
     transport = packet_transport(packet)
 
-    # Pick the transport protocol and destination port.
+    # Pick the transport protocol, source port, and destination port.
     protocol = "OTHER"
     destination_port = None
+    source_port = None
     if isinstance(transport, TCP):
-        protocol, destination_port = "TCP", port_number(transport.dport)
+        protocol = "TCP"
+        destination_port, source_port = port_number(transport.dport), port_number(transport.sport)
     elif isinstance(transport, UDP):
-        protocol, destination_port = "UDP", port_number(transport.dport)
+        protocol = "UDP"
+        destination_port, source_port = port_number(transport.dport), port_number(transport.sport)
     elif source:
         # No transport of its own: IPv4 and IPv6 traffic are both counted as IP.
         protocol = "IP"
@@ -159,6 +223,14 @@ def packet_to_record(packet: Any) -> TrafficRecord:
     if transport is not None and DNS in transport and transport[DNS].qr == 0:
         questions = dns_question_names(transport[DNS])
 
+    # The frame length on the wire, and when it was seen. A packet read back
+    # from a file carries the capture timestamp; an in-memory packet may not.
+    try:
+        length = len(packet)
+    except TypeError:
+        length = 0
+    timestamp = getattr(packet, "time", None)
+
     return TrafficRecord(
         protocol,
         source,
@@ -166,6 +238,9 @@ def packet_to_record(packet: Any) -> TrafficRecord:
         destination_port,
         questions[0] if questions else None,
         questions,
+        source_port,
+        length,
+        float(timestamp) if timestamp is not None else None,
     )
 
 def analyse_pcap(path: Path) -> dict[str, Any]:
@@ -194,28 +269,93 @@ def printable(value: Any) -> str:
     return "".join(character if character.isprintable() else f"\\x{ord(character):02x}" for character in text)
 
 
-def print_summary(summary: dict[str, Any]) -> None:
+def plural(count: int, noun: str) -> str:
+    """Render a count with its noun, using the singular when there is one."""
+
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def format_timestamp(value: float | None) -> str:
+    """Render a capture timestamp in UTC, or a dash when there is none."""
+
+    if value is None:
+        return "not recorded"
+    return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+
+
+def as_json_report(summary: dict[str, Any], top: int) -> dict[str, Any]:
+    """Convert the counters into a plain, serialisable report."""
+
+    duration = summary["duration_seconds"]
+    return {
+        "packet_count": summary["packet_count"],
+        "byte_count": summary["byte_count"],
+        "protocols": dict(summary["protocols"].most_common()),
+        "protocol_bytes": dict(summary["protocol_bytes"].most_common()),
+        "source_hosts": dict(summary["source_hosts"].most_common(top)),
+        "source_bytes": dict(summary["source_bytes"].most_common(top)),
+        "destination_ports": {str(k): v for k, v in summary["destination_ports"].most_common(top)},
+        "destination_port_bytes": {str(k): v for k, v in summary["destination_port_bytes"].most_common(top)},
+        "flows": dict(summary["flows"].most_common(top)),
+        "flow_bytes": dict(summary["flow_bytes"].most_common(top)),
+        "dns_queries": summary["dns_queries"][:20],
+        "first_timestamp": summary["first_timestamp"],
+        "last_timestamp": summary["last_timestamp"],
+        "duration_seconds": duration,
+        "packets_per_second": (
+            None if not duration else round(summary["packet_count"] / duration, 3)
+        ),
+        "bytes_per_second": (
+            None if not duration else round(summary["byte_count"] / duration, 3)
+        ),
+    }
+
+def print_summary(summary: dict[str, Any], top: int = 10) -> None:
     """Print the traffic summary."""
 
     print(f"Packets analysed: {summary['packet_count']}")
+    print(f"Bytes analysed: {summary['byte_count']}")
+
+    print("\nCapture time:")
+    duration = summary["duration_seconds"]
+    if summary["first_timestamp"] is None:
+        print("  No observed values")
+    else:
+        print(f"  first:    {format_timestamp(summary['first_timestamp'])}")
+        print(f"  last:     {format_timestamp(summary['last_timestamp'])}")
+        if duration:
+            print(
+                f"  duration: {duration:.3f}s"
+                f" ({summary['packet_count'] / duration:.1f} packets/s,"
+                f" {summary['byte_count'] / duration:.0f} bytes/s)"
+            )
+        else:
+            print("  duration: under one timestamp, so no rate is reported")
 
     print("\nProtocols:")
     if not summary["protocols"]:
         print("  No observed values")
     for name, count in summary["protocols"].most_common():
-        print(f"  {printable(name)}: {count}")
+        size = summary["protocol_bytes"][name]
+        print(f"  {printable(name)}: {plural(count, 'packet')}, {plural(size, 'byte')}")
 
-    print("\nTop source hosts:")
-    if not summary["source_hosts"]:
+    print(f"\nTop source hosts by bytes (top {top}):")
+    if not summary["source_bytes"]:
         print("  No observed values")
-    for host, count in summary["source_hosts"].most_common(10):
-        print(f"  {printable(host)}: {count} packets")
+    for host, size in summary["source_bytes"].most_common(top):
+        print(f"  {printable(host)}: {plural(size, 'byte')} in {plural(summary['source_hosts'][host], 'packet')}")
 
-    print("\nTop destination ports:")
+    print(f"\nTop destination ports (top {top}):")
     if not summary["destination_ports"]:
         print("  No observed values")
-    for port, count in summary["destination_ports"].most_common(10):
-        print(f"  {port}: {count} packets")
+    for port, count in summary["destination_ports"].most_common(top):
+        print(f"  {port}: {plural(count, 'packet')}, {plural(summary['destination_port_bytes'][port], 'byte')}")
+
+    print(f"\nTop flows by bytes (top {top}):")
+    if not summary["flow_bytes"]:
+        print("  No observed values")
+    for key, size in summary["flow_bytes"].most_common(top):
+        print(f"  {printable(key)}: {plural(size, 'byte')} in {plural(summary['flows'][key], 'packet')}")
 
     if summary["dns_queries"]:
         print("\nDNS queries:")
@@ -229,19 +369,32 @@ def main() -> None:
         description="Summarise a PCAP for basic defensive network analysis."
     )
     parser.add_argument("pcap", type=Path)
+    parser.add_argument(
+        "--json", action="store_true", help="Print the summary as JSON instead of a report"
+    )
+    parser.add_argument(
+        "--top", type=int, default=10, help="How many entries each ranking shows"
+    )
     args = parser.parse_args()
 
     if not args.pcap.is_file():
         raise SystemExit(f"PCAP file not found: {args.pcap}")
+    if args.top < 1:
+        raise SystemExit("--top must be at least 1")
 
     try:
-        print_summary(analyse_pcap(args.pcap))
+        summary = analyse_pcap(args.pcap)
     except ImportError as exc:
         raise SystemExit(
             "Scapy is required. Run: python -m pip install -r requirements.txt"
         ) from exc
     except (ValueError, OSError) as exc:
         raise SystemExit(str(exc)) from exc
+
+    if args.json:
+        print(json.dumps(as_json_report(summary, args.top), indent=2, default=str))
+        return
+    print_summary(summary, args.top)
 
 if __name__ == "__main__":
     main()

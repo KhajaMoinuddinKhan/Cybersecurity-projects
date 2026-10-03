@@ -40,5 +40,9 @@ def test_ipv6_packet_with_no_transport_is_counted_as_ip():
 def test_empty_summary_reports_no_observed_values(capsys):
     print_summary(summarize_records([]))
     out = capsys.readouterr().out
-    assert "No observed values" in out
-    assert out.count("No observed values") == 3
+    # Every section that can be empty says so rather than showing a fabricated
+    # row: the capture time, protocols, source hosts, destination ports and flows.
+    assert out.count("No observed values") == 5
+    for section in ("Capture time:", "Protocols:", "Top source hosts by bytes",
+                    "Top destination ports", "Top flows by bytes"):
+        assert section in out

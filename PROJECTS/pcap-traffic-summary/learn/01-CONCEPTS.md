@@ -1,15 +1,15 @@
 # Concepts
 
-- PCAP files store captured network packets for later analysis.
-- TCP, UDP, IP, and DNS fields provide useful context without reading application payloads.
-- IPv4 and IPv6 packets use different network-layer fields, so the parser handles both.
-- Counters turn packet records into protocol, host, and destination-port summaries.
-- DNS query names can help explain what systems tried to reach.
+**A capture format is a container, not a protocol.** A PCAP file holds frames with a timestamp, a recorded length and the bytes themselves. Everything this tool reports is derived from those three things plus the parsed headers, which is why the timestamps matter as much as the addresses.
 
-## Interpreting the evidence
+**Wire length and captured length are different numbers.** Every capture record stores the number of bytes that were actually saved, which can be smaller than the frame on the wire when the capture was taken with a short snaplen. This project totals the recorded bytes. On a truncated capture that means the byte figures are a floor rather than a measurement, and it is worth knowing before you quote them.
 
-The report shows the total number of packets, protocol counts, the ten busiest source addresses, the ten most common destination ports, and up to twenty DNS question names. Repeated names remain repeated because they represent separate queries. DNS replies are excluded from the query list, although they still contribute to packet and protocol totals.
+**A flow is not a conversation.** The conventional flow definition is a unidirectional five-tuple: source address, source port, destination address, destination port, protocol. One TCP conversation therefore produces two flows, one in each direction, with independent byte counts. That is not a shortcoming; it is what makes per-direction accounting meaningful, because a request and a response are rarely the same size.
 
-This is a traffic summary, not an intrusion detector. A busy host or unusual port needs context before you can call it suspicious. Encrypted application content stays encrypted, and DNS names are available only when the capture exposes them. Scapy loads the capture into memory, so large captures may need to be split before analysis.
+**Rates need a denominator.** Packets per second is meaningless without the interval it was measured over, and the interval here is the span between the first and last timestamp in the file. If the capture has a gap, the average covers the gap. If the file contains a single packet, there is no interval at all and no rate can be honestly reported.
+
+**Counters are the whole algorithm.** Aggregation by key is enough to answer every question this tool asks. There is no model, no scoring and no statistics beyond the sum, which is why the code is short and why its output can be checked by hand.
+
+**DNS names are observations, not attributions.** A name in the query list means some host in the capture asked for it. It does not mean the name is malicious, that the answer was used, or that the connection went anywhere.
 
 [Back to the project guide](../README.md)
