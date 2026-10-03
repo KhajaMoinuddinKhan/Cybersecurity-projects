@@ -1,0 +1,38 @@
+{
+  "assets": [
+    {
+      "name": "//storage.googleapis.com/student-public-bucket",
+      "assetType": "storage.googleapis.com/Bucket",
+      "resource": {
+        "location": "europe-west1",
+        "labels": {},
+        "data": {
+          "encryption": {
+            "defaultKmsKeyName": "projects/lab/locations/europe-west1/keyRings/r/cryptoKeys/k"
+          }
+        }
+      },
+      "iamPolicy": {
+        "bindings": [
+          {
+            "role": "roles/storage.objectViewer",
+            "members": [
+              "allUsers"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "//compute.googleapis.com/projects/lab/zones/europe-west1-b/instances/gce-lab",
+      "assetType": "compute.googleapis.com/Instance",
+      "resource": {
+        "location": "europe-west1-b",
+        "labels": {
+          "owner": "student",
+          "environment": "lab"
+        }
+      }
+    }
+  ]
+}

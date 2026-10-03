@@ -14,3 +14,4 @@ Two limits are worth stating plainly because they are easy to forget while looki
 
 [Run instructions and troubleshooting](../README.md)
 
+[Back to the project guide](../README.md)

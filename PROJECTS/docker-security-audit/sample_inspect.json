@@ -1,21 +1,130 @@
-{
-  "Config": {
-    "User": ""
-  },
-  "HostConfig": {
-    "Privileged": false,
-    "NetworkMode": "bridge",
-    "Binds": [
-      "/tmp/app-data:/data"
-    ]
-  },
-  "NetworkSettings": {
-    "Ports": {
-      "8080/tcp": [
-        {
-          "HostPort": "8080"
-        }
+[
+  {
+    "Id": "8f3a1c2d4e5f60718293a4b5c6d7e8f9",
+    "Name": "/web-app",
+    "Config": {
+      "Image": "nginx:latest",
+      "User": "",
+      "Env": [
+        "DB_PASSWORD=hunter2",
+        "APP_MODE=production",
+        "PATH=/usr/local/bin:/usr/bin"
       ]
+    },
+    "HostConfig": {
+      "Privileged": false,
+      "NetworkMode": "host",
+      "PidMode": "host",
+      "IpcMode": "host",
+      "CapAdd": [
+        "SYS_ADMIN",
+        "NET_ADMIN"
+      ],
+      "CapDrop": [],
+      "ReadonlyRootfs": false,
+      "SecurityOpt": [
+        "seccomp=unconfined",
+        "apparmor=unconfined"
+      ],
+      "Binds": [
+        "/var/run/docker.sock:/var/run/docker.sock",
+        "/etc:/host-etc:ro"
+      ],
+      "RestartPolicy": {
+        "Name": "always",
+        "MaximumRetryCount": 0
+      },
+      "Memory": 0,
+      "NanoCpus": 0,
+      "LogConfig": {
+        "Type": "json-file",
+        "Config": {}
+      }
+    },
+    "Mounts": [
+      {
+        "Type": "bind",
+        "Source": "/var/run/docker.sock",
+        "Destination": "/var/run/docker.sock",
+        "RW": true,
+        "Mode": ""
+      },
+      {
+        "Type": "bind",
+        "Source": "/etc",
+        "Destination": "/host-etc",
+        "RW": false,
+        "Mode": "ro"
+      }
+    ],
+    "NetworkSettings": {
+      "Ports": {
+        "8080/tcp": [
+          {
+            "HostIp": "0.0.0.0",
+            "HostPort": "8080"
+          }
+        ],
+        "9000/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "9000"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "Id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+    "Name": "/cache",
+    "Config": {
+      "Image": "redis@sha256:9c2f1e0d8b7a6543210fedcba9876543210fedcba9876543210fedcba98765432",
+      "User": "1000",
+      "Env": [
+        "REDIS_MODE=standalone"
+      ],
+      "Healthcheck": {
+        "Test": [
+          "CMD",
+          "redis-cli",
+          "ping"
+        ],
+        "Interval": 30000000000,
+        "Timeout": 3000000000
+      }
+    },
+    "HostConfig": {
+      "Privileged": false,
+      "NetworkMode": "bridge",
+      "CapAdd": [],
+      "CapDrop": [
+        "ALL"
+      ],
+      "ReadonlyRootfs": true,
+      "SecurityOpt": [],
+      "RestartPolicy": {
+        "Name": "on-failure",
+        "MaximumRetryCount": 3
+      },
+      "Memory": 268435456,
+      "NanoCpus": 500000000,
+      "LogConfig": {
+        "Type": "json-file",
+        "Config": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+    },
+    "NetworkSettings": {
+      "Ports": {
+        "6379/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "6379"
+          }
+        ]
+      }
     }
   }
-}
+]

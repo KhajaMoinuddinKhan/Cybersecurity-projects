@@ -15,3 +15,4 @@ Severity is the level used to organise events, while the alert flag is a separat
 
 [Run instructions and troubleshooting](../README.md)
 
+[Back to the project guide](../README.md)

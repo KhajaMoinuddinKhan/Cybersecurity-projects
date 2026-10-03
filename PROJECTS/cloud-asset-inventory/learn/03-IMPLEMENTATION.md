@@ -1,15 +1,19 @@
 # Implementation
 
-- `REQUIRED_TAGS` defines the Owner and Environment metadata expected by the project.
-- Public assets produce a medium-severity review item.
-- Missing or malformed tags produce low-severity metadata findings.
-- Assets without a region produce a separate low-severity finding.
-- Provider, type, and name values are printed for each inventory record.
+- `Asset` is the normalised record; `Finding`, `FileReport` and `Report` carry the review output.
+- Four adapters — `adapt_aws_config`, `adapt_azure_resource_graph`, `adapt_gcp_assets`, `adapt_generic` — each return `(assets, skipped)`.
+- `_coerce_region`, `_coerce_tags` and `_coerce_bool` turn raw fields into clean values and record a data-quality problem when a value is present but the wrong type.
+- `build_findings` applies the rules and returns findings with a severity and a category.
+- `group_counts` counts assets by provider and by resource type; `render_table` prints the stable table.
+
+## Rules and severities
+
+`PUBLIC_EXPOSURE` and `UNENCRYPTED_STORAGE` are MEDIUM; `MISSING_TAGS`, `MISSING_OWNER_ENV`, `MISSING_REGION` and `DATA_QUALITY` are LOW. `UNENCRYPTED_STORAGE` fires only for storage-like resource types (the type string contains `storage`, `bucket`, `blob`, `disk`, `volume`, `filesystem` or `filestore`) and only when the export records encryption as `false`; an unrecorded state (`null`) is left alone. `MISSING_REGION` is suppressed when the region was present but not text, because the data-quality finding already explains it.
 
 ## Inputs and failure handling
 
-The file must contain an object with an `assets` list. Each asset is an object that can include `provider`, `type`, `name`, `public`, `region`, and `tags`. Use a JSON boolean for `public` and an object for tags. The bundled file contains synthetic training data; an actual export must be mapped into this schema before use.
+The field names each adapter reads are listed in the README's "Export formats" section. A record without the fields needed to identify it — no `resourceType`/`resourceId` for AWS, no `type`/`id` for Azure, no `assetType`/`name` for GCP — is counted as skipped rather than guessed at. Invalid JSON, a non-UTF-8 file, a deeply nested document, an unrecognised shape, a directory with no `.json` files and a missing path are all reported per file; none of them stop the run. An empty assets list is valid and reports zero resources.
 
-Check that the top-level key is exactly `assets`, and that the tag names match `Owner` and `Environment`. An empty assets list is valid and reports zero resources. Invalid JSON or a non-object asset stops loading with an error.
+The CSV export stores the tags object as a JSON string in a single column, because a tag set does not fit a flat table. `--json` writes one document and sends the export-confirmation messages to stderr so stdout stays parseable.
 
 [Back to the project guide](../README.md)

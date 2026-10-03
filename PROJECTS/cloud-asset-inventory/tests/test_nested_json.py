@@ -6,7 +6,7 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 
 
-def test_deeply_nested_json_exits_without_traceback(tmp_path):
+def test_deeply_nested_json_is_reported_without_traceback(tmp_path):
     path = tmp_path / "deep.json"
     path.write_text("[" * 100000 + "]" * 100000, encoding="utf-8")
     result = subprocess.run(
@@ -15,6 +15,6 @@ def test_deeply_nested_json_exits_without_traceback(tmp_path):
         capture_output=True,
         text=True,
     )
-    assert result.returncode != 0
-    assert "Invalid asset file" in result.stderr
+    assert result.returncode == 0
+    assert "nested too deeply" in result.stdout
     assert "Traceback" not in result.stderr

@@ -1,14 +1,15 @@
 # Challenges
 
 - The baseline must come from a trusted state or the comparison has little value.
-- Hashing a large directory can take time and disk I/O.
-- The project tracks file content and presence, not ownership, permissions, or process activity.
+- Hashing a large directory can take time and disk I/O, and watch mode repeats that work on every interval.
+- The project tracks content, size, modification time and mode, not ownership or process activity.
+- Polling can miss a file that is created and deleted between two scans.
 - A changed file still needs human review to determine why it changed.
 
 ## Working within the scope
 
-This is an on-demand comparison, not a background watcher. It does not record permissions, ownership, or the process responsible for a change. File symlinks can be followed, so choose a folder whose contents and links you understand. A scan is not an atomic filesystem snapshot; files changing while they are read can make a result inconsistent.
+Watch mode is polling, not a kernel file-system event stream. A short interval catches changes sooner but costs more CPU and disk I/O, and a file that comes and goes between two scans is never seen. The tool does not record ownership, and a scan is not an atomic filesystem snapshot, so files changing while they are read can make a result inconsistent.
 
-Create two files and save a baseline. Edit the first file, remove the second, and add a third. The next comparison should report all three change types. Run a second comparison without changing anything else: the same findings remain until you deliberately create a new baseline.
+Create two files and save a baseline. Edit the first file, remove the second, add a third, and change the permissions on one of them. The next comparison should report all four change types, and a second comparison without further edits should stay clean. Use `--count` when you want watch mode to stop on its own, and rely on the non-zero exit status to let a scheduler act on the findings.
 
 [Back to the project guide](../README.md)

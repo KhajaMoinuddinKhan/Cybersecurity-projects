@@ -17,3 +17,4 @@ Pausing the browser leaves collection, correlation and retention running. Losing
 
 [Run instructions and troubleshooting](../README.md)
 
+[Back to the project guide](../README.md)

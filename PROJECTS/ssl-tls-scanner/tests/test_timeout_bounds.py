@@ -18,5 +18,5 @@ def test_out_of_range_timeout_exits_without_traceback():
         capture_output=True,
         text=True,
     )
-    assert "TLS inspection failed" in result.stderr
+    assert "TLS assessment failed" in result.stderr
     assert "Traceback" not in result.stderr

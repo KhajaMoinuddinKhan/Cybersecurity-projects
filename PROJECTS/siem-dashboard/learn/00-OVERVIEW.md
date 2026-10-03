@@ -12,3 +12,4 @@ Open the raw record before deciding what an alert means. A service installation 
 
 [Run instructions and troubleshooting](../README.md)
 
+[Back to the project guide](../README.md)

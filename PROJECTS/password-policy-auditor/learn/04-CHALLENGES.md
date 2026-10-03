@@ -1,14 +1,15 @@
 # Challenges
 
-- The baseline is a project choice and is not a universal policy standard.
-- The parser accepts only simple integer and boolean values.
-- The project reads a local configuration file rather than an operating-system policy source.
-- A passing setting does not describe the strength of user-selected passwords.
+- No single profile is the "right" policy; the standards genuinely disagree, and NIST's modern guidance reverses older habits.
+- The profile values are a reading of published recommendations, not a certification, and standards carry nuances the model simplifies.
+- The common-password list is a tiny illustrative sample, not a breach corpus.
+- The pattern checks are heuristics that both miss weak passwords and flag strong ones.
+- The password mode audits a list you supply; it cannot tell you what passwords real users chose.
 
 ## Working within the scope
 
-The baseline is an illustrative project choice, not a claim of compliance or current best practice. It uses length 12, four character-class requirements, a maximum age of 90 days, and reuse history of 5. Choose a real policy separately for your environment; a passing result here does not measure password strength, MFA, breach detection, or account recovery.
+NIST SP 800-63B advises against composition rules and mandatory expiry, while the baseline, CIS and PCI-DSS ask for them. Modelling that required a comparison direction and a way to say "absence is compliant", rather than one greater-than check for every field. Running the same file under different profiles shows how much a result depends on the reference you chose.
 
-Run the supplied policy, then lower `reuse_limit` to 3 in a copy. Only that setting should change to review if the other values stay the same. This illustrates why different policy fields need different comparison directions, rather than one generic greater-than check.
+The bundled policy is a teaching example. It does not read a live directory, a credential store, or an enforced operating-system policy, and a passing result does not measure password strength, MFA, breach detection, or account recovery. Before relying on a profile, read the current text of the standard it claims to represent.
 
 [Back to the project guide](../README.md)

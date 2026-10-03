@@ -18,3 +18,4 @@
 
 [Run instructions and troubleshooting](../README.md)
 
+[Back to the project guide](../README.md)

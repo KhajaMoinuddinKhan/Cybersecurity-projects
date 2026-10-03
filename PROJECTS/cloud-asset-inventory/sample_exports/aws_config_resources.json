@@ -1,0 +1,40 @@
+{
+  "resourceIdentifiers": [
+    {
+      "resourceType": "AWS::EC2::Instance",
+      "resourceId": "i-0abc123def4567890",
+      "resourceName": "web-server-01",
+      "awsRegion": "eu-west-2",
+      "tags": {
+        "Owner": "Security-Lab",
+        "Environment": "lab"
+      },
+      "configuration": {
+        "public": true,
+        "encrypted": false
+      }
+    },
+    {
+      "resourceType": "AWS::S3::Bucket",
+      "resourceId": "student-artifacts",
+      "resourceName": "student-artifacts",
+      "awsRegion": "eu-west-2",
+      "tags": {
+        "Owner": "Student"
+      },
+      "configuration": {
+        "public": false,
+        "encrypted": false
+      }
+    },
+    {
+      "resourceType": "AWS::VPC",
+      "resourceId": "vpc-0123456789abcdef0",
+      "resourceName": "lab-network",
+      "tags": {
+        "Owner": "Student",
+        "Environment": "lab"
+      }
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "value": [
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/lab/providers/Microsoft.Compute/virtualMachines/lab-vm",
+      "name": "lab-vm",
+      "type": "microsoft.compute/virtualmachines",
+      "location": "eastus",
+      "tags": {
+        "Owner": "Student",
+        "Environment": "lab"
+      },
+      "properties": {
+        "public": false
+      }
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/lab/providers/Microsoft.Storage/storageAccounts/studentstorage",
+      "name": "studentstorage",
+      "type": "microsoft.storage/storageaccounts",
+      "location": "eastus",
+      "tags": {},
+      "properties": {
+        "publicNetworkAccess": "Disabled",
+        "encrypted": false
+      }
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/lab/providers/Microsoft.Network/publicIPAddresses/lab-ip",
+      "name": "lab-ip",
+      "type": "microsoft.network/publicipaddresses",
+      "tags": {
+        "Environment": "lab"
+      }
+    }
+  ]
+}

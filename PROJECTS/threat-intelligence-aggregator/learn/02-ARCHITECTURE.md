@@ -1,15 +1,15 @@
 # Architecture
 
-1. The command line accepts a feed path, a search term, or both.
-2. `read_feed()` parses CSV or JSON and normalizes each row.
-3. `import_iocs()` writes unique indicators to SQLite with `INSERT OR IGNORE`.
-4. `search_iocs()` performs a parameterized substring lookup.
-5. The command line prints import totals and matching indicators.
+1. The command line accepts feed files, feed URLs, a feed directory, and/or a search term, a stats flag, an export path or an expiry window.
+2. `parse_feed_text()` parses CSV or JSON and normalises each row, recording a malformed row instead of failing the whole feed.
+3. `fetch_feed()` downloads a URL with `urllib` and a timeout; a failure names the URL.
+4. `import_indicators()` merges each indicator into SQLite, adding a source row and updating the timestamps, observation count and confidence.
+5. `expire_iocs()`, `search_indicators()`, `collect_stats()` and `export_iocs()` prune or read the store.
 
 ## Follow one run
 
-`read_feed()` parses the entire file and validates its rows before import. `normalise_row()` trims text and normalizes the type name. SQLite enforces uniqueness on `(type, value)`, and parameterized queries perform substring searches. Connections are closed after each operation, and a failed transaction is rolled back.
+A file or URL is read into text, the format is chosen by extension or by the first character, and every row is normalised and validated by type. A structural error aborts the feed; a single bad row is skipped and counted. `import_indicators()` upserts the indicator into `iocs` and a per-source row into `ioc_sources`, then recomputes confidence from the source count and the last-seen time. SQLite enforces uniqueness on `(type, value)`.
 
-CSV needs `type` and `value` columns and can include `source`. JSON uses a list of objects with the same fields. Supported types are `ip`, `domain`, `hash`, and `url`. Fields must be text; an omitted or blank source becomes `local`. The bundled feed is a small training fixture, not a current threat feed.
+The `iocs` table keeps its original `type`, `value` and `source` columns and adds `first_seen`, `last_seen`, `observations` and `confidence`; `ioc_sources` holds one row per indicator and feed. A store written by an earlier version is upgraded in place the first time it is opened, so the SIEM dashboard's `--intel-db` reader still finds the columns it expects. The bundled feed is a small training fixture, not a current threat feed.
 
 [Back to the project guide](../README.md)

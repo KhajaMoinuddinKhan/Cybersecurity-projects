@@ -1,14 +1,21 @@
 # Challenges
 
-- The result depends on the network and the endpoint state at scan time.
-- One connection reports one negotiated session rather than every server-supported option.
+- The result depends on the network and the endpoint state at scan time, and different load-balancer nodes can answer differently.
+- Cipher-family coverage is bounded by the client library: a family it cannot offer is reported as `not probed`, not as unsupported. The Python/OpenSSL build used here exposes no RC4, 3DES, DES, NULL, EXPORT or MD5 suites, so only anonymous suites could be probed.
+- `SSLSocket.shared_ciphers()` returns `None` on this runtime, so the full list of suites the server offers cannot be enumerated directly.
+- Chain validity is judged against this machine's trust store, so a private CA that is not installed here reads the same as a self-signed certificate.
 - Certificate details can change after renewal or infrastructure changes.
-- The project does not grade protocol policy or enumerate remote configuration.
+- TLS 1.3 is treated as forward secret, because its suite names do not carry the key exchange.
 
 ## Working within the scope
 
-One successful handshake does not enumerate every cipher or protocol the server supports. A result can also differ across load-balancer nodes, Python builds, or certificate stores. This project does not assign a security grade, test obsolete protocols individually, or replace a full TLS configuration review.
-
-Run against an endpoint you are authorized to inspect, then compare the reported expiry with its certificate details. Repeating the command after a certificate renewal is a useful practical check. A connection failure is also meaningful output: it means no verified session was established.
+The grade is derived only from the checks this scanner runs, and every deduction is
+printed as a reason. Checks that could not be performed are listed under
+`not_checked` and do not change the score. This is a point-in-time assessment, not
+a complete audit: it does not enumerate every cipher, test certificate revocation,
+or say anything about the applications behind the TLS layer. Run it against an
+endpoint you are authorized to inspect, read the reasons rather than the letter,
+and repeat it after changes. A connection failure is also meaningful output: it
+means no verified session was established.
 
 [Back to the project guide](../README.md)

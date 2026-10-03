@@ -13,15 +13,15 @@ Listed largest first.
 | Project | What it does |
 | --- | --- |
 | [SIEM Dashboard](PROJECTS/siem-dashboard) | Collects Windows Event Log and Sysmon telemetry, classifies it with rules loaded from files, correlates sequences across sources, and serves a live dashboard. |
-| [PCAP Traffic Summary](PROJECTS/pcap-traffic-summary) | Reads a PCAP you supply and prints protocols, top talkers, destination ports and DNS names. |
-| [Network Traffic Analyzer](PROJECTS/network-traffic-analyzer) | Streams a PCAP packet by packet for the same summary, with a JSON output mode. |
+| [Threat Intelligence Aggregator](PROJECTS/threat-intelligence-aggregator) | Merges indicators from several feeds and URLs into one store, normalising by type, tracking which sources reported each one, scoring confidence and expiring stale entries. |
+| [SSL/TLS Scanner](PROJECTS/ssl-tls-scanner) | Enumerates the protocol versions a server accepts, flags weak cipher families, reads the whole certificate chain, checks hostname match, expiry and HSTS, and grades the result. |
+| [Web Vulnerability Scanner](PROJECTS/web-vulnerability-scanner) | Probes a localhost page for reflected input, error-based SQL injection, open redirects, cookie flags, dangerous HTTP methods, exposed paths and missing anti-CSRF tokens, alongside the security-header checks. |
+| [Cloud Asset Inventory](PROJECTS/cloud-asset-inventory) | Normalises AWS Config, Azure Resource Graph and GCP asset exports into one inventory, then flags public exposure, unencrypted storage and missing tags, owner or region. |
+| [Docker Security Audit](PROJECTS/docker-security-audit) | Audits saved `docker inspect` data against a CIS-style checklist: privileges, host namespaces, capabilities, seccomp and AppArmor, sensitive mounts, published ports, image pinning, resource limits and secrets in the environment. |
+| [Phishing URL Detector](PROJECTS/phishing-url-detector) | Scores URLs against explainable signals - lookalike and punycode hosts, typosquatting, abused top-level domains, encoded paths, credential words - and can explain every signal that did and did not fire. |
+| [Password Policy Auditor](PROJECTS/password-policy-auditor) | Scores a policy file against NIST SP 800-63B, CIS or PCI-DSS profiles, and audits a list of candidate passwords against the effective policy with the reason each one fails. |
+| [Network Traffic Analyzer](PROJECTS/network-traffic-analyzer) | Streams a capture packet by packet with byte and flow accounting, the time range and rates, host, port and protocol filters, and a JSON output mode. |
+| [File Integrity Monitor](PROJECTS/file-integrity-monitor) | Baselines a folder with SHA-256 plus size, modification time and permissions, then reports added, changed, removed and permission-only changes, with a watch mode, exclude patterns and JSON output. |
+| [PCAP Traffic Summary](PROJECTS/pcap-traffic-summary) | Reads a PCAP you supply and reports protocols, byte totals, top talkers, five-tuple flows, destination ports and DNS names, with the capture time range and the rates derived from it. |
+| [Hash Cracker](PROJECTS/hash-cracker) | Tests digests against a wordlist with automatic algorithm detection, salts, mangling rules and a bounded brute-force mode, reporting the measured work. |
 | [Consent-based terminal key recorder](PROJECTS/keylogger) | Records visible keystrokes from the terminal that launched it into a local JSONL file, behind an explicit consent flag, with no background hook. |
-| [File Integrity Monitor](PROJECTS/file-integrity-monitor) | Baselines a folder with SHA-256 and reports files that were added, changed or removed. |
-| [Web Vulnerability Scanner](PROJECTS/web-vulnerability-scanner) | Runs passive checks against a localhost page for missing security headers and risky form settings. |
-| [Threat Intelligence Aggregator](PROJECTS/threat-intelligence-aggregator) | Imports IP, domain, hash and URL indicators from CSV or JSON into a searchable SQLite database. |
-| [Docker Security Audit](PROJECTS/docker-security-audit) | Reviews saved `docker inspect` data for privileged mode, host namespaces, sensitive mounts and published ports. |
-| [SSL/TLS Scanner](PROJECTS/ssl-tls-scanner) | Reports the protocol, cipher, certificate identity and expiry from one verified handshake. |
-| [Password Policy Auditor](PROJECTS/password-policy-auditor) | Compares a password policy file against an explicit baseline, one setting per line. |
-| [Cloud Asset Inventory](PROJECTS/cloud-asset-inventory) | Flags public assets, missing ownership tags and unrecorded regions in a JSON inventory export. |
-| [Phishing URL Detector](PROJECTS/phishing-url-detector) | Scores URLs against a few explainable phishing clues and shows its reasoning. |
-| [Hash Cracker](PROJECTS/hash-cracker) | Tests an offline digest against a wordlist you provide and reports the measured work. |
