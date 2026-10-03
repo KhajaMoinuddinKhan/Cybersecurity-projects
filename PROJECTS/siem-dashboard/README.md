@@ -49,7 +49,7 @@ python -m src.agent --server http://siem.example:5000 --host-id web-01 --key hk_
 
 The page updates from the current contents of the database, so nothing on it is decorative. Counts, severity breakdowns, events-per-minute, timelines, providers, Event IDs, rule hits, ATT&CK techniques, the correlation panel and the event table are all computed from stored records, and the search, time, channel, provider, Event ID, user, rule, severity and alerts-only filters apply to everything on screen.
 
-The console now has eight parts beyond the overview, described at the end of this section: a sign-in view, a monitored-hosts panel, a detection triage queue with an investigation record, a suppression manager with an audit log, and the four wave-two panels — indexed event search, per-host baselining, lockout and multi-factor authentication, and backups. The three screenshots below were taken on a run from before accounts and triage existed, so they show the collection, alerting and event-stream panels that are still on the page rather than the newer ones. The numbers are odd and specific because they come from one live machine; yours will differ, and the panels will not.
+The console now has eight parts beyond the overview, described at the end of this section: a sign-in view, a monitored-hosts panel, a detection triage queue with an investigation record, a suppression manager with an audit log, and the four wave-two panels — indexed event search, per-host baselining, lockout and multi-factor authentication, and backups. The screenshots below all come from one run on a single laptop, so the numbers are odd and specific; yours will differ, and the panels will not.
 
 ### The overview
 
@@ -91,6 +91,8 @@ At the bottom, the ingestion panel is where additional sources arrive — a JSON
 
 ### The hosts, triage, suppression and audit panels
 
+![The triage queue with its status filters and paging, above the suppression rules and the activity audit](docs/screenshots/04-triage-and-suppression.png)
+
 **Monitored hosts** lists every enrolled agent with a computed status — `online`, `stale` or `never-reported` — how long ago it was last seen and how many events it has sent. A host that has never reported reads as `never-reported` rather than as a failure, and the status is computed from the last-seen time when the panel is read, so a machine that is switched off stays `online` until the stale window passes.
 
 **Detection triage** is the queue an analyst works. Each row is a stored detection with its status, its assignee and its notes; opening one shows the investigation record, and a note is appended, never edited. A detection moves through `new`, `acknowledged`, `investigating`, `closed` and `false_positive`, and every move is kept in the history.
@@ -101,6 +103,8 @@ At the bottom, the ingestion panel is where additional sources arrive — a JSON
 
 ### The search, baseline, security and backup panels
 
+![Event search with its query grammar and engine report, above the behaviour baselines and the deviation table](docs/screenshots/05-search-and-baseline.png)
+
 **Event search** is the indexed query language described below, a grammar over hosts, severity, channel, rule, user, source address, message and time, with wildcards, quoting and negation. It shows which engine answered the query, and when the fallback ran it says so rather than implying the search was indexed.
 
 **Baselining** lists what is normal for each host and key, and the deviations panel shows the keys whose recent volume sits furthest above their own baseline, with the observed and expected counts, the standard deviation and the sigma distance. A key with too little history is reported as insufficient rather than judged.
@@ -109,7 +113,15 @@ At the bottom, the ingestion panel is where additional sources arrive — a JSON
 
 **Backups** lists the snapshots of the store, with a control to take one now and a control to verify one.
 
+![The security panel with active lockouts, failed sign-ins and MFA enrolment, above the backup list](docs/screenshots/06-security-and-backups.png)
+
 These panels respect the role as the older ones do: a viewer sees the lockout-clear, MFA, rebuild and backup controls hidden, with the reason stated, rather than as buttons the server would refuse.
+
+### Claiming a console
+
+![The first-run card, asking for the first administrator's name and a password](docs/screenshots/07-first-run.png)
+
+A console with no accounts shows this card rather than a sign-in form, because there is nothing yet to sign in with. Filling it in creates the first administrator and signs you in with it; the link below it leaves the console open on loopback, which is the documented lab default. The card is the only time this console will offer to create an account for you — once one exists the endpoint refuses, and further accounts come from an administrator.
 
 ## Detection rules are data, not code
 
