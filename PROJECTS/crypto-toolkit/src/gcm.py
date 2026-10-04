@@ -20,44 +20,15 @@ that verify against nothing.
 from __future__ import annotations
 
 from .aes import AES, xor_bytes
+from .gf128 import block_to_int, gf128_multiply
 
 GCM_BLOCK_SIZE = 16
 GCM_TAG_SIZE = 16
 GCM_NONCE_RECOMMENDED_SIZE = 12
 
-# x**128 + x**7 + x**2 + x + 1, the reduction polynomial, as the low bit of the
-# value is the x**127 coefficient and the wrap-around lands on x**128.
-_REDUCTION = 0xE1000000000000000000000000000000
-
 
 class InvalidTag(ValueError):
     """The tag did not match, so the ciphertext or the AAD was altered."""
-
-
-def _gf_multiply(left: int, right: int) -> int:
-    """Multiply two field elements, as GCM's GHASH defines the operation.
-
-    Both arguments are 128-bit integers whose most significant bit is the
-    coefficient of x**0 in the specification's notation. The loop walks the
-    bits of ``left`` from the top, accumulating ``right`` shifted right by one
-    each time, and applies the reduction polynomial whenever a bit falls off
-    the bottom.
-    """
-
-    product = 0
-    value = right
-    for index in range(128):
-        if (left >> (127 - index)) & 1:
-            product ^= value
-        if value & 1:
-            value = (value >> 1) ^ _REDUCTION
-        else:
-            value >>= 1
-    return product
-
-
-def _to_block(data: bytes) -> int:
-    return int.from_bytes(data, "big")
 
 
 def ghash(h: bytes, aad: bytes, ciphertext: bytes) -> bytes:
@@ -73,16 +44,16 @@ def ghash(h: bytes, aad: bytes, ciphertext: bytes) -> bytes:
 
     if len(h) != GCM_BLOCK_SIZE:
         raise ValueError("GHASH needs a 16-byte hash subkey")
-    key = _to_block(h)
+    key = block_to_int(h)
     accumulator = 0
     for offset in range(0, len(aad), GCM_BLOCK_SIZE):
         block = aad[offset:offset + GCM_BLOCK_SIZE].ljust(GCM_BLOCK_SIZE, b"\x00")
-        accumulator = _gf_multiply(accumulator ^ _to_block(block), key)
+        accumulator = gf128_multiply(accumulator ^ block_to_int(block), key)
     for offset in range(0, len(ciphertext), GCM_BLOCK_SIZE):
         block = ciphertext[offset:offset + GCM_BLOCK_SIZE].ljust(GCM_BLOCK_SIZE, b"\x00")
-        accumulator = _gf_multiply(accumulator ^ _to_block(block), key)
+        accumulator = gf128_multiply(accumulator ^ block_to_int(block), key)
     lengths = (len(aad) * 8) << 64 | (len(ciphertext) * 8)
-    accumulator = _gf_multiply(accumulator ^ lengths, key)
+    accumulator = gf128_multiply(accumulator ^ lengths, key)
     return accumulator.to_bytes(GCM_BLOCK_SIZE, "big")
 
 
@@ -131,14 +102,14 @@ class GCM:
         nonce = bytes(nonce)
         if len(nonce) == GCM_NONCE_RECOMMENDED_SIZE:
             return nonce + b"\x00\x00\x00\x01"
-        key = _to_block(self._h)
+        key = block_to_int(self._h)
         accumulator = 0
         for offset in range(0, len(nonce), GCM_BLOCK_SIZE):
             block = nonce[offset:offset + GCM_BLOCK_SIZE].ljust(GCM_BLOCK_SIZE, b"\x00")
-            accumulator = _gf_multiply(accumulator ^ _to_block(block), key)
+            accumulator = gf128_multiply(accumulator ^ block_to_int(block), key)
         # The final block is 64 zero bits followed by the nonce length in bits,
         # which is the one place GCM's length block is not in the AAD order.
-        accumulator = _gf_multiply(accumulator ^ (len(nonce) * 8), key)
+        accumulator = gf128_multiply(accumulator ^ (len(nonce) * 8), key)
         return accumulator.to_bytes(GCM_BLOCK_SIZE, "big")
 
     def _counter_mode(self, initial_counter_block: bytes, data: bytes) -> bytes:

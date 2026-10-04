@@ -45,9 +45,9 @@ The fingerprint console is the third way into the same traffic, and the only one
 
 | Project | Bring this | What you will practise |
 | --- | --- | --- |
-| [Cryptographic toolkit](PROJECTS/crypto-toolkit) | Nothing at all | Reading a specification closely enough to reproduce its own worked examples, and why a primitive tested against its own output is being asked to mark its own homework. |
+| [Cryptographic toolkit and attack lab](PROJECTS/crypto-toolkit) | Nothing at all | Reading a specification closely enough to reproduce its own worked examples, and why a primitive tested against its own output is being asked to mark its own homework. Then what happens when the same construction is used slightly wrongly, which is the half that makes the rules memorable. |
 
-This is the one project here that is a library rather than a tool, so it is the one that needs no data. It is also the one that is unfinished: the symmetric primitives are complete and checked against the published vectors, and the public-key half, the attacks against deliberately broken constructions, and the post-quantum benchmark are still to be written. The README names each of those gaps.
+This is the one project here that is a library rather than a tool, so it is the one that needs no data. It is also the one that is unfinished: the primitives are complete and checked against the published vectors, four attacks run against those same constructions, and RSA, key exchange and the post-quantum benchmark are still to be written. The README names each of those gaps.
 
 ## Before running anything
 

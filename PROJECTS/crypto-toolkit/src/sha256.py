@@ -131,6 +131,60 @@ def sha256(data: bytes) -> bytes:
     return struct.pack(">8I", *state)
 
 
+def sha256_padding(message_length: int) -> bytes:
+    """The bytes SHA-256 appends to a message of ``message_length`` bytes.
+
+    A single ``0x80`` byte, then enough zero bytes that the message plus this
+    padding is 56 bytes short of a multiple of 64, then the length of the
+    message in bits as a 64-bit big-endian integer. The rule is written out here
+    rather than only inside the digest because the length-extension attack needs
+    to build the same padding for a message it never sees.
+    """
+
+    if message_length < 0:
+        raise ValueError("a message length cannot be negative")
+    filler = (56 - (message_length + 1) % SHA256_BLOCK_SIZE) % SHA256_BLOCK_SIZE
+    return b"\x80" + b"\x00" * filler + struct.pack(">Q", (message_length * 8) & 0xFFFFFFFFFFFFFFFF)
+
+
+def sha256_resume(state: bytes, byte_length: int, data: bytes) -> bytes:
+    """Continue a digest from a known internal state.
+
+    ``state`` is the 32 raw digest bytes of some prefix, and ``byte_length`` is
+    the length of that prefix *including the padding SHA-256 already appended*,
+    so it is always a multiple of the block size. The result is the digest of
+    the prefix, its padding, and ``data``:
+
+        sha256_resume(sha256(prefix), len(prefix) + len(sha256_padding(len(prefix))), suffix)
+            == sha256(prefix + sha256_padding(len(prefix)) + suffix)
+
+    The padding appears in the middle because a digest is the state after the
+    prefix has already been padded, and a raw digest carries no partial block --
+    which is why ``byte_length`` has to be a block boundary. That is exactly the
+    property that makes a MAC built as ``sha256(secret || message)`` forgeable:
+    the digest hands the attacker the state, and a state can be continued.
+    """
+
+    if not isinstance(state, (bytes, bytearray)) or len(state) != SHA256_DIGEST_SIZE:
+        raise ValueError("the state must be 32 bytes")
+    if not isinstance(data, (bytes, bytearray, memoryview)):
+        raise ValueError("the data must be a bytes-like object")
+    if byte_length < 0:
+        raise ValueError("the byte length cannot be negative")
+    if byte_length % SHA256_BLOCK_SIZE:
+        raise ValueError(
+            "a raw digest state only exists on a block boundary, so the byte "
+            "length must be a multiple of %d, got %d" % (SHA256_BLOCK_SIZE, byte_length)
+        )
+    words = list(struct.unpack(">8I", bytes(state)))
+    data = bytes(data)
+    total = byte_length + len(data)
+    tail = data + sha256_padding(total)
+    for offset in range(0, len(tail), SHA256_BLOCK_SIZE):
+        _compress(words, tail[offset:offset + SHA256_BLOCK_SIZE])
+    return struct.pack(">8I", *words)
+
+
 def sha256_hex(data: bytes) -> str:
     """Return the SHA-256 digest of ``data`` as 64 lowercase hex characters."""
     return sha256(data).hex()

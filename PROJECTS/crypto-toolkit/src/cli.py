@@ -11,11 +11,18 @@ process on the machine. The README says so as well.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
+from .attacks.length_extension import forge_mac, naive_mac
+from .attacks.nonce_reuse_ecdsa import recover_private_key
+from .attacks.nonce_reuse_gcm import forge_tag, recover_hash_subkey
+from .attacks.padding_oracle import padding_oracle, recover_plaintext
+from .cbc import CBC, pkcs7_unpad
+from .ecdsa import P256_N, PrivateKey, generate_private_key, sign, verify
 from .gcm import GCM, InvalidTag
 from .hmac import hmac_sha256_hex
-from .sha256 import sha256_hex
+from .sha256 import sha256, sha256_hex
 
 
 def _hex(value: str, what: str) -> bytes:
@@ -131,6 +138,121 @@ def cmd_vectors(args) -> int:
     return 1 if failures else 0
 
 
+# --------------------------------------------------------------------------
+# The attacks. Each one generates its own key, nonce and messages, mounts the
+# attack against the real implementation, and reports whether what came out is
+# what went in. Nothing here is a stored answer: the verification is always a
+# comparison against the genuine implementation on values made up on the spot.
+# --------------------------------------------------------------------------
+
+def _demo_length_extension() -> bool:
+    secret = os.urandom(24)
+    message = b"user=guest&role=guest"
+    appendage = b"&role=admin"
+
+    tag = naive_mac(secret, message)
+    forged_message, forged_mac = forge_mac(tag, len(secret), message, appendage)
+    accepted = naive_mac(secret, forged_message) == forged_mac
+
+    print("the attacker saw one message and its tag, and knows only that the secret is %d bytes"
+          % len(secret))
+    print("  original  %r" % message)
+    print("  forged    %r" % forged_message)
+    print("  the MAC function accepts the forged tag: %s" % accepted)
+    return accepted
+
+
+def _demo_gcm_nonce_reuse() -> bool:
+    key = os.urandom(16)
+    nonce = os.urandom(12)
+    messages = []
+    for index in range(3):
+        ciphertext, tag = GCM(key).encrypt(nonce, os.urandom(16 + 8 * index))
+        messages.append((tag, b"", ciphertext))
+
+    subkey = recover_hash_subkey(messages)
+    subkey_found = subkey == GCM(key).hash_subkey
+
+    known_tag, known_aad, known_ciphertext = messages[0]
+    chosen = b"transfer 999999 to mallory"
+    chosen_ciphertext, chosen_tag = GCM(key).encrypt(nonce, chosen)
+    forged = forge_tag(subkey, known_tag, known_aad, known_ciphertext, b"", chosen_ciphertext)
+    accepted = forged == chosen_tag and GCM(key).decrypt(nonce, chosen_ciphertext, forged) == chosen
+
+    print("three messages were encrypted under one nonce and the attacker has only the ciphertexts")
+    print("  the hash subkey came out equal to the real one: %s" % subkey_found)
+    print("  a tag forged for a message the attacker chose was accepted: %s" % accepted)
+    return subkey_found and accepted
+
+
+def _demo_padding_oracle() -> bool:
+    key = os.urandom(16)
+    iv = os.urandom(16)
+    plaintext = b"the token is 9f3a41c7 and it never expires"
+    ciphertext = CBC(key).encrypt(iv, plaintext)
+
+    queries = []
+
+    def oracle(preceding, block):
+        queries.append(1)
+        return padding_oracle(key)(preceding, block)
+
+    recovered = recover_plaintext(oracle, iv, ciphertext)
+    ok = pkcs7_unpad(recovered) == plaintext
+
+    print("the attacker can ask only whether a ciphertext has valid padding, and gets yes or no")
+    print("  the message: %r" % plaintext)
+    print("  recovered  : %r" % pkcs7_unpad(recovered))
+    print("  after %d yes-or-no questions" % len(queries))
+    return ok
+
+
+def _demo_ecdsa_nonce_reuse() -> bool:
+    key = generate_private_key(os.urandom(32))
+    nonce = int.from_bytes(os.urandom(32), "big") % (P256_N - 1) + 1
+    digest1 = sha256(b"pay alice ten pounds")
+    digest2 = sha256(b"pay alice a hundred pounds")
+    signature1 = sign(key, digest1, nonce)
+    signature2 = sign(key, digest2, nonce)
+
+    recovered = recover_private_key(digest1, signature1, digest2, signature2)
+    key_found = recovered == key.secret
+
+    fresh = sha256(b"pay mallory everything")
+    forged = sign(PrivateKey(recovered), fresh, int.from_bytes(os.urandom(32), "big") % (P256_N - 1) + 1)
+    accepted = verify(key.public_key, fresh, forged)
+
+    print("two signatures were published, and they share an r because the signer reused a nonce")
+    print("  the private key was recovered and equals the real one: %s" % key_found)
+    print("  a signature made with it verifies under the real public key: %s" % accepted)
+    return key_found and accepted
+
+
+DEMOS = {
+    "length-extension": _demo_length_extension,
+    "gcm-nonce-reuse": _demo_gcm_nonce_reuse,
+    "padding-oracle": _demo_padding_oracle,
+    "ecdsa-nonce-reuse": _demo_ecdsa_nonce_reuse,
+}
+
+
+def cmd_attack(args) -> int:
+    """Run one attack, or all of them, against freshly generated values."""
+
+    names = list(DEMOS) if args.which == "all" else [args.which]
+    failures = 0
+    for name in names:
+        print("=" * 68)
+        print(name)
+        print("=" * 68)
+        worked = DEMOS[name]()
+        failures += 0 if worked else 1
+        print("  --> %s" % ("the attack worked" if worked else "THE ATTACK FAILED"))
+        print()
+    print("%d of %d attacks worked" % (len(names) - failures, len(names)))
+    return 1 if failures else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="crypto-toolkit",
@@ -163,6 +285,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     vectors = sub.add_parser("vectors", help="re-check the published GCM vectors")
     vectors.set_defaults(func=cmd_vectors)
+
+    attack = sub.add_parser("attack", help="mount one of the attacks against fresh values")
+    attack.add_argument("which", choices=sorted(DEMOS) + ["all"],
+                        help="which attack to run, or all of them")
+    attack.set_defaults(func=cmd_attack)
 
     return parser
 
