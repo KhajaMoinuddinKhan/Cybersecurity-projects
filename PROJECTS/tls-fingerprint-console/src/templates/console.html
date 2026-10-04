@@ -169,7 +169,7 @@
     </nav>
     <div class="rail-foot">
       <div class="kv"><span>build</span><span>0.1.0</span></div>
-      <div class="kv"><span>transport</span><span>offline</span></div>
+      <div class="kv"><span>capture</span><span id="captureFoot">checking</span></div>
     </div>
   </aside>
 
@@ -270,12 +270,21 @@
       <section id="view-scope" class="view">
         <div class="err" id="err-scope"></div>
         <div class="panel">
+          <h2>Capture state</h2>
+          <div class="err" id="err-capture"></div>
+          <dl class="scope-kv" id="captureKv"></dl>
+          <div class="notice" id="captureNote" style="margin-top:14px">
+            Reading capture state&hellip; live capture uses Npcap; when the driver
+            is absent, the file and ingest paths still work.
+          </div>
+        </div>
+        <div class="panel">
           <h2>Capture scope</h2>
           <dl class="scope-kv" id="scopeKv"></dl>
           <div class="notice" style="margin-top:14px">
-            This console is passive and offline by default: it consumes a capture file
-            or explicitly ingested events, never a live interface, and it never
-            transmits traffic.
+            This console is passive by default: it consumes a capture file or
+            explicitly ingested events, and only reads a live interface when a
+            capture driver is present. It never transmits traffic.
           </div>
         </div>
       </section>
@@ -343,7 +352,7 @@
     if (target) target.classList.add("active");
     if (view === "fingerprints") loadFingerprints();
     if (view === "intel") loadIntel();
-    if (view === "scope") loadScope();
+    if (view === "scope"){ loadScope(); loadCapture(); }
   });
 
   /* ---------------- health + stats ---------------- */
@@ -575,6 +584,55 @@
     });
   }
 
+  /* ---------------- capture ---------------- */
+  function setCaptureFoot(text){
+    var el = $("captureFoot");
+    if (el) el.textContent = text;
+  }
+
+  function renderCaptureState(d){
+    var modeLabel = (d.mode === "live") ? "live capture available" : "file / ingest only";
+    var iface = d.selected;
+    var ifaceText;
+    if (iface) {
+      ifaceText = (iface.description || iface.name || "") +
+                  (iface.name ? "  (" + iface.name + ")" : "");
+    } else if (d.driver_available) {
+      ifaceText = "\u2014 (none selected)";
+    } else {
+      ifaceText = "\u2014 (no driver)";
+    }
+    var rows = [
+      ["mode", modeLabel],
+      ["selected interface", ifaceText],
+      ["default BPF filter", d.default_filter || "\u2014 (none)"]
+    ];
+    var kv = $("captureKv");
+    if (kv) {
+      kv.innerHTML = rows.map(function(r){
+        return "<dt>" + esc(r[0]) + "</dt><dd>" + esc(r[1]) + "</dd>";
+      }).join("");
+    }
+    var note = d.driver_note || d.note || "";
+    if (!d.driver_available) {
+      note = (note ? note + " " : "") +
+        "File capture and event ingest still work without the driver.";
+    }
+    var n = $("captureNote");
+    if (n) n.textContent = note;
+    setCaptureFoot(d.mode === "live" ? "live" : "file only");
+  }
+
+  function loadCapture(){
+    return getJSON("/api/capture").then(function(d){
+      clearErr("capture");
+      renderCaptureState(d);
+    }).catch(function(err){
+      showErr("capture", "capture state unavailable: " + err.message);
+      setCaptureFoot("unknown");
+    });
+  }
+
   /* ---------------- export ---------------- */
   function doExport(fmt){
     var url = "/api/export?format=" + encodeURIComponent(fmt);
@@ -653,6 +711,7 @@
     loadFingerprints();
     buildKindChips();
     loadScope();
+    loadCapture();
   }
   boot();
 
@@ -660,6 +719,7 @@
   setInterval(loadStats, POLL);
   setInterval(loadAlerts, POLL);
   setInterval(loadFingerprints, POLL);
+  setInterval(loadCapture, POLL);
 })();
 </script>
 </body>

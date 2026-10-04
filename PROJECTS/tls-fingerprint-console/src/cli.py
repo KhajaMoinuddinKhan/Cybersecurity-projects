@@ -1,18 +1,31 @@
 """Command line entry point.
 
+    python -m src.cli interfaces                      list capturable interfaces
     python -m src.cli analyse <capture.pcap> [--db console.db]
-    python -m src.cli serve   [--db console.db] [--port 5001]
     python -m src.cli demo    [--db console.db]
+    python -m src.cli watch   [--interface N] [--filter EXPR] [--db console.db]
+    python -m src.cli serve   [--db console.db] [--port 5001]
 """
 from __future__ import annotations
 
 import argparse
 import os
 import sys
+import time
 
 
 def _default_db():
     return os.path.join(os.getcwd(), "tls_console.db")
+
+
+def _clock(ts):
+    """A short local time for a packet timestamp, falling back to the raw value."""
+    if not isinstance(ts, (int, float)):
+        return "--:--:--"
+    try:
+        return time.strftime("%H:%M:%S", time.localtime(ts))
+    except Exception:
+        return str(ts)
 
 
 def _corpus():
@@ -47,6 +60,100 @@ def cmd_serve(args):
     return 0
 
 
+def cmd_interfaces(args):
+    """List what this machine can capture from, and say whether capture is possible at all."""
+    from . import capture
+    print("capture driver :", "available" if capture.available() else "NOT FOUND")
+    if not capture.available():
+        print("  Install Npcap (https://npcap.com/) to capture live traffic; the file and")
+        print("  ingest paths work without it.")
+        return 1
+    print("default filter :", capture.DEFAULT_FILTER)
+    print()
+    print("%-5s %-58s %s" % ("IDX", "DESCRIPTION", "DEVICE"))
+    for i in capture.list_interfaces():
+        print("%-5d %-58s %s" % (i["index"], i["description"][:58], i["name"]))
+    print()
+    try:
+        chosen = capture.pick_interface(None)
+        print("would pick by default: [%d] %s" % (chosen["index"], chosen["description"]))
+    except Exception as exc:
+        print("no default interface:", exc)
+    return 0
+
+
+def cmd_watch(args):
+    """Capture live, fingerprint each handshake as it arrives, and report as it goes."""
+    from . import capture
+    from .live import LiveSensor
+    from .store import Store
+
+    if not capture.available():
+        print("No capture driver found. Install Npcap (https://npcap.com/) and re-run.")
+        print("Live capture also normally needs an elevated shell.")
+        return 1
+
+    try:
+        iface = capture.pick_interface(args.interface)
+    except capture.CaptureUnavailable as exc:
+        print("interface error:", exc)
+        return 1
+    print("interface : [%d] %s" % (iface["index"], iface["description"]))
+    print("filter    : %s" % (args.filter or capture.DEFAULT_FILTER))
+    print("db        : %s" % args.db)
+    print("stop with Ctrl-C%s" % ("" if not args.duration else " (or after %gs)" % args.duration))
+    print()
+
+    store = Store(args.db)
+    corpus = _corpus()
+
+    def show_event(event):
+        fp = event.get("fingerprints") or {}
+        print("%s  %s:%s -> %s:%s  %s" % (
+            _clock(event.get("ts")),
+            event.get("src_ip"), event.get("src_port"),
+            event.get("dst_ip"), event.get("dst_port"),
+            event.get("sni") or "(no SNI)"))
+        for kind in sorted(fp):
+            print("        %-6s %s" % (kind, fp[kind]))
+        if event.get("intel_name"):
+            print("        intel  %s (%s)" % (event["intel_name"], event.get("category")))
+
+    def show_alert(alert):
+        print("    ! [%-8s] %-14s %s" % (alert.get("severity"), alert.get("rule"),
+                                         alert.get("title")))
+
+    sensor = LiveSensor(store, corpus, on_event=show_event, on_alert=show_alert)
+    started = time.time()
+    try:
+        with capture.LiveCapture(iface["name"], bpf=args.filter or capture.DEFAULT_FILTER) as cap:
+            last_tick = 0.0
+            for packet in cap.packets():
+                sensor.feed(packet)
+                now = time.time()
+                if now - last_tick >= 0.5:
+                    sensor.tick()
+                    last_tick = now
+                if args.duration and (now - started) >= args.duration:
+                    break
+    except KeyboardInterrupt:
+        print("\nstopping...")
+    except capture.CaptureUnavailable as exc:
+        print("capture error:", exc)
+        store.close()
+        return 1
+
+    for item in sensor.flush():
+        if "fingerprints" in item:
+            show_event(item)
+    stats = sensor.stats()
+    print()
+    print("packets %d | flows %d | events %d | alerts %d | in flight %d"
+          % (stats["packets"], stats["flows"], stats["events"], stats["alerts"], stats["in_flight"]))
+    store.close()
+    return 0
+
+
 def cmd_demo(args):
     """Analyse the built-in synthetic capture so the console has something to show."""
     import tempfile
@@ -70,14 +177,22 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="tls-fingerprint-console")
     sub = p.add_subparsers(dest="cmd", required=True)
     for name, fn, helptext in (
+        ("interfaces", cmd_interfaces, "list capturable interfaces"),
         ("analyse", cmd_analyse, "fingerprint a capture file"),
-        ("serve", cmd_serve, "run the console"),
         ("demo", cmd_demo, "fingerprint a built-in synthetic capture"),
+        ("watch", cmd_watch, "capture live and fingerprint handshakes as they arrive"),
+        ("serve", cmd_serve, "run the console"),
     ):
         sp = sub.add_parser(name, help=helptext)
         sp.add_argument("--db", default=_default_db())
         if name == "analyse":
             sp.add_argument("capture")
+        if name == "watch":
+            sp.add_argument("--interface", default=None,
+                            help="interface index or part of its description")
+            sp.add_argument("--filter", default=None, help="a BPF filter expression")
+            sp.add_argument("--duration", type=float, default=None,
+                            help="stop after this many seconds")
         if name == "serve":
             sp.add_argument("--port", type=int, default=5001)
         sp.set_defaults(func=fn)

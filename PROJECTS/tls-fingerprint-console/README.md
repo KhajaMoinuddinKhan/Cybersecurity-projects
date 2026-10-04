@@ -2,7 +2,7 @@
 
 A TLS handshake is readable even though the session it opens is not. The ClientHello announces, in a fixed order, the protocol versions the client supports, its cipher suites, its extensions, its elliptic curves and its signature algorithms; the ServerHello answers with the version and cipher it chose and the extensions it will use. Those lists describe the TLS software itself, and two clients built on the same stack offer them in the same order. Reduce the lists to a short hash and you have a fingerprint: a name for the software that does not depend on the address it dialled, the certificate it was shown, or anything it did afterwards.
 
-This console computes those fingerprints. It reads a packet capture, parses the TLS handshakes inside it, derives the JA3 and JA4+ fingerprints for each flow, matches them against a bundled threat-intelligence corpus, runs six detection rules over the result, and serves a console that shows what it found. It reads a capture file, or it accepts events posted to its API. It never opens a live interface and it never decrypts a byte.
+This console computes those fingerprints. It reads a packet capture, parses the TLS handshakes inside it, derives the JA3 and JA4+ fingerprints for each flow, matches them against a bundled threat-intelligence corpus, runs six detection rules over the result, and serves a console that shows what it found. It reads a capture file, it can watch a live interface, or it accepts events posted to its API. It never decrypts a byte.
 
 ## Why fingerprints are worth computing
 
@@ -12,13 +12,15 @@ A fingerprint is also a description rather than a verdict. A JA4 value is not in
 
 ## Running it
 
-The project needs Flask and pytest; everything else — the capture reader, the TLS parsers and the fingerprints — is the standard library.
+The project needs Flask and pytest; everything else — the capture reader, the live-capture binding, the TLS parsers and the fingerprints — is the standard library. Live capture additionally needs Npcap installed on the machine, which is a driver rather than a Python package.
 
 ```console
 python -m pip install -r requirements.txt
 
+python -m src.cli interfaces
 python -m src.cli analyse capture.pcap
 python -m src.cli demo
+python -m src.cli watch
 python -m src.cli serve
 ```
 
@@ -30,9 +32,39 @@ python -m src.cli serve
 
 A useful first run is `demo` followed by `serve`: the demo fills the store, and the console then has events, fingerprints and alerts to display rather than six empty views.
 
+## Live capture
+
+The console can fingerprint handshakes as they happen on an interface, not only from a capture file. Two commands drive it, and the module behind them binds the capture driver directly, so live capture adds no Python dependency.
+
+`interfaces` lists what this machine can capture from and says whether a capture driver is present at all:
+
+```console
+python -m src.cli interfaces
+```
+
+It reports whether a driver was found, the default filter, and one row per interface with an index, a human description and the device name, and it prints which interface it would choose by default. That default skips the pseudo-adapters Npcap lists — WAN Miniport, Wi-Fi Direct, virtual, Bluetooth and Teredo — because they carry no traffic, and prefers a real adapter.
+
+`watch` captures live, fingerprints each handshake as the bytes arrive, and prints each event and alert as it happens:
+
+```console
+python -m src.cli watch
+python -m src.cli watch --interface 3
+python -m src.cli watch --interface "Wi-Fi" --filter "tcp port 443" --duration 30
+```
+
+`--interface` takes an index from the `interfaces` listing or a substring of an interface's description or device name. `--filter` replaces the default BPF expression, and `--duration` stops the run after that many seconds; without it, `watch` runs until you stop it. The default filter watches the ports a TLS handshake normally appears on — 443, 8443, 993, 995, 465, 587, 636, 853, 8883 and 9443 — so the console follows handshakes rather than every packet on the wire. As each event is released, `watch` prints the time, the client and server endpoints, the server name, one line for every fingerprint it computed, and the intel name when a fingerprint matches the corpus, with each alert printed beneath it.
+
+Live capture needs two things the file and ingest paths do not. A capture driver must be installed: the module looks for Npcap's `wpcap.dll`, the driver Wireshark installs on Windows, and it says so plainly when the driver is absent instead of failing with an import error somewhere else. And opening an interface is a privileged operation, so `watch` normally needs an elevated shell. Neither is required for `analyse`, `demo`, `serve` or the ingest API.
+
+The reason to watch live is that a fingerprint names a client rather than a destination. A short run against a real Wi-Fi adapter captured 1061 packets in 22 seconds and produced 51 flows, 19 fingerprinted events and 26 alerts, and the clearest thing it showed was one JA3 value — `a1ebe7f90a577e9399eaa60be3c67721` — appearing across eight different destinations: example.com, www.python.org, api.github.com, www.cloudflare.com, www.wikipedia.org, www.mozilla.org, duckduckgo.com and www.reddit.com. The same client library made all eight connections, and its TLS stack is the same wherever it dialled, so one fingerprint named all eight. The events from that run carried JA3, JA3S, JA4, JA4S and JA4T, and one flow carried a JA4X as well, read from its certificate. That is what client fingerprinting is for, and it is the thing to look for in your own runs.
+
+How the live path works is worth one paragraph, because it cannot do what the file path does. A live packet arrives on its own and a ClientHello can be split across several TCP segments, so the console cannot wait for a whole capture to reassemble. Instead a sensor (`src/live.py`) keeps a table of in-flight flows and fingerprints each one as soon as enough bytes have arrived to try. It runs on the packet clock rather than the wall clock, so a replayed capture behaves like the live one it records. It emits a flow once the flow goes quiet — the server has answered and the flow has been idle for a short grace period, or a hard cap has passed — which is what lets the ServerHello and the Certificate both arrive before the event is released, so the server-side fingerprints are usually present. Every captured frame is decoded through the same decoder the capture-file reader uses, so a live packet and a recorded packet become identical packet dicts and the rest of the pipeline cannot tell them apart.
+
+Because `watch` writes to a SQLite store and `serve` reads from one, the two can share the same `--db` and run at the same time: start the console, then start a capture against the same store, and events appear on the page as the store is written. The store opens in WAL mode, so a running capture does not block the console's reads.
+
 ## How a handshake becomes a fingerprint
 
-The path from bytes to console is short enough to follow end to end, and every stage is reproducible because nothing here touches a network.
+The path from bytes to console is short enough to follow end to end. The file path is fully reproducible because it touches no network; the live path runs the same stages over packets as they arrive.
 
 The capture reader (`src/pcap.py`) decodes classic pcap and pcapng into packet dicts, walking Ethernet II and raw-IP frames down through IPv4 or IPv6 and into TCP or UDP. It bounds-checks every low-level read, so a truncated or malformed capture raises a readable `ValueError` rather than a raw `struct.error`. The reassembler groups TCP payloads by direction — source address and port to destination address and port — orders each group by sequence number and concatenates it, dropping pure acknowledgements, so each direction becomes one contiguous byte stream.
 
@@ -82,7 +114,7 @@ The rules (`src/rules.py`) read each event and the context around it and decide 
 These sit here, beside the description of what the console does, because they bound it and are as much a part of reading its output as the fingerprints are.
 
 - **Nothing is decrypted.** Only the handshake is fingerprinted, because only the handshake is sent in the clear. JA4H therefore appears only for plaintext HTTP flows; a JA4H built from a TLS connection would be a fingerprint of ciphertext, and the console does not pretend otherwise.
-- **Capture is offline.** The console reads a pcap or accepts events posted to its API. There is no live interface capture, so it can only see traffic that was recorded somewhere else and handed to it.
+- **Live capture needs a driver and, normally, an elevated shell.** The console can watch a live interface, but on Windows that requires Npcap, the capture driver Wireshark installs, and opening an interface is a privileged operation, so `watch` normally runs from an elevated shell. The file and ingest paths need neither, and a machine without a capture driver still gets the whole offline console.
 - **The capture reader covers Ethernet and raw-IP link types.** pcap and pcapng are both supported, IPv4 and IPv6 are both decoded, and VLAN tags are followed, but other link-layer types are not, and a capture using one will be reported as such rather than guessed at.
 - **The intel corpus is a snapshot.** It holds two public feeds plus a few curated entries, it is not updated automatically, and it will age. A fingerprint that is malicious and absent from the snapshot will not match, and freshness is the operator's responsibility, not the console's.
 - **os_mismatch cannot separate macOS from Linux.** A JA3 identifies a TLS stack, and the two systems often share one. The rule treats the whole Unix family as consistent and fires only on a genuine contradiction between families.
@@ -101,7 +133,7 @@ The console is one self-contained HTML file (`src/templates/console.html`) with 
 
 **Intel** is the reference set, made searchable. A text box matches against the value or the name, and a row of chips filters by fingerprint kind; the chips are built from the corpus itself, so they reflect what is loaded rather than a fixed list. The table shows the value, the name, the category, the source and the licence for every matching record, which is what lets a known_bad alert be traced back to the feed it came from. A note line reports how many records matched and whether the result was capped.
 
-**Scope** states plainly what the console is looking at. It prints the capture mode, the interface and the capture file — all empty in the default configuration — and a note that says the console is passive and offline, consumes a capture file or explicitly ingested events rather than a live interface, and never transmits traffic. It is the view that keeps the tool's boundaries in front of the operator.
+**Scope** states plainly what the console is looking at. It prints the capture mode, the interface and the capture file — all empty in the default configuration — and the app's scope note, which in the default configuration describes the file-and-ingest path: the console reads a capture file or events posted to its API, and it never transmits traffic. Live capture runs from the `watch` command rather than through this view, and `watch` prints the interface and the filter it is using on the command line. It is the view that keeps the tool's boundaries in front of the operator.
 
 **Export** writes the current events and alerts out as a single file, in JSON for a complete record or CSV for a spreadsheet, as a download. The view notes that an export reflects the store at the moment of the click.
 

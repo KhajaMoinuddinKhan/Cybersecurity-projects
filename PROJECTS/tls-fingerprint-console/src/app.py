@@ -25,9 +25,11 @@ DEFAULT_SCOPE = {
     "interface": None,
     "capture_file": None,
     "note": (
-        "Offline / passive capture only. This console reads an existing capture "
-        "file or ingested events; it never opens a live interface and never "
-        "transmits traffic."
+        "Passive. This console reads an existing capture file or events posted "
+        "to its API, and it never transmits traffic. Live capture is available "
+        "from the command line with 'python -m src.cli watch', which needs a "
+        "capture driver and normally an elevated shell; see GET /api/capture "
+        "for whether this machine can do it."
     ),
 }
 
@@ -138,6 +140,26 @@ def os_by_ja3(corpus):
     except Exception:
         return mapping
     return mapping
+
+
+def _capture_unavailable():
+    """The documented /api/capture shape when no capture driver is present."""
+    return {
+        "driver_available": False,
+        "driver_note": (
+            "Npcap is not installed, so live capture is unavailable; install "
+            "Npcap (the driver Wireshark ships) to enable it."
+        ),
+        "interface_count": 0,
+        "interfaces": [],
+        "selected": None,
+        "default_filter": "",
+        "mode": "file",
+        "note": (
+            "File and ingest modes are active: the console reads an existing "
+            "capture file or explicitly ingested events."
+        ),
+    }
 
 
 def create_app(store, corpus, rules_module=None):
@@ -280,6 +302,68 @@ def create_app(store, corpus, rules_module=None):
                 "interface": merged.get("interface"),
                 "capture_file": merged.get("capture_file"),
                 "note": merged.get("note"),
+            }
+        )
+
+    # -------------------------------------------------------------- capture
+    @app.get("/api/capture")
+    def capture_state():
+        """Report the live-capture state without ever failing.
+
+        ``src.capture`` is imported lazily and every driver call is guarded, so
+        this endpoint answers 200 with ``driver_available: false`` on a machine
+        with no Npcap (Linux/CI) instead of raising a 500.
+        """
+        try:
+            from . import capture as _capture
+        except Exception:
+            _capture = None
+
+        if _capture is None:
+            return jsonify(_capture_unavailable())
+
+        try:
+            driver_available = bool(_capture.available())
+        except Exception:
+            driver_available = False
+
+        if not driver_available:
+            return jsonify(_capture_unavailable())
+
+        interfaces = []
+        try:
+            interfaces = list(_capture.list_interfaces() or [])
+        except Exception:
+            interfaces = []
+
+        selected = None
+        try:
+            selected = _capture.pick_interface(interfaces=interfaces)
+        except Exception:
+            selected = None
+
+        default_filter = ""
+        try:
+            default_filter = getattr(_capture, "DEFAULT_FILTER", "") or ""
+        except Exception:
+            default_filter = ""
+
+        return jsonify(
+            {
+                "driver_available": True,
+                "driver_note": (
+                    "Npcap is present, so live capture is available from a "
+                    "network interface."
+                ),
+                "interface_count": len(interfaces),
+                "interfaces": interfaces,
+                "selected": selected,
+                "default_filter": default_filter,
+                "mode": "live",
+                "note": (
+                    "Live capture is available: the console can read packets "
+                    "straight from a network interface."
+                ),
             }
         )
 

@@ -376,3 +376,90 @@ def test_index_is_self_contained(client):
     assert "https://" not in html
     assert "<script src" not in html
     assert "<link" not in html
+
+
+# ------------------------------------------------------ capture state (/api/capture)
+CAPTURE_KEYS = {
+    "driver_available",
+    "driver_note",
+    "interface_count",
+    "interfaces",
+    "selected",
+    "default_filter",
+    "mode",
+    "note",
+}
+
+
+def test_capture_endpoint_returns_documented_shape(client):
+    resp = client.get("/api/capture")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert CAPTURE_KEYS <= set(data)
+    assert isinstance(data["driver_available"], bool)
+    assert isinstance(data["driver_note"], str) and data["driver_note"]
+    assert isinstance(data["interface_count"], int)
+    assert isinstance(data["interfaces"], list)
+    assert data["selected"] is None or isinstance(data["selected"], dict)
+    assert isinstance(data["default_filter"], str)
+    assert data["mode"] in ("live", "file")
+    assert isinstance(data["note"], str) and data["note"]
+
+
+def test_capture_endpoint_degrades_when_driver_absent(client, monkeypatch):
+    import src.capture as capture
+
+    monkeypatch.setattr(capture, "available", lambda: False)
+
+    resp = client.get("/api/capture")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["driver_available"] is False
+    assert data["mode"] == "file"
+    assert data["interface_count"] == 0
+    assert data["interfaces"] == []
+    assert data["selected"] is None
+    assert data["default_filter"] == ""
+    assert "npcap" in data["driver_note"].lower()
+    assert "file" in data["note"].lower()
+
+
+def test_capture_endpoint_survives_missing_module(client, monkeypatch):
+    # Force the lazy import to fail as if src.capture did not exist at all:
+    # the handler must degrade to the unavailable shape, never 500.
+    import builtins
+    import sys
+    import src
+
+    real_import = builtins.__import__
+    monkeypatch.delitem(sys.modules, "src.capture", raising=False)
+    monkeypatch.delattr(src, "capture", raising=False)
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if "capture" in str(name) or (fromlist and "capture" in fromlist):
+            raise ImportError("simulated: src.capture is missing")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    resp = client.get("/api/capture")
+    assert resp.status_code == 200
+    assert resp.get_json()["driver_available"] is False
+
+
+def test_index_scope_panel_mentions_capture_state_and_all_nav_labels(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    low = html.lower()
+    assert "capture state" in low, "scope panel must mention capture state"
+    assert "npcap" in low, "scope panel must name Npcap when the driver is absent"
+    for label in ["Overview", "Alerts", "Fingerprints", "Intel", "Scope", "Export"]:
+        assert label in html, "missing nav label: " + label
+
+
+def test_index_no_longer_claims_transport_offline(client):
+    html = client.get("/").get_data(as_text=True)
+    assert "transport offline" not in html
+    # the footer is now driven by /api/capture
+    assert "captureFoot" in html

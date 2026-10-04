@@ -12,4 +12,6 @@ The counts and flags in JA4's readable part are choices, not decoration. The ver
 
 A corpus is a lookup table of fingerprints with a category and a provenance. It does not decide anything by itself; it answers whether a given value has been named, and by whom, under what licence. The rules are what turn that answer into a decision, and every rule in this project is written to return nothing rather than a guess when it cannot establish its premise. An unknown fingerprint is not treated as benign, and it is not treated as suspicious either — it is treated as unknown, which is the only honest reading of a value no one has classified.
 
+Live capture makes that claim observable rather than theoretical. Watching a real interface for a short while shows a client library reaching one destination after another, and every one of those connections carries the same JA3 and JA4, because the fingerprint describes the stack that made the connection and not the name it connected to. One client, many destinations, one fingerprint is the whole idea in a single run, and the console's live path exists to put that in front of you as it happens; the concept it demonstrates is the one this note has been describing throughout.
+
 [Back to the project guide](../README.md)

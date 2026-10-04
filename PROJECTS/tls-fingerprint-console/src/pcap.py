@@ -214,6 +214,16 @@ def _idb_tsresol(body, endian, default):
 # link / network / transport decoding
 # ---------------------------------------------------------------------------
 
+def decode_frame(raw, linktype, ts):
+    """Decode one link-layer frame into a packet dict.
+
+    Public wrapper over the same path the file reader uses, so a frame captured
+    live and a frame read from a capture file are decoded by identical code.
+    Returns None for a frame that carries no IPv4/IPv6 packet.
+    """
+    return _decode_link(raw, linktype, ts)
+
+
 def _decode_link(raw, linktype, ts):
     if linktype == LINKTYPE_ETHERNET:
         return _parse_ethernet(raw, ts)
