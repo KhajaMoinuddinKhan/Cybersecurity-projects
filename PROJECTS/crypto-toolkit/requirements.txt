@@ -1,0 +1,4 @@
+# The toolkit itself imports nothing outside the Python standard library.
+# This file exists only so CI can install the reference implementation that the
+# differential tests compare against. Nothing under src/ may import it.
+cryptography>=42

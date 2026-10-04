@@ -41,6 +41,14 @@ The two traffic tools answer the same question in different ways. The summary to
 
 The fingerprint console is the third way into the same traffic, and the only one that reads the encrypted handshake rather than the plaintext around it. It never decrypts the session: what it fingerprints is the negotiation itself, which is sent in the clear before any key exists. QUIC is the one exception worth naming — an HTTP/3 handshake arrives inside an encrypted Initial packet, but that packet's keys come from a public salt and the connection ID, so the console can read it too and fingerprint HTTP/3 alongside TLS. It is also the only project here whose findings depend on someone else's data, so it names the source and licence of every intel record it matches against. It reads a capture file or watches a live interface, and either way the same fingerprints come out, because both paths share one decoder and one set of fingerprint functions.
 
+## You have nothing to hand it
+
+| Project | Bring this | What you will practise |
+| --- | --- | --- |
+| [Cryptographic toolkit](PROJECTS/crypto-toolkit) | Nothing at all | Reading a specification closely enough to reproduce its own worked examples, and why a primitive tested against its own output is being asked to mark its own homework. |
+
+This is the one project here that is a library rather than a tool, so it is the one that needs no data. It is also the one that is unfinished: the symmetric primitives are complete and checked against the published vectors, and the public-key half, the attacks against deliberately broken constructions, and the post-quantum benchmark are still to be written. The README names each of those gaps.
+
 ## Before running anything
 
 Follow the project's own README from inside its folder. Keep your fixtures separate from anything you are collecting for real, and keep a copy of the inputs you need to compare later. [TESTING.md](TESTING.md) explains the automated checks and where their authority stops; the [root README](README.md) covers the layout.
