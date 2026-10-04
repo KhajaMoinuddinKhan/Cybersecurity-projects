@@ -48,6 +48,15 @@ SYSMON_CHANNEL = "Microsoft-Windows-Sysmon/Operational"
 # too long and a recycled id could hide a real event from an unrelated process.
 OWN_PID_MEMORY = 400
 
+# How long one PowerShell query is allowed to take before it is treated as a
+# hang. Querying the event log means starting a PowerShell process and running
+# Get-WinEvent, and on a loaded machine that can take far longer than it does on
+# a quiet one -- a shared CI runner was seen to exceed eighteen seconds for a
+# single System-channel read. This is a bound against an indefinite hang, not a
+# performance target, so it is deliberately generous; a real query that takes a
+# minute is slow, and a query that never returns is what this is for.
+POWERSHELL_TIMEOUT_SECONDS = 60
+
 # Sysmon describes the process in the event body rather than in the record
 # header, and the header's process id is Sysmon's own. So the check for "did we
 # cause this" has to look at the structured fields: the process that was
@@ -380,11 +389,13 @@ class WindowsEventCollector:
         self._remember_pid(process.pid)
 
         try:
-            stdout, stderr = process.communicate(timeout=18)
+            stdout, stderr = process.communicate(timeout=POWERSHELL_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
             process.kill()
             process.communicate()
-            raise RuntimeError("PowerShell command timed out")
+            raise RuntimeError(
+                "PowerShell command timed out after %d seconds" % POWERSHELL_TIMEOUT_SECONDS
+            )
 
         if process.returncode != 0:
             error = (stderr or "").strip() or (stdout or "").strip() or "PowerShell command failed"
