@@ -107,12 +107,12 @@
     margin:12px 0 14px;
   }
   .masthead .thesis{max-width:64ch;color:var(--bone);font-size:14px;margin:0 0 24px}
-  .metrics{display:flex;align-items:flex-end;gap:32px;flex-wrap:wrap}
-  .metric{display:flex;flex-direction:column;line-height:1.1}
-  .metric .n{font-family:var(--display);font-size:30px;color:var(--ink);letter-spacing:.02em}
+  .metrics{display:flex;align-items:baseline;gap:34px;flex-wrap:wrap}
+  .metric{display:flex;align-items:baseline;gap:8px;line-height:1}
+  .metric .n{font-family:var(--display);font-size:26px;color:var(--ink);letter-spacing:.02em}
   .metric .l{
     font-family:var(--mono);font-size:9px;letter-spacing:.2em;
-    text-transform:uppercase;color:var(--muted);margin-top:5px;
+    text-transform:uppercase;color:var(--muted);
   }
   .metric.hot .n{color:var(--teal)}
   .metrics .spacer{flex:1}
@@ -120,6 +120,20 @@
 
   /* ---- body + views ---- */
   .body{padding:22px 0 52px;min-width:0}
+
+  /* The deck: the live feed takes the top-left and keeps it, with the reading
+     panels down the right. Narrow windows collapse to one column. */
+  .deck{display:grid;grid-template-columns:minmax(0,1.95fr) minmax(0,1fr);gap:16px;align-items:start}
+  .deck > .col{min-width:0;display:flex;flex-direction:column}
+  @media (max-width:1120px){ .deck{grid-template-columns:1fr} }
+  .deck .feed{max-height:62vh}
+
+  .recent{display:flex;flex-direction:column}
+  .rrow{padding:9px 0;border-bottom:1px solid var(--line-soft);font-family:var(--mono);font-size:11px}
+  .rrow:last-child{border-bottom:0}
+  .rrow .rt{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+  .rrow .rr{color:var(--ink)}
+  .rrow .rd{color:var(--muted);margin-top:4px;word-break:break-word}
   .view{display:none}
   .view.active{display:block;animation:fade .18s ease}
   @keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
@@ -133,7 +147,7 @@
     letter-spacing:.24em;text-transform:uppercase;color:var(--muted);
     display:flex;align-items:center;gap:10px;
   }
-  .panel h2::before{content:"";width:14px;height:1px;background:var(--teal)}
+  .panel h2::before{content:"// ";color:var(--teal)}
   .grid-4{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px}
   .tile{background:var(--panel-2);border:1px solid var(--line);padding:14px 15px}
   .tile .n{font-family:var(--display);font-size:32px;color:var(--ink);line-height:1}
@@ -219,14 +233,15 @@
   }
   .feed{max-height:58vh;overflow-y:auto;border-top:1px solid var(--line);margin-top:14px}
   .frow{
-    display:grid;grid-template-columns:70px 58px 1fr;gap:14px;padding:9px 2px;
+    display:grid;grid-template-columns:66px 46px 1fr;gap:13px;padding:9px 2px;
     border-bottom:1px solid var(--line-soft);font-size:12px;align-items:start;
   }
   .frow.is-alert{background:#120604}
   .frow .t{font-family:var(--mono);color:var(--muted);font-size:10px}
   .frow .k{
     font-family:var(--mono);font-size:9px;letter-spacing:.16em;
-    text-transform:uppercase;color:var(--muted);
+    text-transform:uppercase;color:var(--muted);border:1px solid var(--line);
+    padding:1px 4px;text-align:center;
   }
   .frow .k.event{color:var(--teal)}
   .frow .k.alert{color:var(--amber)}
@@ -275,8 +290,8 @@
       <span class="tagline">passive tls fingerprint console</span>
     </div>
     <nav class="tabs" id="nav">
-      <button data-view="overview" class="active">Overview</button>
-      <button data-view="live">Live</button>
+      <button data-view="live" class="active">Live</button>
+      <button data-view="overview">Overview</button>
       <button data-view="alerts">Alerts</button>
       <button data-view="fingerprints">Fingerprints</button>
       <button data-view="intel">Intel</button>
@@ -314,7 +329,7 @@
 
     <div class="body">
 
-      <section id="view-overview" class="view active">
+      <section id="view-overview" class="view">
         <div class="err" id="err-overview"></div>
         <div class="panel">
           <h2>Surface counters</h2>
@@ -335,36 +350,55 @@
         </div>
       </section>
 
-      <section id="view-live" class="view">
+      <section id="view-live" class="view active">
         <div class="err" id="err-live"></div>
-        <div class="panel">
-          <h2>Live capture</h2>
-          <div class="livebar">
-            <span class="stat" id="liveState">&mdash;</span>
-            <span class="stat">packets <b id="livePackets">0</b></span>
-            <span class="stat">packets/s <b id="liveRate">0</b></span>
-            <span class="stat">flows <b id="liveFlows">0</b></span>
-            <span class="stat">events <b id="liveEvents">0</b></span>
-            <span class="stat">alerts <b id="liveAlerts">0</b></span>
-            <span class="stat">stream <b id="liveStreamState">closed</b></span>
+        <div class="deck">
+
+          <div class="col">
+            <div class="panel">
+              <h2>Live handshakes</h2>
+              <div class="livebar">
+                <span class="stat" id="liveState">&mdash;</span>
+                <span class="stat">packets <b id="livePackets">0</b></span>
+                <span class="stat">packets/s <b id="liveRate">0</b></span>
+                <span class="stat">flows <b id="liveFlows">0</b></span>
+                <span class="stat">events <b id="liveEvents">0</b></span>
+                <span class="stat">alerts <b id="liveAlerts">0</b></span>
+                <span class="stat">stream <b id="liveStreamState">closed</b></span>
+              </div>
+              <div class="ctrl">
+                <button class="btn" id="liveToggle">start capture</button>
+                <select id="liveIface" aria-label="capture interface"></select>
+                <input id="liveFilter" placeholder="BPF filter (blank = TLS ports)" aria-label="capture filter">
+                <button class="btn" id="livePause">pause feed</button>
+                <button class="btn" id="liveClear">clear</button>
+              </div>
+              <div class="notice" id="liveNote" style="margin-top:14px">
+                Handshakes appear here the moment they are fingerprinted. Starting a
+                capture needs a capture driver and normally an elevated shell.
+              </div>
+              <div class="feed" id="liveFeed">
+                <div class="feed-empty" id="liveEmpty">Nothing yet. Start a capture, or browse to an HTTPS site.</div>
+              </div>
+            </div>
           </div>
-          <div class="ctrl">
-            <button class="btn" id="liveToggle">start capture</button>
-            <select id="liveIface" aria-label="capture interface"></select>
-            <input id="liveFilter" placeholder="BPF filter (blank = TLS ports)" aria-label="capture filter">
-            <button class="btn" id="livePause">pause feed</button>
-            <button class="btn" id="liveClear">clear</button>
+
+          <div class="col">
+            <div class="panel">
+              <h2>Distribution</h2>
+              <div id="deckSev"><div class="empty">no alerts yet</div></div>
+              <div id="deckKind" style="margin-top:20px"><div class="empty">no fingerprints held</div></div>
+            </div>
+            <div class="panel">
+              <h2>Recent alerts</h2>
+              <div class="recent" id="recentRows"><div class="empty">no alerts yet</div></div>
+            </div>
+            <div class="panel">
+              <h2>Capture scope</h2>
+              <dl class="scope-kv" id="deckKv"></dl>
+            </div>
           </div>
-          <div class="notice" id="liveNote" style="margin-top:14px">
-            Handshakes appear here the moment they are fingerprinted. Starting a
-            capture needs a capture driver and normally an elevated shell.
-          </div>
-        </div>
-        <div class="panel">
-          <h2>Incoming handshakes</h2>
-          <div class="feed" id="liveFeed">
-            <div class="feed-empty" id="liveEmpty">Nothing yet. Start a capture, or browse to an HTTPS site.</div>
-          </div>
+
         </div>
       </section>
 
@@ -591,7 +625,8 @@
       $("ovAlerts").textContent = d.alerts;
       $("ovFps").textContent = d.fingerprints;
       $("ovIntel").textContent = itotal;
-      renderSeverity(d.alerts_by_severity || []);
+      renderSeverity(d.alerts_by_severity || [], "sevBreakdown");
+      renderSeverity(d.alerts_by_severity || [], "deckSev");
       fillRuleFilter(d.alerts_by_rule || []);
       $("stamp").textContent = new Date().toLocaleTimeString();
     }).catch(function(err){
@@ -599,8 +634,9 @@
     });
   }
 
-  function renderSeverity(rows){
-    var box = $("sevBreakdown");
+  function renderSeverity(rows, targetId){
+    var box = $(targetId || "sevBreakdown");
+    if (!box) return;
     if (!rows.length){ box.innerHTML = '<div class="empty">no alerts yet</div>'; return; }
     var max = 1;
     rows.forEach(function(r){ if (r.count > max) max = r.count; });
@@ -662,6 +698,29 @@
     });
   }
 
+  /* ---------------- recent alerts (the deck's right column) ---------------- */
+  function loadRecent(){
+    var box = $("recentRows");
+    if (!box) return;
+    return getJSON("/api/alerts?limit=8").then(function(d){
+      var rows = d.alerts || [];
+      if (!rows.length){
+        box.innerHTML = '<div class="empty">no alerts yet</div>';
+        return;
+      }
+      box.innerHTML = rows.map(function(a){
+        var fp = (a.fp_kind || a.fingerprint_kind || "") +
+                 (a.fp_value || a.fingerprint_value ? " " + (a.fp_value || a.fingerprint_value) : "");
+        return '<div class="rrow">' +
+          '<div class="rt"><span class="' + chipClass(a.severity) + '">' + esc(a.severity || "?") + "</span>" +
+          '<span class="rr">' + esc(a.rule) + "</span>" +
+          '<span class="muted">' + esc(a.src_ip) + "</span></div>" +
+          '<div class="rd">' + esc(a.title) + (fp ? " &middot; " + esc(fp) : "") + "</div>" +
+          "</div>";
+      }).join("");
+    }).catch(function(){ /* a convenience panel, not the page */ });
+  }
+
   /* ---------------- fingerprints ---------------- */
   var fpsCache = [];
   function loadFingerprints(){
@@ -669,7 +728,8 @@
       clearErr("fps");
       fpsCache = d.fingerprints || [];
       renderFingerprints();
-      renderKindDist();
+      renderKindDist("kindDist");
+      renderKindDist("deckKind");
     }).catch(function(err){
       showErr("fps", "fingerprints unavailable: " + err.message);
     });
@@ -699,14 +759,15 @@
     }).join("");
   }
 
-  function renderKindDist(){
+  function renderKindDist(targetId){
     var counts = {};
     fpsCache.forEach(function(f){
       var k = f.kind || "unknown";
       counts[k] = (counts[k] || 0) + (Number(f.count) || 1);
     });
     var keys = Object.keys(counts);
-    var box = $("kindDist");
+    var box = $(targetId || "kindDist");
+    if (!box) return;
     if (!keys.length){ box.innerHTML = '<div class="empty">no fingerprints held</div>'; return; }
     var max = 1;
     keys.forEach(function(k){ if (counts[k] > max) max = counts[k]; });
@@ -834,6 +895,16 @@
     if (n) n.textContent = note;
     setCaptureFoot(d.mode === "live" ? "live" : "file only");
     setHeaderInterface(iface ? (iface.description || iface.name || "") : modeLabel);
+    var deck = $("deckKv");
+    if (deck) {
+      deck.innerHTML = [
+        ["mode", modeLabel],
+        ["interface", ifaceText],
+        ["filter", d.default_filter || "\u2014 (none)"]
+      ].map(function(r){
+        return "<dt>" + esc(r[0]) + "</dt><dd>" + esc(r[1]) + "</dd>";
+      }).join("");
+    }
   }
 
   function loadCapture(){
@@ -1150,10 +1221,17 @@
   function boot(){
     tickClock();
     wireLive();
+    /* The deck opens on the feed, so the feed starts with the page rather than
+       waiting for a tab click. */
+    loadLiveStatus();
+    loadLiveFeed();
+    fillInterfaces();
+    if (!livePaused) openStream();
     loadHealth();
     loadStats();
     loadAlerts();
     loadFingerprints();
+    loadRecent();
     buildKindChips();
     loadScope();
     loadCapture();
@@ -1165,6 +1243,7 @@
   setInterval(loadStats, POLL);
   setInterval(loadAlerts, POLL);
   setInterval(loadFingerprints, POLL);
+  setInterval(loadRecent, POLL);
   setInterval(loadCapture, POLL);
   setInterval(function(){
     var live = $("view-live");
