@@ -65,6 +65,13 @@ built around.
 
 ![The published vectors and the suite](docs/screenshots/03-vectors-and-tests.png)
 
+It runs in an editor as happily as in a shell. A few tasks ship with the project
+so the attacks and the suite are a keystroke away rather than a remembered
+command, and the terminal below is Visual Studio Code running the same four
+attacks on this machine.
+
+![Running in Visual Studio Code](docs/screenshots/04-in-visual-studio-code.png)
+
 ## Why write a cipher out by hand
 
 AES has a shape that is easy to describe and hard to get exactly right. The
@@ -125,23 +132,18 @@ forgery is handed back to the genuine implementation and has to be accepted.
 A test that compared a forgery to a stored value would keep passing if the
 construction it attacks were quietly replaced with a safe one.
 
-## Running it
+## The command line
 
-```console
-python -m src.cli attack all
-python -m src.cli vectors
-python -m src.cli hash path/to/file
-python -m src.cli hmac 4a656665 "what do ya want for nothing?"
-python -m src.cli seal feffe9928665731c6d6a8f9467308308 cafebabefacedbaddecaf888 path/to/file
-python -m src.cli open feffe9928665731c6d6a8f9467308308 cafebabefacedbaddecaf888 <ciphertext> <tag>
-```
-
-`attack` runs any one of the four or all of them, generating its own keys and
-messages and reporting whether the recovery or the forgery actually worked.
-`vectors` re-checks the published GCM examples so the arithmetic can be
-confirmed on any machine without a test runner. `seal` prints a ciphertext and a
-tag in hex; `open` verifies the tag before it does anything else and refuses a
-tampered one with a non-zero exit and nothing on standard output.
+There is a small command line over the primitives, and it exists for one reason:
+so the arithmetic can be re-checked on a machine that has nothing installed but
+Python, without a test runner in the way. One verb runs any of the four attacks
+or all of them, generating its own keys and messages and reporting whether the
+recovery or the forgery actually worked. Another re-checks the published GCM
+examples and prints one line per case. Hashing and HMAC speak for themselves.
+The last two seal a file and open it again, and the opening one verifies the tag
+before it does anything else -- hand it a tampered tag and it says so, exits
+non-zero, and writes nothing at all to standard output, which is the same
+promise the `GCM.decrypt` path keeps in the library.
 
 ## Limits
 
@@ -208,11 +210,10 @@ signature = sign_deterministic(key, digest)                 # RFC 6979, no reuse
 
 ## Tests
 
-```console
-python -m pytest -q tests
-```
-
-The suite is organised by module, and each module's tests are in two halves: the
-published vectors, and the differential comparison against the reference. The
-attacks have their own file each, and they assert against the genuine
-implementation rather than against constants.
+The suite is organised by module, and each module's tests come in two halves:
+the published vectors first, then the differential comparison against the
+reference. The attacks have a file each, and they are the odd ones out in that
+they assert against the genuine implementation rather than against constants --
+a test that compared a forgery to a stored value would keep passing if the
+construction it attacks were quietly replaced with a safe one, which is the one
+thing that must not be allowed to happen quietly.
