@@ -1,0 +1,1258 @@
+[
+ {
+  "kind": "ja3",
+  "value": "61d50e7771aee7f2f4b89a7200b4d45e",
+  "category": "benign",
+  "name": "AcroCEF",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "49a6cf42956937669a01438f26e7c609",
+  "category": "benign",
+  "name": "AIM",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "561145462cfc7de1d6a97e93d3264786",
+  "category": "benign",
+  "name": "Airmail 3",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "f6fd83a21f9f3c5f9ff7b5c63bbc179d",
+  "category": "benign",
+  "name": "Alation Compose",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "6003b52942a2e1e1ea72d802d153ec08",
+  "category": "benign",
+  "name": "Amazon Music",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "eb149984fc9c44d85ed7f12c90d818be",
+  "category": "benign",
+  "name": "Amazon Music,Dreamweaver,Spotify",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "8e3f1bf87bc652a20de63bfd4952b16a",
+  "category": "benign",
+  "name": "AnypointStudio",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "5507277945374659a5b4572e1b6d9b9f",
+  "category": "benign",
+  "name": "apple.geod",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "f753495f2eab5155c61b760c838018f8",
+  "category": "benign",
+  "name": "apple.geod",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "ba40fea2b2638908a3b3b482ac78d729",
+  "category": "benign",
+  "name": "apple.geod,parsecd,apple.photomoments",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "474e73aea21d1e0910f25c3e6c178535",
+  "category": "benign",
+  "name": "apple.WebKit.Networking",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "eeeb5e7485f5e10cbc39db4cfb69b264",
+  "category": "benign",
+  "name": "apple.WebKit.Networking",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "d4693422c5ce1565377aca25940ad80c",
+  "category": "benign",
+  "name": "apple.WebKit.Networking,CalendarAgent,Go for Gmail",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "63de2b6188d5694e79b678f585b13264",
+  "category": "benign",
+  "name": "apple.WebKit.Networking,Chatter,FieldServiceApp,socialstudio",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "3e4e87dda5a3162306609b7e330441d2",
+  "category": "benign",
+  "name": "apple.WebKit.Networking,itunesstored",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "7b343af1092863fdd822d6f10645abfb",
+  "category": "benign",
+  "name": "apple.WebKit.Networking,itunesstored",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "a312f9162a08eeedf7feb7a13cd7e9bb",
+  "category": "benign",
+  "name": "apple.WebKit.Networking,Spotify,WhatsApp,Skype,iTunes",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "c5c11e6105c56fd29cc72c3ac7a2b78b",
+  "category": "benign",
+  "name": "AT&T Connect",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "fa030dbcb2e3c7141d3c2803780ee8db",
+  "category": "benign",
+  "name": "Battle.net,Dropbox",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "0ef9ca1c10d3f186f5786e1ef3461a46",
+  "category": "benign",
+  "name": "bitgo,ShapeShift",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "cdec81515ccc75a5aa41eb3db22226e6",
+  "category": "benign",
+  "name": "BlueJeans,CEPHtmlEngine",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "83e04bc58d402f9633983cbf22724b02",
+  "category": "benign",
+  "name": "Charles,Google Play Music Desktop Player,Postman,Slack,and other desktop programs",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "424008725394c634a4616b8b1f2828a5",
+  "category": "benign",
+  "name": "Charles,java,eclipse",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "be9f1360cf52dc1f61ae025252f192a3",
+  "category": "benign",
+  "name": "Chromium",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "def8761e4bcaaf91d99801a22ac6f6d4",
+  "category": "benign",
+  "name": "Chromium",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "fc5cb0985a5f5e295163cc8ffff8a6e1",
+  "category": "benign",
+  "name": "Chromium",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "e7d46c98b078477c4324031e0d3b22f5",
+  "category": "benign",
+  "name": "Cisco AnyConnect Secure Mobility Client",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "ed36017db541879619c399c95e22067d",
+  "category": "benign",
+  "name": "Cisco AnyConnect Secure Mobility Client",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "5ee1a653fb824db7182714897fd3b5df",
+  "category": "benign",
+  "name": "Citrix Viewer",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "a9d17f74e55dd53fcf7c234f8a240919",
+  "category": "benign",
+  "name": "Covenant Eyes",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "c882d9444412c00e71b643f3f54145ff",
+  "category": "benign",
+  "name": "Creative Cloud",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "bc0608d33dc64506b42f7f5f87958f37",
+  "category": "benign",
+  "name": "cscan",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "ccaa60f6ccc701bde536ef409be3cf63",
+  "category": "benign",
+  "name": "curl no-SNI",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "fe048fe8faf797796e278f2b4f1e9c24",
+  "category": "benign",
+  "name": "curl SNI",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "4fcd1770545298cc119865aeba81daba",
+  "category": "benign",
+  "name": "Deezer",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "4c40bf8baa7c301c5dba8a20bc4119e2",
+  "category": "benign",
+  "name": "Dynalist,Postman,Google Chrome,Franz,GOG Galaxy",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "0411bbb5ff27ad46e1874a7a8beedacb",
+  "category": "benign",
+  "name": "eclipse",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "4990c9da08f44a01ecd7ddc3837caf25",
+  "category": "benign",
+  "name": "eclipse",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "fa106fe5beec443af7e211ef8902e7e0",
+  "category": "benign",
+  "name": "eclipse",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "d74778f454e2b047e030b291b94dd698",
+  "category": "benign",
+  "name": "eclipse,java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "187dfde7edc8ceddccd3deeccc21daeb",
+  "category": "benign",
+  "name": "eclipse,java,studio,STS",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "8c5a50f1e833ed581e9cfc690814719a",
+  "category": "benign",
+  "name": "eclipse,JavaApplicationStub,idea",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "1fbe5382f9d8430fe921df747c46d95f",
+  "category": "benign",
+  "name": "FieldServiceApp,socialstudio",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "0a81538cf247c104edb677bdb8902ed5",
+  "category": "benign",
+  "name": "firefox",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "0b6592fd91d4843c823b75e49b43838d",
+  "category": "benign",
+  "name": "firefox",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "0ffee3ba8e615ad22535e7f771690a28",
+  "category": "benign",
+  "name": "firefox",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "1c15aca4a38bad90f9c40678f6aface9",
+  "category": "benign",
+  "name": "firefox",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "5163bc7c08f57077bc652ec370459c2f",
+  "category": "benign",
+  "name": "firefox",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "a88f1426c4603f2a8cd8bb41e875cb75",
+  "category": "benign",
+  "name": "firefox",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "b03910cc6de801d2fcfa0c3b9f397df4",
+  "category": "benign",
+  "name": "firefox",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "bfcc1a3891601edb4f137ab7ab25b840",
+  "category": "benign",
+  "name": "firefox",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "ce694315cbb81ce95e6ae4ae8cbafde6",
+  "category": "benign",
+  "name": "firefox",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "f15797a734d0b4f171a86fd35c9a5e43",
+  "category": "benign",
+  "name": "firefox",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "07b4162d4db57554961824a21c4a0fde",
+  "category": "benign",
+  "name": "firefox,thunderbird",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "61d0d709fe7ac199ef4b2c52bc8cef75",
+  "category": "benign",
+  "name": "firefox,thunderbird",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "8498fe4268764dbf926a38283e9d3d8f",
+  "category": "benign",
+  "name": "Franz,Google Chrome,Kiwi,Spotify,nwjs,Slack",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "900c1fa84b4ea86537e1d148ee16eae8",
+  "category": "benign",
+  "name": "Fuze",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "107144b88827da5da9ed42d8776ccdc5",
+  "category": "benign",
+  "name": "geod",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "c46941d4de99445aef6b497679474cf4",
+  "category": "benign",
+  "name": "geod",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "002205d0f96c37c5e660b9f041363c11",
+  "category": "benign",
+  "name": "Google Chrome",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "073eede15b2a5a0302d823ecbd5ad15b",
+  "category": "benign",
+  "name": "Google Chrome",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "0b61c673ee71fe9ee725bd687c455809",
+  "category": "benign",
+  "name": "Google Chrome",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "6cd1b944f5885e2cfbe98a840b75eeb8",
+  "category": "benign",
+  "name": "Google Chrome",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "94c485bca29d5392be53f2b8cf7f4304",
+  "category": "benign",
+  "name": "Google Chrome",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "b4f4e6164f938870486578536fc1ffce",
+  "category": "benign",
+  "name": "Google Chrome",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "b8f81673c0e1d29908346f3bab892b9b",
+  "category": "benign",
+  "name": "Google Chrome",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "baaac9b6bf25ad098115c71c59d29e51",
+  "category": "benign",
+  "name": "Google Chrome",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "bc6c386f480ee97b9d9e52d472b772d8",
+  "category": "benign",
+  "name": "Google Chrome",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "da949afd9bd6df820730f8f171584a71",
+  "category": "benign",
+  "name": "Google Chrome",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "f58966d34ff9488a83797b55c804724d",
+  "category": "benign",
+  "name": "Google Chrome",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "fd6314b03413399e4f23d1524d206692",
+  "category": "benign",
+  "name": "Google Chrome",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "0e46737668fe75092919ee047a0b5945",
+  "category": "benign",
+  "name": "Google Chrome Helper",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "39fa85654105398ee7ef6a3a1c81d685",
+  "category": "benign",
+  "name": "Google Chrome Helper",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "4ba7b7022f5f5e1e500bb19199d8b1a4",
+  "category": "benign",
+  "name": "Google Chrome Helper",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "5498cef2cca704eb01cf2041cc1089c1",
+  "category": "benign",
+  "name": "Google Chrome,Slack",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "d27fb8deca6e3b9739db3fda2b229fe3",
+  "category": "benign",
+  "name": "Google Drive File Stream",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "ae340571b4fd0755c4a0821b18d8fa93",
+  "category": "benign",
+  "name": "Google Earth",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "f059212ce3de94b1e8253a7522cb1b44",
+  "category": "benign",
+  "name": "Google Photos Backup",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "fd10cc8cce9493a966c57249e074755f",
+  "category": "benign",
+  "name": "gramblr",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "3e860202fc555b939e83e7a7ab518c38",
+  "category": "benign",
+  "name": "hola_svc",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "56ac3a0bef0824c49e4b569941937088",
+  "category": "benign",
+  "name": "hola_svc",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "5c1c89f930122bccc7a97d52f73bea2c",
+  "category": "benign",
+  "name": "hola_svc",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "77310efe11f1943306ee317cf02150b7",
+  "category": "benign",
+  "name": "hola_svc",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "8bd59c4b7f3193db80fd64318429bcec",
+  "category": "benign",
+  "name": "hola_svc",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "d1f9f9b224387d2597f02095fcec96d7",
+  "category": "benign",
+  "name": "hola_svc",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "ff1040ba1e3d235855ef0d7cd9237fdc",
+  "category": "benign",
+  "name": "hola_svc",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "5af143afdbf58ec11ab3b3d53dd4e5e3",
+  "category": "benign",
+  "name": "IDSyncDaemon",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "d06acbe8ac31e753f40600a9d6717cba",
+  "category": "benign",
+  "name": "Inbox OSX",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "093081b45872912be9a1f2a8163fe041",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "2080bf56cb87e64303e27fcd781e7efd",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "225a24b45f0f1adbc2e245d4624c6e08",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "3afe1fb5976d0999abe833b14b7d6485",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "3b844830bfbb12eb5d2f8dc281d349a9",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "51a7ad14509fd614c7bb3a50c4982b8c",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "550628650380ff418de25d3d890e836e",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "5b270b309ad8c6478586a15dece20a88",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "5d7abe53ae15b4272a34f10431e06bf3",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "7c7a68b96d2aab15d678497a12119f4f",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "88afa0dea1608e28f50acbad32d7f195",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "8ce6933b8c12ce931ca238e9420cc5dd",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "a61299f9b501adcf680b9275d79d4ac6",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "a9fead344bf3ac09f62df3cd9b22c268",
+  "category": "benign",
+  "name": "java",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "4056657a50a8a4e5cfac40ba48becfa2",
+  "category": "benign",
+  "name": "java,eclipse",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "f22bdd57e3a52de86cda40da2d84e83b",
+  "category": "benign",
+  "name": "java,eclipse,Cyberduck",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "028563cffc7a3a2e32090aee0294d636",
+  "category": "benign",
+  "name": "java,eclipse,STS",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "5f9b53f0d39dc9d940a3b5568fe5f0bb",
+  "category": "benign",
+  "name": "java,JavaApplicationStub",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "2db6873021f2a95daa7de0d93a1d1bf2",
+  "category": "benign",
+  "name": "java,studio,eclipse",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "c376061f96329e1020865a1dc726927d",
+  "category": "benign",
+  "name": "JavaApplicationStub",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "e516ad69a423f8e0407307aa7bfd6344",
+  "category": "benign",
+  "name": "Kindle,stack,nextcloud",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "3959d0a1344896e9fb5c0564ca0a2956",
+  "category": "benign",
+  "name": "LeagueClientUx",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "0fe51fa93812c2ebb50a655222a57bf2",
+  "category": "benign",
+  "name": "LINE Messaging",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "2e094913d88f0ad8dc69447cb7d2ce65",
+  "category": "benign",
+  "name": "LINE Messaging",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "193349d34561d1d5d1a270172eb2d97e",
+  "category": "benign",
+  "name": "LogMeIn Client",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "d732ca39155f38942f90e9fc2b0f97f7",
+  "category": "benign",
+  "name": "Maxthon",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "c9dbeed362a32f9a50a26f4d9b32bbd8",
+  "category": "benign",
+  "name": "Messenger,Jumpshare",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "6acb250ada693067812c3335705dae79",
+  "category": "benign",
+  "name": "mono-sgen,Syncplicity,Axure RP 8,Amazon Drive",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "3ee4aaac7147ff2b80ada31686db660c",
+  "category": "benign",
+  "name": "node-webkit,Kindle",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "641df9d6dbe7fdb74f70c8ad93def8cc",
+  "category": "benign",
+  "name": "node.js",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "9811c1bb9f0f6835d5c13a831cca4173",
+  "category": "benign",
+  "name": "node.js",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "106ecbd3d14b4dc6e413494263720afe",
+  "category": "benign",
+  "name": "node.js,Postman,WhatsApp",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "49de9b1c7e60bd3b8e1d4f7a49ba362e",
+  "category": "benign",
+  "name": "nwjs,Chromium",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "38cbe70b308f42da7c9980c0e1c89656",
+  "category": "benign",
+  "name": "p4v,owncloud",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "62448833d8230241227c03b7d441e31b",
+  "category": "benign",
+  "name": "parsecd,apple.geod,apple.photomoments,photoanalysisd,FreedomProxy",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "e846898acc767ebeb2b4388e58a968d4",
+  "category": "benign",
+  "name": "postbox-bin",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "a7823092705a5e91ce2b7f561b6e5b98",
+  "category": "benign",
+  "name": "Qsync Client",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "c048d9f26a79e11ca7276499ef24daf3",
+  "category": "benign",
+  "name": "RescueTime,Plantronics Hub",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "d219efd07cbb8fbe547e6a5335843f0f",
+  "category": "benign",
+  "name": "ruby",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "c36fb08942cf19508c08d96af22d4ffc",
+  "category": "benign",
+  "name": "Safari",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "844166382cc98d98595e6778c470f5d5",
+  "category": "benign",
+  "name": "Salesforce Files",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "49a341a21f4fd4ac63b027ff2b1a331f",
+  "category": "benign",
+  "name": "Skype",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "a5aa6e939e4770e3b8ac38ce414fd0d5",
+  "category": "benign",
+  "name": "Slack",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "116ffc8889873efad60457cd55eaf543",
+  "category": "benign",
+  "name": "Spark",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "8db4b0f8e9dd8f2fff38ee7c5a1e4496",
+  "category": "benign",
+  "name": "SpotlightNetHelper,Safari",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "39cf5b7a13a764494de562add874f016",
+  "category": "benign",
+  "name": "Steam OSX",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "2d3854d1cbcdceece83eabd85bdcc056",
+  "category": "benign",
+  "name": "Tableau",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "a585c632a2b49be1256881fb0c16c864",
+  "category": "benign",
+  "name": "Tableau",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "cd7c06b9459c9cfd4af2dba5696ea930",
+  "category": "benign",
+  "name": "Tableau",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "df65746370dcabc9b4f370c6e14a8156",
+  "category": "benign",
+  "name": "True Key",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "84071ea96fc8a60c55fc8a405e214c0f",
+  "category": "benign",
+  "name": "Used by many desktop apps,Quip,Spotify,GitHub Desktop",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "40fd0a5e81ebdcf0ec82a4710a12dec1",
+  "category": "benign",
+  "name": "Used by many programs on OSX,apple.WebKit.Networking",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "618ee2509ef52bf0b8216e1564eea909",
+  "category": "benign",
+  "name": "Used by many programs on OSX,apple.WebKit.Networking",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "799135475da362592a4be9199d258726",
+  "category": "benign",
+  "name": "Used by many programs on OSX,apple.WebKit.Networking",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "7b530a25af9016a9d12de5abc54d9e74",
+  "category": "benign",
+  "name": "Used by many programs on OSX,apple.WebKit.Networking",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "7e72698146290dd68239f788a452e7d8",
+  "category": "benign",
+  "name": "Used by many programs on OSX,apple.WebKit.Networking",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "a9aecaa66ad9c6cfe1c361da31768506",
+  "category": "benign",
+  "name": "Used by many programs on OSX,apple.WebKit.Networking",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "c05de18b01a054f2f6900ffe96b3da7a",
+  "category": "benign",
+  "name": "Used by many programs on OSX,apple.WebKit.Networking",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "c07cb55f88702033a8f52c046d23e0b2",
+  "category": "benign",
+  "name": "Used by many programs on OSX,apple.WebKit.Networking",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "e4d448cdfe06dc1243c1eb026c74ac9a",
+  "category": "benign",
+  "name": "Used by many programs on OSX,apple.WebKit.Networking",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "f1c5cf087b959cec31bd6285407f689a",
+  "category": "benign",
+  "name": "Used by many programs on OSX,apple.WebKit.Networking",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "488b6b601cb141b062d4da7f524b4b22",
+  "category": "benign",
+  "name": "Used by many programs,Python,PHP,Git,dotnet,Adobe",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "f28d34ce9e732f644de2350027d74c3f",
+  "category": "benign",
+  "name": "Used by many programs,Quip,Aura,Spotify,Chatty",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "190dfb280fe3b541acc6a2e5f00690e6",
+  "category": "benign",
+  "name": "Used by many programs,Quip,Spotify,Dropbox,GitHub Desktop,etc",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "20dd18bdd3209ea718989030a6f93364",
+  "category": "benign",
+  "name": "Used by many programs,Slack,Postman,Spotify,Google Chrome",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "e0224fc1c33658f2d3d963bfb0a76a85",
+  "category": "benign",
+  "name": "Viber",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "01319090aea981dde6fc8d6ae71ead54",
+  "category": "benign",
+  "name": "vpnkit",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "84607748f3887541dd60fe974a042c71",
+  "category": "benign",
+  "name": "wineserver",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ },
+ {
+  "kind": "ja3",
+  "value": "c2b4710c6888a5d47befe865c8e6fb19",
+  "category": "benign",
+  "name": "ZwiftApp",
+  "source": "salesforce/ja3 osx-nix",
+  "license": "BSD-3-Clause"
+ }
+]

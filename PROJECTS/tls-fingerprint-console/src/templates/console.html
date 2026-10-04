@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TLS Fingerprint Console</title>
+<style>
+  :root{
+    --bg:#080b0e;
+    --rail:#0c1116;
+    --panel:#0f151b;
+    --panel-2:#121a21;
+    --ink:#d8e4ea;
+    --muted:#63757f;
+    --line:#1b2631;
+    --teal:#31d0b6;
+    --amber:#f0a634;
+    --red:#ff5d68;
+    --violet:#8f9dff;
+    --mono:"DejaVu Sans Mono","Cascadia Mono","Consolas",monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  body{
+    background:var(--bg);color:var(--ink);
+    font-family:var(--mono);font-size:13px;line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+  }
+  .frame{display:grid;grid-template-columns:212px 1fr;min-height:100vh}
+
+  /* ---- left rail ---- */
+  .rail{
+    background:var(--rail);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;position:sticky;top:0;height:100vh;
+  }
+  .brand{padding:16px 14px 12px;border-bottom:1px solid var(--line)}
+  .brand .mark{
+    display:inline-block;width:9px;height:9px;border-radius:2px;
+    background:var(--teal);box-shadow:0 0 10px var(--teal);margin-right:7px;
+  }
+  .brand .name{font-weight:700;letter-spacing:.04em;font-size:13px;color:#eaf4f2}
+  .brand .sub{color:var(--muted);font-size:10px;letter-spacing:.14em;text-transform:uppercase;margin-top:4px}
+  nav{display:flex;flex-direction:column;padding:10px 8px;gap:2px}
+  nav button{
+    all:unset;cursor:pointer;padding:9px 11px;border-radius:6px;color:#a9bcc4;
+    font-family:var(--mono);font-size:12px;letter-spacing:.03em;
+    display:flex;align-items:center;gap:9px;border-left:2px solid transparent;
+  }
+  nav button .dot{width:6px;height:6px;border-radius:50%;background:#2b3a44}
+  nav button:hover{background:#111a20;color:#e6f2f0}
+  nav button.active{background:#0f1c22;color:var(--teal);border-left-color:var(--teal)}
+  nav button.active .dot{background:var(--teal)}
+  .rail-foot{margin-top:auto;padding:12px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:10px}
+  .rail-foot .kv{display:flex;justify-content:space-between;margin-top:3px}
+
+  /* ---- main ---- */
+  main{min-width:0;display:flex;flex-direction:column}
+  .strip{
+    display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+    padding:12px 20px;border-bottom:1px solid var(--line);background:var(--rail);
+    position:sticky;top:0;z-index:5;
+  }
+  .pill{
+    display:inline-flex;align-items:center;gap:7px;padding:4px 11px;border-radius:999px;
+    border:1px solid var(--line);background:#0b1319;font-size:11px;letter-spacing:.05em;
+  }
+  .pill .beacon{width:7px;height:7px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px var(--amber)}
+  .pill.ok .beacon{background:var(--teal);box-shadow:0 0 8px var(--teal)}
+  .pill.bad .beacon{background:var(--red);box-shadow:0 0 8px var(--red)}
+  .strip .metric{display:flex;flex-direction:column;line-height:1.15}
+  .strip .metric .n{font-size:16px;font-weight:700;color:#eef7f5}
+  .strip .metric .l{font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+  .strip .spacer{flex:1}
+  .strip .stamp{color:var(--muted);font-size:10px}
+
+  .body{padding:18px 20px 40px;min-width:0}
+  .view{display:none}
+  .view.active{display:block;animation:fade .18s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+
+  .panel{
+    background:var(--panel);border:1px solid var(--line);border-radius:9px;
+    padding:14px 16px;margin-bottom:16px;min-width:0;
+  }
+  .panel h2{
+    margin:0 0 12px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--muted);font-weight:600;display:flex;align-items:center;gap:9px;
+  }
+  .panel h2::before{content:"";width:12px;height:2px;background:var(--teal)}
+  .grid-4{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .tile{
+    background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:13px 14px;
+  }
+  .tile .n{font-size:26px;font-weight:700;color:#f2fbf9}
+  .tile .l{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:3px}
+  .tile.accent .n{color:var(--teal)}
+
+  .bar{height:9px;border-radius:5px;background:#182530;overflow:hidden;margin-top:5px}
+  .bar > i{display:block;height:100%;background:var(--teal)}
+  .rowbar{margin:9px 0}
+  .rowbar .top{display:flex;justify-content:space-between;font-size:11px;color:#b8ccd3}
+  .rowbar .top .c{color:var(--muted)}
+
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{
+    text-align:left;color:var(--muted);font-weight:600;font-size:10px;letter-spacing:.1em;
+    text-transform:uppercase;padding:7px 9px;border-bottom:1px solid var(--line);white-space:nowrap;
+  }
+  td{padding:8px 9px;border-bottom:1px solid #131c23;vertical-align:top;word-break:break-word}
+  tbody tr:hover{background:#101820}
+  .mono-val{color:#9fe7db}
+  .muted{color:var(--muted)}
+  .empty{color:var(--muted);padding:14px 4px;font-style:italic}
+
+  .chip{
+    display:inline-block;padding:2px 8px;border-radius:5px;font-size:10px;letter-spacing:.06em;
+    text-transform:uppercase;border:1px solid var(--line);background:#0d151b;color:#b8ccd3;
+  }
+  .chip.high{color:var(--red);border-color:#3a2027;background:#1c1216}
+  .chip.medium{color:var(--amber);border-color:#3a3020;background:#1c1710}
+  .chip.low{color:var(--violet);border-color:#232a44;background:#121524}
+  .chip.info{color:var(--teal);border-color:#153a34;background:#0d1b19}
+
+  .controls{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-bottom:12px}
+  input[type=text],select{
+    background:#0a1218;border:1px solid var(--line);color:var(--ink);border-radius:6px;
+    padding:7px 10px;font-family:var(--mono);font-size:12px;outline:none;min-width:130px;
+  }
+  input[type=text]:focus,select:focus{border-color:var(--teal)}
+  button.btn{
+    all:unset;cursor:pointer;padding:7px 13px;border-radius:6px;border:1px solid var(--line);
+    background:#101a21;color:#cfe3e8;font-family:var(--mono);font-size:12px;
+  }
+  button.btn:hover{border-color:var(--teal);color:var(--teal)}
+  button.btn.primary{background:#0f2622;border-color:#1c4a42;color:var(--teal)}
+  .filterchips{display:flex;gap:6px;flex-wrap:wrap}
+  .filterchips .chip{cursor:pointer}
+  .filterchips .chip.on{background:#0f2622;border-color:var(--teal);color:var(--teal)}
+
+  .err{
+    display:none;margin:0 0 12px;padding:9px 12px;border-radius:7px;
+    border:1px solid #3a2027;background:#1a1013;color:#ffb3b8;font-size:12px;
+  }
+  .err.show{display:block}
+  .notice{
+    padding:9px 12px;border-radius:7px;border:1px dashed var(--line);
+    background:#0c141a;color:var(--muted);font-size:11px;margin-bottom:12px;
+  }
+  .scope-kv{display:grid;grid-template-columns:180px 1fr;gap:2px 14px;font-size:12px}
+  .scope-kv dt{color:var(--muted);padding:6px 0}
+  .scope-kv dd{margin:0;padding:6px 0;border-bottom:1px solid #131c23}
+  .tag{display:inline-block;padding:1px 7px;border:1px solid var(--line);border-radius:4px;font-size:10px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="frame">
+  <aside class="rail">
+    <div class="brand">
+      <div><span class="mark"></span><span class="name">TLS Fingerprint Console</span></div>
+      <div class="sub">signal deck / passive</div>
+    </div>
+    <nav id="nav">
+      <button data-view="overview" class="active"><span class="dot"></span>Overview</button>
+      <button data-view="alerts"><span class="dot"></span>Alerts</button>
+      <button data-view="fingerprints"><span class="dot"></span>Fingerprints</button>
+      <button data-view="intel"><span class="dot"></span>Intel</button>
+      <button data-view="scope"><span class="dot"></span>Scope</button>
+      <button data-view="export"><span class="dot"></span>Export</button>
+    </nav>
+    <div class="rail-foot">
+      <div class="kv"><span>build</span><span>0.1.0</span></div>
+      <div class="kv"><span>transport</span><span>offline</span></div>
+    </div>
+  </aside>
+
+  <main>
+    <header class="strip">
+      <span class="pill" id="healthPill"><span class="beacon"></span><span id="healthText">checking</span></span>
+      <div class="metric"><span class="n" id="mEvents">-</span><span class="l">events</span></div>
+      <div class="metric"><span class="n" id="mAlerts">-</span><span class="l">alerts</span></div>
+      <div class="metric"><span class="n" id="mFps">-</span><span class="l">fingerprints</span></div>
+      <div class="metric"><span class="n" id="mIntel">-</span><span class="l">intel</span></div>
+      <div class="spacer"></div>
+      <button class="btn primary" id="ingestBtn">ingest sample</button>
+      <span class="stamp" id="stamp">--:--:--</span>
+    </header>
+
+    <div class="body">
+
+      <section id="view-overview" class="view active">
+        <div class="err" id="err-overview"></div>
+        <div class="panel">
+          <h2>Surface counters</h2>
+          <div class="grid-4">
+            <div class="tile"><div class="n" id="ovEvents">-</div><div class="l">events observed</div></div>
+            <div class="tile accent"><div class="n" id="ovAlerts">-</div><div class="l">alerts raised</div></div>
+            <div class="tile"><div class="n" id="ovFps">-</div><div class="l">fingerprints held</div></div>
+            <div class="tile"><div class="n" id="ovIntel">-</div><div class="l">intel records</div></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Severity breakdown</h2>
+          <div id="sevBreakdown"><div class="empty">no alerts yet</div></div>
+        </div>
+        <div class="panel">
+          <h2>Fingerprint-kind distribution</h2>
+          <div id="kindDist"><div class="empty">no fingerprints held</div></div>
+        </div>
+      </section>
+
+      <section id="view-alerts" class="view">
+        <div class="err" id="err-alerts"></div>
+        <div class="panel">
+          <h2>Raised alerts</h2>
+          <div class="controls">
+            <select id="alertRule">
+              <option value="">all rules</option>
+            </select>
+            <select id="alertSeverity">
+              <option value="">all severities</option>
+              <option value="high">high</option>
+              <option value="medium">medium</option>
+              <option value="low">low</option>
+              <option value="info">info</option>
+            </select>
+            <span class="muted" id="alertCount"></span>
+          </div>
+          <table>
+            <thead><tr>
+              <th>sev</th><th>rule</th><th>title</th><th>detail</th>
+              <th>source</th><th>fingerprint</th>
+            </tr></thead>
+            <tbody id="alertRows"><tr><td colspan="6" class="empty">loading</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="view-fingerprints" class="view">
+        <div class="err" id="err-fps"></div>
+        <div class="panel">
+          <h2>Fingerprint inventory</h2>
+          <div class="controls">
+            <input type="text" id="fpSearch" placeholder="filter kind / value">
+            <span class="muted" id="fpCount"></span>
+          </div>
+          <table>
+            <thead><tr><th>kind</th><th>value</th><th>count</th><th>first seen</th><th>last seen</th></tr></thead>
+            <tbody id="fpRows"><tr><td colspan="5" class="empty">loading</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="view-intel" class="view">
+        <div class="err" id="err-intel"></div>
+        <div class="panel">
+          <h2>Corpus lookup</h2>
+          <div class="controls">
+            <input type="text" id="intelQ" placeholder="search value or name">
+            <button class="btn" id="intelGo">search</button>
+          </div>
+          <div class="filterchips" id="intelKinds"></div>
+          <div class="notice" id="intelNote"></div>
+          <table>
+            <thead><tr><th>value</th><th>name</th><th>category</th><th>source</th><th>licence</th></tr></thead>
+            <tbody id="intelRows"><tr><td colspan="5" class="empty">loading</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="view-scope" class="view">
+        <div class="err" id="err-scope"></div>
+        <div class="panel">
+          <h2>Capture scope</h2>
+          <dl class="scope-kv" id="scopeKv"></dl>
+          <div class="notice" style="margin-top:14px">
+            This console is passive and offline by default: it consumes a capture file
+            or explicitly ingested events, never a live interface, and it never
+            transmits traffic.
+          </div>
+        </div>
+      </section>
+
+      <section id="view-export" class="view">
+        <div class="err" id="err-export"></div>
+        <div class="panel">
+          <h2>Export snapshot</h2>
+          <p class="muted">Download the current events and alerts as a single file.</p>
+          <div class="controls">
+            <button class="btn primary" data-export="json">download JSON</button>
+            <button class="btn" data-export="csv">download CSV</button>
+          </div>
+          <div class="notice">Exports reflect the store at the moment of the click.</div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var POLL = 2000;
+
+  function $(id){ return document.getElementById(id); }
+
+  function esc(v){
+    if (v === null || v === undefined) return "";
+    return String(v).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+
+  function showErr(panel, msg){
+    var el = $("err-" + panel);
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.add("show");
+  }
+  function clearErr(panel){
+    var el = $("err-" + panel);
+    if (el){ el.classList.remove("show"); el.textContent = ""; }
+  }
+
+  function getJSON(url){
+    return fetch(url, {headers:{"Accept":"application/json"}}).then(function(r){
+      if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+      return r.json();
+    });
+  }
+
+  /* ---------------- navigation ---------------- */
+  $("nav").addEventListener("click", function(ev){
+    var btn = ev.target.closest("button[data-view]");
+    if (!btn) return;
+    var view = btn.getAttribute("data-view");
+    var buttons = document.querySelectorAll("#nav button");
+    for (var i=0;i<buttons.length;i++) buttons[i].classList.remove("active");
+    btn.classList.add("active");
+    var views = document.querySelectorAll(".view");
+    for (var j=0;j<views.length;j++) views[j].classList.remove("active");
+    var target = $("view-" + view);
+    if (target) target.classList.add("active");
+    if (view === "fingerprints") loadFingerprints();
+    if (view === "intel") loadIntel();
+    if (view === "scope") loadScope();
+  });
+
+  /* ---------------- health + stats ---------------- */
+  function setHealth(ok, text){
+    var pill = $("healthPill");
+    pill.classList.remove("ok","bad");
+    pill.classList.add(ok ? "ok" : "bad");
+    $("healthText").textContent = text;
+  }
+
+  function loadHealth(){
+    return getJSON("/api/health").then(function(d){
+      setHealth(d && d.status === "ok", (d && d.status) || "unknown");
+    }).catch(function(){ setHealth(false, "unreachable"); });
+  }
+
+  var lastStats = null;
+  function loadStats(){
+    return getJSON("/api/stats").then(function(d){
+      lastStats = d;
+      clearErr("overview");
+      $("mEvents").textContent = d.events;
+      $("mAlerts").textContent = d.alerts;
+      $("mFps").textContent = d.fingerprints;
+      var intel = d.intel || {};
+      var itotal = (intel.total !== undefined) ? intel.total : ((intel.sources||[]).length);
+      $("mIntel").textContent = itotal;
+      $("ovEvents").textContent = d.events;
+      $("ovAlerts").textContent = d.alerts;
+      $("ovFps").textContent = d.fingerprints;
+      $("ovIntel").textContent = itotal;
+      renderSeverity(d.alerts_by_severity || []);
+      fillRuleFilter(d.alerts_by_rule || []);
+      $("stamp").textContent = new Date().toLocaleTimeString();
+    }).catch(function(err){
+      showErr("overview", "stats unavailable: " + err.message);
+    });
+  }
+
+  function renderSeverity(rows){
+    var box = $("sevBreakdown");
+    if (!rows.length){ box.innerHTML = '<div class="empty">no alerts yet</div>'; return; }
+    var max = 1;
+    rows.forEach(function(r){ if (r.count > max) max = r.count; });
+    box.innerHTML = rows.map(function(r){
+      var pct = Math.round((r.count / max) * 100);
+      return '<div class="rowbar"><div class="top"><span>' + esc(r.severity) +
+             '</span><span class="c">' + esc(r.count) + '</span></div>' +
+             '<div class="bar"><i style="width:' + pct + '%"></i></div></div>';
+    }).join("");
+  }
+
+  function fillRuleFilter(rows){
+    var sel = $("alertRule");
+    var current = sel.value;
+    var rules = rows.map(function(r){ return r.rule; });
+    var opts = '<option value="">all rules</option>';
+    rules.forEach(function(r){ opts += '<option value="' + esc(r) + '">' + esc(r) + '</option>'; });
+    sel.innerHTML = opts;
+    if (current && rules.indexOf(current) >= 0) sel.value = current;
+  }
+
+  /* ---------------- alerts ---------------- */
+  function chipClass(sev){
+    var s = String(sev || "").toLowerCase();
+    if (s === "high" || s === "medium" || s === "low" || s === "info") return "chip " + s;
+    return "chip";
+  }
+
+  function loadAlerts(){
+    var rule = $("alertRule").value;
+    var sev = $("alertSeverity").value;
+    var qs = [];
+    if (rule) qs.push("rule=" + encodeURIComponent(rule));
+    if (sev) qs.push("severity=" + encodeURIComponent(sev));
+    qs.push("limit=200");
+    return getJSON("/api/alerts?" + qs.join("&")).then(function(d){
+      clearErr("alerts");
+      var rows = d.alerts || [];
+      $("alertCount").textContent = rows.length + " shown";
+      var tb = $("alertRows");
+      if (!rows.length){
+        tb.innerHTML = '<tr><td colspan="6" class="empty">no alerts match</td></tr>';
+        return;
+      }
+      tb.innerHTML = rows.map(function(a){
+        var fp = (a.fp_kind || a.fingerprint_kind || "") +
+                 (a.fp_value || a.fingerprint_value ? " / " + (a.fp_value || a.fingerprint_value) : "");
+        return "<tr>" +
+          '<td><span class="' + chipClass(a.severity) + '">' + esc(a.severity || "?") + "</span></td>" +
+          "<td>" + esc(a.rule) + "</td>" +
+          "<td>" + esc(a.title) + "</td>" +
+          '<td class="muted">' + esc(a.detail) + "</td>" +
+          '<td class="mono-val">' + esc(a.src_ip) + "</td>" +
+          '<td class="mono-val">' + esc(fp) + "</td>" +
+          "</tr>";
+      }).join("");
+    }).catch(function(err){
+      showErr("alerts", "alerts unavailable: " + err.message);
+    });
+  }
+
+  /* ---------------- fingerprints ---------------- */
+  var fpsCache = [];
+  function loadFingerprints(){
+    return getJSON("/api/fingerprints").then(function(d){
+      clearErr("fps");
+      fpsCache = d.fingerprints || [];
+      renderFingerprints();
+      renderKindDist();
+    }).catch(function(err){
+      showErr("fps", "fingerprints unavailable: " + err.message);
+    });
+  }
+
+  function renderFingerprints(){
+    var needle = $("fpSearch").value.toLowerCase();
+    var rows = fpsCache.filter(function(f){
+      if (!needle) return true;
+      return String(f.kind || "").toLowerCase().indexOf(needle) >= 0 ||
+             String(f.value || "").toLowerCase().indexOf(needle) >= 0;
+    });
+    $("fpCount").textContent = rows.length + " of " + fpsCache.length;
+    var tb = $("fpRows");
+    if (!rows.length){
+      tb.innerHTML = '<tr><td colspan="5" class="empty">nothing held</td></tr>';
+      return;
+    }
+    tb.innerHTML = rows.map(function(f){
+      return "<tr>" +
+        '<td><span class="chip info">' + esc(f.kind) + "</span></td>" +
+        '<td class="mono-val">' + esc(f.value) + "</td>" +
+        "<td>" + esc(f.count) + "</td>" +
+        '<td class="muted">' + esc(f.first_seen) + "</td>" +
+        '<td class="muted">' + esc(f.last_seen) + "</td>" +
+        "</tr>";
+    }).join("");
+  }
+
+  function renderKindDist(){
+    var counts = {};
+    fpsCache.forEach(function(f){
+      var k = f.kind || "unknown";
+      counts[k] = (counts[k] || 0) + (Number(f.count) || 1);
+    });
+    var keys = Object.keys(counts);
+    var box = $("kindDist");
+    if (!keys.length){ box.innerHTML = '<div class="empty">no fingerprints held</div>'; return; }
+    var max = 1;
+    keys.forEach(function(k){ if (counts[k] > max) max = counts[k]; });
+    box.innerHTML = keys.sort(function(a,b){ return counts[b]-counts[a]; }).map(function(k){
+      var pct = Math.round((counts[k] / max) * 100);
+      return '<div class="rowbar"><div class="top"><span>' + esc(k) +
+             '</span><span class="c">' + counts[k] + '</span></div>' +
+             '<div class="bar"><i style="width:' + pct + '%"></i></div></div>';
+    }).join("");
+  }
+
+  /* ---------------- intel ---------------- */
+  var intelKind = "";
+  function loadIntel(){
+    var q = $("intelQ").value.trim();
+    var qs = [];
+    if (q) qs.push("q=" + encodeURIComponent(q));
+    if (intelKind) qs.push("kind=" + encodeURIComponent(intelKind));
+    return getJSON("/api/intel/search" + (qs.length ? "?" + qs.join("&") : "")).then(function(d){
+      clearErr("intel");
+      $("intelNote").textContent = d.note || ((d.count || 0) + " matching records" +
+        (d.capped ? " (capped)" : ""));
+      var rows = d.entries || [];
+      var tb = $("intelRows");
+      if (!rows.length){
+        tb.innerHTML = '<tr><td colspan="5" class="empty">no records match</td></tr>';
+        return;
+      }
+      tb.innerHTML = rows.map(function(e){
+        return "<tr>" +
+          '<td class="mono-val">' + esc(e.value) + "</td>" +
+          "<td>" + esc(e.name) + "</td>" +
+          '<td><span class="chip">' + esc(e.category) + "</span></td>" +
+          '<td class="muted">' + esc(e.source) + "</td>" +
+          '<td class="muted">' + esc(e.license) + "</td>" +
+          "</tr>";
+      }).join("");
+    }).catch(function(err){
+      showErr("intel", "intel unavailable: " + err.message);
+    });
+  }
+
+  function buildKindChips(){
+    getJSON("/api/intel").then(function(d){
+      var sample = d.sample || [];
+      var kinds = {};
+      sample.forEach(function(e){ if (e.kind) kinds[e.kind] = true; });
+      var box = $("intelKinds");
+      var html = '<span class="chip' + (intelKind === "" ? " on" : "") + '" data-kind="">all</span>';
+      Object.keys(kinds).forEach(function(k){
+        html += '<span class="chip' + (intelKind === k ? " on" : "") + '" data-kind="' + esc(k) + '">' + esc(k) + "</span>";
+      });
+      box.innerHTML = html;
+    }).catch(function(){ /* chips are optional */ });
+  }
+
+  $("intelKinds").addEventListener("click", function(ev){
+    var chip = ev.target.closest(".chip");
+    if (!chip) return;
+    intelKind = chip.getAttribute("data-kind") || "";
+    var chips = $("intelKinds").querySelectorAll(".chip");
+    for (var i=0;i<chips.length;i++) chips[i].classList.remove("on");
+    chip.classList.add("on");
+    loadIntel();
+  });
+
+  /* ---------------- scope ---------------- */
+  function loadScope(){
+    return getJSON("/api/scope").then(function(d){
+      clearErr("scope");
+      var rows = [
+        ["mode", d.mode],
+        ["interface", d.interface === null || d.interface === undefined ? "\u2014 (none)" : d.interface],
+        ["capture file", d.capture_file === null || d.capture_file === undefined ? "\u2014 (none)" : d.capture_file],
+        ["note", d.note]
+      ];
+      $("scopeKv").innerHTML = rows.map(function(r){
+        return "<dt>" + esc(r[0]) + "</dt><dd>" + esc(r[1]) + "</dd>";
+      }).join("");
+    }).catch(function(err){
+      showErr("scope", "scope unavailable: " + err.message);
+    });
+  }
+
+  /* ---------------- export ---------------- */
+  function doExport(fmt){
+    var url = "/api/export?format=" + encodeURIComponent(fmt);
+    fetch(url).then(function(r){
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.blob();
+    }).then(function(blob){
+      var a = document.createElement("a");
+      var objUrl = URL.createObjectURL(blob);
+      a.href = objUrl;
+      a.download = "tls-console-export." + fmt;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objUrl);
+      clearErr("export");
+    }).catch(function(err){
+      showErr("export", "export failed: " + err.message);
+    });
+  }
+  var exportButtons = document.querySelectorAll("[data-export]");
+  for (var eb=0; eb<exportButtons.length; eb++){
+    exportButtons[eb].addEventListener("click", function(ev){
+      doExport(ev.target.getAttribute("data-export"));
+    });
+  }
+
+  /* ---------------- ingest sample ---------------- */
+  function demoEvents(){
+    var now = Date.now() / 1000;
+    return [
+      {ts: now, src_ip: "203.0.113.7", dst_ip: "198.51.100.10", dst_port: 443,
+       sni: "demo.example.net", fingerprint_kind: "ja3",
+       fingerprint_value: "a1b2c3d4e5f60718293a4b5c6d7e8f90", ja3: "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+       ua: "curl/8.0.1", os: "linux"},
+      {ts: now + 0.4, src_ip: "203.0.113.42", dst_ip: "198.51.100.10", dst_port: 443,
+       sni: "portal.example.net", fingerprint_kind: "ja4",
+       fingerprint_value: "t13d1516h2_8daaf6152771_b0da82dd1658", ja4: "t13d1516h2_8daaf6152771_b0da82dd1658",
+       ua: "Mozilla/5.0 (Windows NT 10.0)", os: "windows"}
+    ];
+  }
+
+  $("ingestBtn").addEventListener("click", function(){
+    var btn = $("ingestBtn");
+    btn.textContent = "ingesting...";
+    fetch("/api/ingest", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({events: demoEvents()})
+    }).then(function(r){
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function(d){
+      btn.textContent = "ingested " + d.accepted + " / " + d.alerts + " alerts";
+      setTimeout(function(){ btn.textContent = "ingest sample"; }, 1800);
+      loadStats();
+      loadAlerts();
+      loadFingerprints();
+    }).catch(function(err){
+      btn.textContent = "ingest sample";
+      showErr("overview", "ingest failed: " + err.message);
+    });
+  });
+
+  /* ---------------- wiring ---------------- */
+  $("fpSearch").addEventListener("input", renderFingerprints);
+  $("alertRule").addEventListener("change", loadAlerts);
+  $("alertSeverity").addEventListener("change", loadAlerts);
+  $("intelQ").addEventListener("keydown", function(ev){ if (ev.key === "Enter") loadIntel(); });
+  $("intelGo").addEventListener("click", loadIntel);
+
+  function boot(){
+    loadHealth();
+    loadStats();
+    loadAlerts();
+    loadFingerprints();
+    buildKindChips();
+    loadScope();
+  }
+  boot();
+
+  setInterval(loadHealth, POLL);
+  setInterval(loadStats, POLL);
+  setInterval(loadAlerts, POLL);
+  setInterval(loadFingerprints, POLL);
+})();
+</script>
+</body>
+</html>

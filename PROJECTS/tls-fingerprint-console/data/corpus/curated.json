@@ -1,0 +1,34 @@
+[
+ {
+  "kind": "ja3",
+  "value": "e7d705a3286e19ea42f587b344ee6865",
+  "category": "tool",
+  "name": "Tor client",
+  "source": "tlsfp curated",
+  "license": "project"
+ },
+ {
+  "kind": "ja3",
+  "value": "6734f37431670b3ab4292b8f60f29984",
+  "category": "malware",
+  "name": "Trickbot",
+  "source": "tlsfp curated",
+  "license": "project"
+ },
+ {
+  "kind": "ja3",
+  "value": "4d7a28d6f2263ed61de88ca66eb011e3",
+  "category": "malware",
+  "name": "Emotet",
+  "source": "tlsfp curated",
+  "license": "project"
+ },
+ {
+  "kind": "ja3s",
+  "value": "623de93db17d313345d7ea481e7443cf",
+  "category": "malware",
+  "name": "Trickbot (JA3S)",
+  "source": "tlsfp curated",
+  "license": "project"
+ }
+]

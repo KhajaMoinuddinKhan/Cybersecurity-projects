@@ -31,10 +31,13 @@ The bundled `sample_*` files are fixtures, not evidence. They exist so you can s
 | [Phishing URL Detector](PROJECTS/phishing-url-detector) | One or more URL strings | Keeping a heuristic score explainable, and separating clues from verdicts. |
 | [Network Traffic Analyzer](PROJECTS/network-traffic-analyzer) | The same kind of PCAP, possibly a large one | Streaming instead of loading, accounting in bytes and flows, and filtering a report without losing the totals. |
 | [File Integrity Monitor](PROJECTS/file-integrity-monitor) | A folder and a trusted baseline | Hashing contents and telling added, changed and removed files apart, and why a permission change is its own kind of change. |
+| [TLS Fingerprint Console](PROJECTS/tls-fingerprint-console) | A capture containing TLS handshakes, or a live console you can post events to | Reading a handshake field by field, and why a fingerprint is only ever as good as the intel it is matched against. |
 | [PCAP Traffic Summary](PROJECTS/pcap-traffic-summary) | A PCAP from your lab | Pulling fields out of packets and turning them into a summary someone can read. |
 | [Hash Cracker](PROJECTS/hash-cracker) | A digest you are authorised to test, and a wordlist | Comparing candidates offline and measuring the actual work involved. |
 
 The two traffic tools answer the same question in different ways. The summary tool loads the capture and prints a text report; the analyzer reads it one packet at a time and can print JSON. Start with whichever matches the size of your file and the shape of output you want.
+
+The fingerprint console is the third way into the same traffic, and the only one that reads the encrypted handshake rather than the plaintext around it. It never decrypts anything: what it fingerprints is the negotiation itself, which is sent in the clear before any key exists. It is also the only project here whose findings depend on someone else's data, so it names the source and licence of every intel record it matches against.
 
 ## Before running anything
 

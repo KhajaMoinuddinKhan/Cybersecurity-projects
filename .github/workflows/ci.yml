@@ -24,6 +24,7 @@ jobs:
           - PROJECTS/docker-security-audit
           - PROJECTS/web-vulnerability-scanner
           - PROJECTS/cloud-asset-inventory
+          - PROJECTS/tls-fingerprint-console
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

@@ -1,0 +1,136 @@
+# TLS Fingerprint Console
+
+A TLS handshake is readable even though the session it opens is not. The ClientHello announces, in a fixed order, the protocol versions the client supports, its cipher suites, its extensions, its elliptic curves and its signature algorithms; the ServerHello answers with the version and cipher it chose and the extensions it will use. Those lists describe the TLS software itself, and two clients built on the same stack offer them in the same order. Reduce the lists to a short hash and you have a fingerprint: a name for the software that does not depend on the address it dialled, the certificate it was shown, or anything it did afterwards.
+
+This console computes those fingerprints. It reads a packet capture, parses the TLS handshakes inside it, derives the JA3 and JA4+ fingerprints for each flow, matches them against a bundled threat-intelligence corpus, runs six detection rules over the result, and serves a console that shows what it found. It reads a capture file, or it accepts events posted to its API. It never opens a live interface and it never decrypts a byte.
+
+## Why fingerprints are worth computing
+
+Identity and behaviour fail in opposite directions, and a fingerprint sits between them. A malware family rotates its infrastructure constantly — new addresses, new domains, new certificates — but it tends to keep the TLS stack it was built against, so a fingerprint that matched last month often matches today even when nothing else does. Run the same reasoning the other way and a different signal appears: one fingerprint offered by a hundred source addresses is one toolkit deployed across a hundred hosts, which is exactly the shape of an automated campaign and is invisible if you look only at destinations.
+
+A fingerprint is also a description rather than a verdict. A JA4 value is not inherently good or bad; it is a name for a client, and whether that name means anything depends on what you compare it against. That is why the console keeps the corpus, the observed fingerprints and the alerts in separate views: the raw material, the reference set, and the rules' reading of the difference between them.
+
+## Running it
+
+The project needs Flask and pytest; everything else — the capture reader, the TLS parsers and the fingerprints — is the standard library.
+
+```console
+python -m pip install -r requirements.txt
+
+python -m src.cli analyse capture.pcap
+python -m src.cli demo
+python -m src.cli serve
+```
+
+`analyse` reads a capture, fingerprints every flow it can, runs the rules and writes the events and alerts to a SQLite store. It prints the capture path, how many events and alerts were produced, and a line for each alert naming its severity, rule and title.
+
+`demo` analyses a synthetic capture that the project builds itself, so you can see the console work without finding a real capture first. The capture is assembled by `fixtures/make_pcap.py` from hand-written pcap, Ethernet, IP, TCP, TLS and DER bytes, and contains a TLS handshake, a plaintext HTTP request and a UDP packet, which is enough to exercise every fingerprint kind the console knows.
+
+`serve` starts the console on `http://127.0.0.1:5001` with a store at `tls_console.db` in the working directory. Both commands accept `--db` to point at a different store, and `serve` accepts `--port`. The console runs on the Flask development server bound to loopback; it is a lab tool, not a hardened service, and it should be reached over loopback or a network you control.
+
+A useful first run is `demo` followed by `serve`: the demo fills the store, and the console then has events, fingerprints and alerts to display rather than six empty views.
+
+## How a handshake becomes a fingerprint
+
+The path from bytes to console is short enough to follow end to end, and every stage is reproducible because nothing here touches a network.
+
+The capture reader (`src/pcap.py`) decodes classic pcap and pcapng into packet dicts, walking Ethernet II and raw-IP frames down through IPv4 or IPv6 and into TCP or UDP. It bounds-checks every low-level read, so a truncated or malformed capture raises a readable `ValueError` rather than a raw `struct.error`. The reassembler groups TCP payloads by direction — source address and port to destination address and port — orders each group by sequence number and concatenates it, dropping pure acknowledgements, so each direction becomes one contiguous byte stream.
+
+The pipeline (`src/pipeline.py`) then buckets those streams into bidirectional flows and asks which direction carried a ClientHello; that direction is the client and the other is the server. It parses the ClientHello with `src/tls.py` and hands the field lists to `src/ja3.py` and `src/ja4.py`. On the server side it looks for a ServerHello and a Certificate message, and from the client's SYN it reads the TCP options for JA4T. When the client stream is not a TLS handshake at all, it tries to read it as a plaintext HTTP request, which is the one place a JA4H can come from.
+
+One detail shapes every fingerprint and is worth stating before the definitions. Modern clients insert reserved values — `0x0a0a`, `0x1a1a`, and so on up to `0xfafa` — into their cipher, extension and curve lists. These are the GREASE values, and a server is required to ignore them. They are chosen afresh on every connection, so if a fingerprint kept them it would change from one handshake to the next and describe nothing. Every fingerprint module strips GREASE before it does anything else, which is why a client that pads its lists with GREASE produces the same value as one that does not.
+
+## The seven fingerprints
+
+The console computes seven fingerprints, five from the JA4+ family and two from Salesforce JA3. Each is a plain string; the two JA3 values are MD5 digests, and the JA4 family carry readable structure ahead of their hashes.
+
+**JA3** is the original client fingerprint. It takes the protocol version, the cipher list, the extension list, the elliptic curves and the elliptic-curve point formats in the order the client sent them, writes the decimal values dash-separated inside each field and comma-separated between fields, and MD5-hashes the string. Because it preserves wire order, JA3 is sensitive to the exact ordering a stack chose, and two clients that offer the same suites in a different order get different JA3 values.
+
+**JA3S** is the server's answer in the same idiom: the protocol version, the single chosen cipher and the extension list, in wire order, MD5-hashed.
+
+**JA4** is the full client fingerprint and the one the console treats as a host's identity. Its first part is readable: a protocol character, a two-character version code, `d` or `i` for whether a server name was offered, the cipher count, the extension count and a two-character ALPN code. Then come two truncated SHA-256 hashes. The first is over the cipher list converted to lowercase four-digit hex, **sorted into hex order** rather than kept in wire order, so a client that shuffles its offer still lands on one value. The second is over the sorted extension list — with the SNI and ALPN extensions removed, since they are already represented in the readable part — followed by the signature algorithms in their original order. `ja4_r` returns the same fingerprint with the hashes left unhashed, which is useful when you want to see what went into a value rather than compare it.
+
+**JA4S** is the server counterpart: protocol character, version, extension count and ALPN code, then the chosen cipher in hex and a truncated SHA-256 of the server's extensions in arrival order.
+
+**JA4X** describes an X.509 certificate by its structure rather than its contents. It walks the certificate, collects the issuer's RDN attribute-type OIDs, the subject's, and the certificate's own extension OIDs, and produces three truncated SHA-256 hashes, one for each list. Because it hashes the DER-encoded OID bytes, two certificates issued by the same authority with the same extension profile share a JA4X even when the names, keys and dates differ — the shape of the certificate, not its subject.
+
+**JA4T** describes the TCP stack from the SYN: the window size, the sequence of TCP option kinds, the maximum segment size and the window scale, joined into one readable string. It is a host fingerprint rather than a TLS one, and it is read from the client's SYN packet.
+
+**JA4H** describes a plaintext HTTP client: the method and version as short codes, flags for whether a cookie and a referer were present, the header count and a language code, then three truncated SHA-256 hashes of the header names in order, the sorted cookie names, and the sorted cookie name-and-value pairs.
+
+## The intel corpus
+
+The reference set lives under `data/corpus/` as JSON and is loaded offline; nothing is fetched at run time. Each entry names its kind, value, category, name, source and licence, and the console shows the source and licence beside every record so a match can be traced back to where it came from.
+
+The bundled snapshot draws on three sources. The abuse.ch SSLBL JA3 blacklist contributes the malware fingerprints and is released under CC0-1.0. The salesforce/ja3 osx-nix client list contributes known client fingerprints and is released under BSD-3-Clause. A curated file carries a handful of entries under the project's own licence, including a Tor client fingerprint, Trickbot and Emotet JA3 values and a Trickbot JA3S. Across the three files the snapshot holds 258 records.
+
+Lookup is exact and case-insensitive on the kind and value pair. A file that is missing, unreadable or not valid JSON is skipped rather than fatal, and the reason is recorded on the corpus, so a broken feed degrades the reference set instead of stopping the console.
+
+## The six rules
+
+The rules (`src/rules.py`) read each event and the context around it and decide whether it deserves attention. Each is a separate callable, and each is written to stay silent rather than guess when the information it needs is missing — an unknown fingerprint produces no verdict, not a default one.
+
+- **known_bad** (critical) fires when a fingerprint on the event matches a corpus entry whose category is malware or c2. It consults the corpus itself rather than trusting a verdict someone else was supposed to attach.
+- **ua_mismatch** (medium) fires when the declared User-Agent names a different client family from the one the fingerprint indicates — a `curl` user-agent behind a browser fingerprint, for instance. It uses a built-in table of well-known families and stays quiet when either side is unknown.
+- **os_mismatch** (medium) fires when the User-Agent's declared operating system contradicts the operating system mapped from the event's JA3. It treats the whole Unix family as consistent, so it never invents a mismatch between two systems that share a TLS stack.
+- **first_seen** (info) fires the first time a fingerprint value is observed. It asks the store whether the value has been seen before, which is why the ordering of evaluation and storage matters.
+- **fp_rotation** (high) fires when one source address presents three or more distinct JA4 values for the same server name inside the window — the signature of a client deliberately changing its appearance.
+- **monoculture** (medium) fires when one fingerprint value is presented by ten or more distinct source addresses inside the window, which points at one toolkit running on many hosts.
+
+## Limits
+
+These sit here, beside the description of what the console does, because they bound it and are as much a part of reading its output as the fingerprints are.
+
+- **Nothing is decrypted.** Only the handshake is fingerprinted, because only the handshake is sent in the clear. JA4H therefore appears only for plaintext HTTP flows; a JA4H built from a TLS connection would be a fingerprint of ciphertext, and the console does not pretend otherwise.
+- **Capture is offline.** The console reads a pcap or accepts events posted to its API. There is no live interface capture, so it can only see traffic that was recorded somewhere else and handed to it.
+- **The capture reader covers Ethernet and raw-IP link types.** pcap and pcapng are both supported, IPv4 and IPv6 are both decoded, and VLAN tags are followed, but other link-layer types are not, and a capture using one will be reported as such rather than guessed at.
+- **The intel corpus is a snapshot.** It holds two public feeds plus a few curated entries, it is not updated automatically, and it will age. A fingerprint that is malicious and absent from the snapshot will not match, and freshness is the operator's responsibility, not the console's.
+- **os_mismatch cannot separate macOS from Linux.** A JA3 identifies a TLS stack, and the two systems often share one. The rule treats the whole Unix family as consistent and fires only on a genuine contradiction between families.
+- **ua_mismatch relies on a built-in table.** The table lists well-known client families and can be extended, but an unknown fingerprint produces no verdict rather than a guess, so the rule reports only the mismatches it can actually establish.
+- **JA4X parsing is hand-written.** It follows the published examples by hashing DER-encoded OID bytes and walks the certificate structure directly, and it handles the common cases rather than every extension an X.509 certificate may carry.
+
+## The console
+
+The console is one self-contained HTML file (`src/templates/console.html`) with inline CSS and JavaScript and no external assets or CDN references. It polls the API about every two seconds and keeps filter and search input in place across re-renders, so a refresh does not throw away what you typed. A left rail carries the six views and a top strip carries the health of the API and the headline counters.
+
+**Overview** is the first thing the console shows and answers whether there is anything here at all. Four counter tiles report the events observed, the alerts raised, the fingerprints held and the intel records loaded. Below them a severity breakdown draws one bar per severity that has fired, scaled to the largest, so the shape of the alert load is visible before any filter is applied; and a fingerprint-kind distribution draws one bar per fingerprint kind, weighted by how often each has been seen. An empty console says so in words rather than drawing empty bars.
+
+**Alerts** is the queue. A rule dropdown and a severity dropdown narrow the table, and the rule list is filled from the rules that have actually fired rather than from a fixed list. Each row carries a severity chip, the rule, the title, the detail that says why the rule fired, the source address and the fingerprint involved. The detail is the point of the view: an alert names the value that matched, so a reader can disagree with a specific rule instead of arguing with a verdict.
+
+**Fingerprints** is the inventory of everything the store has seen, independent of whether it alerted. A text box filters by kind or value, and the table lists each fingerprint's kind, value, how many times it has been observed, and when it was first and last seen. This is where a first_seen alert's subject can be checked against everything else that arrived with it.
+
+**Intel** is the reference set, made searchable. A text box matches against the value or the name, and a row of chips filters by fingerprint kind; the chips are built from the corpus itself, so they reflect what is loaded rather than a fixed list. The table shows the value, the name, the category, the source and the licence for every matching record, which is what lets a known_bad alert be traced back to the feed it came from. A note line reports how many records matched and whether the result was capped.
+
+**Scope** states plainly what the console is looking at. It prints the capture mode, the interface and the capture file — all empty in the default configuration — and a note that says the console is passive and offline, consumes a capture file or explicitly ingested events rather than a live interface, and never transmits traffic. It is the view that keeps the tool's boundaries in front of the operator.
+
+**Export** writes the current events and alerts out as a single file, in JSON for a complete record or CSV for a spreadsheet, as a download. The view notes that an export reflects the store at the moment of the click.
+
+The top strip carries a health pill that reads `ok` or `unreachable`, the same four counters as the Overview, a clock, and an **ingest sample** button that posts a pair of synthetic events to the API — which is the quickest way to watch a first_seen or a known_bad alert appear on a running console.
+
+## API routes
+
+The console is a thin layer over a JSON API, and every view is built from these routes.
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/` | GET | The console page. |
+| `/api/health` | GET | `{"status": "ok"}` when the app is up. |
+| `/api/stats` | GET | Event, alert and fingerprint counts, alerts grouped by rule and by severity, and the intel totals. |
+| `/api/alerts` | GET | Alerts newest first; accepts `rule`, `severity` and `limit`. |
+| `/api/events` | GET | Events newest first; accepts `sni` (substring) and `limit`. |
+| `/api/fingerprints` | GET | The fingerprint inventory with counts and first and last seen times. |
+| `/api/intel` | GET | Corpus statistics and a sample of entries. |
+| `/api/intel/search` | GET | Search the corpus by value or name; accepts `q` and `kind`; results are capped. |
+| `/api/scope` | GET | The configured capture scope: mode, interface, capture file and note. |
+| `/api/export` | GET | `format=json` or `format=csv`, returned as a file download. |
+| `/api/ingest` | POST | Accept `{"events": [...]}`, run the rules, store the events and alerts, and answer `{"accepted": n, "alerts": n}`. |
+
+`/api/ingest` is how a capture analysed elsewhere, or a live sensor, feeds the console: it takes events in the same shape the pipeline produces and runs them through the same rules, so the store does not care whether an event came from a file or from the API.
+
+## Tests
+
+```console
+python -m pytest -q tests
+```
+
+The suite is organised around what each module promises. The JA3 and JA4 tests assert the published worked examples verbatim — the Salesforce JA3 examples, the FoxIO JA4 worked example and its extension-hash variants, and the JA4S, JA4X, JA4T and JA4H examples — along with GREASE handling, the version and ALPN codes and the empty-list cases. The parser tests round-trip hand-built ClientHello, ServerHello and Certificate bytes and check the exact fields they produce. The capture tests cover classic pcap, pcapng, IPv6 and VLAN frames, truncated files and bad magic. The store, corpus, rules and API each have their own tests, and an integration suite drives the real store, corpus and rules through the real `/api/ingest` endpoint to confirm that every rule can actually fire through the app rather than only in isolation.
