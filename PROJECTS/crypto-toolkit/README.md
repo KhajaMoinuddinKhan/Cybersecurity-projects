@@ -1,19 +1,29 @@
 # Cryptographic toolkit
 
-A cryptographic library written from the primitives up, and the attacks that
-break the naive versions of the same constructions. Nothing in `src/` imports a
-cryptography package: AES is written out as a key schedule and a round
-function, SHA-256 as a message schedule and a compression function, and GCM as
-counter mode bolted to a polynomial hash over GF(2**128). The point is not to
-replace a real library. The point is that the arithmetic is visible, and that
-the behaviour can be checked against the standard's own worked examples rather
-than taken on trust.
+A cryptographic library written from the primitives up: AES as a key schedule
+and a round function, SHA-256 as a message schedule and a compression function,
+GCM as counter mode bolted to a polynomial hash over GF(2**128). Nothing in
+`src/` imports a cryptography package. The point is not to replace a real
+library. The point is that the arithmetic is visible, and that the behaviour can
+be checked against the standard's own worked examples rather than taken on
+trust.
 
-The project is being built in four stages and this repository is at the first
-one. What is here now is the symmetric half: AES-128, AES-192 and AES-256 as a
-block cipher, counter mode, GCM as authenticated encryption, SHA-256 and
-HMAC-SHA256. The public-key half, the attacks and the post-quantum benchmark
-come next, and the section on what is not here yet says exactly what is missing.
+The finished project is meant to be a toolkit *and* an attack lab -- the second
+half being the attacks that break the naive versions of these same
+constructions. Only the first half exists so far, so read the name as the
+destination rather than as a description of the contents. What is here now is
+the symmetric primitives: AES-128, AES-192 and AES-256 as a block cipher,
+counter mode, GCM as authenticated encryption, SHA-256 and HMAC-SHA256. The
+public-key half, the attacks and the post-quantum benchmark are all still to be
+written, and the section on what is not here yet says exactly what is missing.
+
+Two things are worth saying plainly about the toolkit half, since a reader
+deciding whether to use it needs them more than they need the arithmetic. It is
+a teaching implementation and it has not been audited. And it is a set of
+primitives rather than a finished tool: there is no key generation, no key
+derivation, no file format and no way to store a key, so a caller has to bring
+their own randomness and their own decisions about all of that. A real library
+gives you those; this gives you the parts underneath them, on purpose.
 
 ## Why write a cipher out by hand
 
