@@ -60,7 +60,30 @@
     padding:12px 20px;border-bottom:1px solid var(--line);background:var(--rail);
     position:sticky;top:0;z-index:5;
   }
-  .pill{
+  .feed{max-height:56vh;overflow-y:auto;border-top:1px solid var(--line);margin-top:12px}
+    .frow{display:grid;grid-template-columns:64px 52px 1fr;gap:12px;padding:8px 2px;
+          border-bottom:1px solid var(--line);font-size:12px;align-items:start}
+    .frow.is-alert{background:#160f11}
+    .frow .t{color:var(--muted);font-size:11px}
+    .frow .k{font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+    .frow .k.event{color:var(--teal)}
+    .frow .k.alert{color:var(--amber)}
+    .frow .body{min-width:0}
+    .frow .who{color:var(--ink);word-break:break-all}
+    .frow .fp{color:var(--muted);font-size:11px;word-break:break-all;margin-top:3px}
+    .feed-empty{padding:22px 2px;color:var(--muted);font-size:12px}
+    .livebar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:4px}
+    .livebar .stat{font-size:11px;color:var(--muted)}
+    .livebar .stat b{color:var(--ink);font-weight:500}
+    .ctrl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
+    .ctrl select,.ctrl input{background:#0b1319;border:1px solid var(--line);color:var(--ink);
+          border-radius:6px;padding:7px 9px;font-family:var(--mono);font-size:12px;min-width:150px}
+    .btn{border:1px solid var(--line);border-radius:6px;padding:8px 13px;font-size:11px;
+          letter-spacing:.05em;text-transform:uppercase;color:#b8ccd3;background:#0d151b}
+    .btn.on{color:var(--teal);border-color:var(--teal)}
+    .btn.off{color:var(--red);border-color:var(--red)}
+
+.pill{
     display:inline-flex;align-items:center;gap:7px;padding:4px 11px;border-radius:999px;
     border:1px solid var(--line);background:#0b1319;font-size:11px;letter-spacing:.05em;
   }
@@ -161,6 +184,7 @@
     </div>
     <nav id="nav">
       <button data-view="overview" class="active"><span class="dot"></span>Overview</button>
+      <button data-view="live"><span class="dot"></span>Live</button>
       <button data-view="alerts"><span class="dot"></span>Alerts</button>
       <button data-view="fingerprints"><span class="dot"></span>Fingerprints</button>
       <button data-view="intel"><span class="dot"></span>Intel</button>
@@ -205,6 +229,39 @@
         <div class="panel">
           <h2>Fingerprint-kind distribution</h2>
           <div id="kindDist"><div class="empty">no fingerprints held</div></div>
+        </div>
+      </section>
+
+      <section id="view-live" class="view">
+        <div class="err" id="err-live"></div>
+        <div class="panel">
+          <h2>Live capture</h2>
+          <div class="livebar">
+            <span class="stat" id="liveState">&mdash;</span>
+            <span class="stat">packets <b id="livePackets">0</b></span>
+            <span class="stat">packets/s <b id="liveRate">0</b></span>
+            <span class="stat">flows <b id="liveFlows">0</b></span>
+            <span class="stat">events <b id="liveEvents">0</b></span>
+            <span class="stat">alerts <b id="liveAlerts">0</b></span>
+            <span class="stat">stream <b id="liveStreamState">closed</b></span>
+          </div>
+          <div class="ctrl">
+            <button class="btn" id="liveToggle">start capture</button>
+            <select id="liveIface" aria-label="capture interface"></select>
+            <input id="liveFilter" placeholder="BPF filter (blank = TLS ports)" aria-label="capture filter">
+            <button class="btn" id="livePause">pause feed</button>
+            <button class="btn" id="liveClear">clear</button>
+          </div>
+          <div class="notice" id="liveNote" style="margin-top:12px">
+            Handshakes appear here the moment they are fingerprinted. Starting a
+            capture needs a capture driver and normally an elevated shell.
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Incoming handshakes</h2>
+          <div class="feed" id="liveFeed">
+            <div class="feed-empty" id="liveEmpty">Nothing yet. Start a capture, or browse to an HTTPS site.</div>
+          </div>
         </div>
       </section>
 
@@ -350,6 +407,12 @@
     for (var j=0;j<views.length;j++) views[j].classList.remove("active");
     var target = $("view-" + view);
     if (target) target.classList.add("active");
+    if (view === "live"){
+      loadLiveStatus();
+      loadLiveFeed();
+      fillInterfaces();
+      if (!livePaused) openStream();
+    }
     if (view === "fingerprints") loadFingerprints();
     if (view === "intel") loadIntel();
     if (view === "scope"){ loadScope(); loadCapture(); }
@@ -704,7 +767,223 @@
   $("intelQ").addEventListener("keydown", function(ev){ if (ev.key === "Enter") loadIntel(); });
   $("intelGo").addEventListener("click", loadIntel);
 
+  /* ---------------- live feed ---------------- */
+  var liveStream = null;          /* the EventSource, once opened */
+  var livePaused = false;
+  var liveRows = 0;
+  var LIVE_MAX_ROWS = 300;
+
+  function clockOf(ts){
+    if (typeof ts !== "number" || !isFinite(ts)) return "--:--:--";
+    var d = new Date(ts * 1000);
+    return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)+":"+("0"+d.getSeconds()).slice(-2);
+  }
+
+  function fingerprintLines(fp){
+    var out = [];
+    for (var k in fp){ if (Object.prototype.hasOwnProperty.call(fp, k)) out.push(k + " " + fp[k]); }
+    out.sort();
+    return out.join("\n");
+  }
+
+  function feedRow(rec){
+    var item = rec.item || {};
+    var kind = rec.kind === "alert" ? "alert" : "event";
+    var who, extra = "";
+    if (kind === "event"){
+      who = esc(item.src_ip) + ":" + esc(item.src_port) + " \u2192 " + esc(item.dst_ip) + ":" + esc(item.dst_port)
+          + (item.sni ? "  " + esc(item.sni) : "  (no SNI)");
+      extra = fingerprintLines(item.fingerprints || {});
+      if (item.intel_name) extra = "intel " + item.intel_name + " (" + (item.category||"") + ")\n" + extra;
+    } else {
+      who = esc(item.rule) + " \u2014 " + esc(item.title) + (item.src_ip ? "  " + esc(item.src_ip) : "");
+      extra = item.detail ? esc(item.detail) : "";
+    }
+    var row = document.createElement("div");
+    row.className = "frow" + (kind === "alert" ? " is-alert" : "");
+    row.innerHTML = '<span class="t">' + clockOf(item.ts || rec.at) + '</span>'
+                  + '<span class="k ' + kind + '">' + kind + '</span>'
+                  + '<span class="body"><span class="who">' + who + '</span>'
+                  + (extra ? '<span class="fp">' + esc(extra).replace(/\n/g, "<br>") + '</span>' : '')
+                  + '</span>';
+    return row;
+  }
+
+  function pushRecord(rec){
+    if (livePaused) return;
+    var feed = $("liveFeed");
+    var empty = $("liveEmpty");
+    if (empty) empty.remove();
+    feed.insertBefore(feedRow(rec), feed.firstChild);
+    liveRows++;
+    while (feed.children.length > LIVE_MAX_ROWS) feed.removeChild(feed.lastChild);
+    if (liveRows % 5 === 0){ loadStats(); loadAlerts(); }
+  }
+
+  function setStreamState(text){
+    var el = $("liveStreamState");
+    if (el) el.textContent = text;
+  }
+
+  function openStream(){
+    if (liveStream) return;
+    if (typeof EventSource === "undefined"){
+      showErr("live", "This browser has no EventSource, so the live feed cannot stream.");
+      return;
+    }
+    try {
+      liveStream = new EventSource("/api/stream");
+    } catch (e){
+      showErr("live", "Could not open the feed: " + e.message);
+      return;
+    }
+    setStreamState("connecting");
+    liveStream.addEventListener("hello", function(ev){
+      clearErr("live");
+      setStreamState("open");
+      var payload = {};
+      try { payload = JSON.parse(ev.data); } catch (e) {}
+      if (payload.capture) renderCaptureStatus(payload.capture);
+    });
+    liveStream.addEventListener("event", function(ev){
+      try { pushRecord(JSON.parse(ev.data)); } catch (e) {}
+    });
+    liveStream.addEventListener("alert", function(ev){
+      try { pushRecord(JSON.parse(ev.data)); } catch (e) {}
+    });
+    liveStream.onerror = function(){
+      /* EventSource retries by itself; say so rather than shouting. */
+      setStreamState("reconnecting");
+    };
+  }
+
+  function closeStream(){
+    if (liveStream){ liveStream.close(); liveStream = null; }
+    setStreamState("paused");
+  }
+
+  function renderCaptureStatus(s){
+    var el = $("liveState");
+    if (!el) return;
+    if (s && s.running){
+      el.innerHTML = '<b style="color:var(--teal)">capturing</b> \u2014 ' + esc(s.interface || "interface");
+      $("livePackets").textContent = s.packets || 0;
+      $("liveRate").textContent = (s.packets_per_second || 0);
+      $("liveFlows").textContent = s.flows || 0;
+      $("liveEvents").textContent = s.events || 0;
+      $("liveAlerts").textContent = s.alerts || 0;
+      $("liveToggle").textContent = "stop capture";
+      $("liveToggle").className = "btn off";
+    } else {
+      el.innerHTML = '<b style="color:var(--muted)">idle</b> \u2014 not capturing';
+      $("liveToggle").textContent = "start capture";
+      $("liveToggle").className = "btn on";
+      if (s && s.error){
+        showErr("live", "Capture stopped: " + s.error);
+      }
+    }
+  }
+
+  function loadLiveStatus(){
+    getJSON("/api/capture/status").then(function(s){
+      renderCaptureStatus(s);
+    }).catch(function(e){
+      showErr("live", "Capture status unavailable: " + e.message);
+    });
+  }
+
+  function fillInterfaces(){
+    return getJSON("/api/capture").then(function(d){
+      var sel = $("liveIface");
+      sel.innerHTML = "";
+      var list = d.interfaces || [];
+      if (!list.length){
+        var o = document.createElement("option");
+        o.value = ""; o.textContent = "no capture driver";
+        sel.appendChild(o);
+        sel.disabled = true;
+        if (d.driver_note) $("liveNote").textContent = d.driver_note;
+        return d;
+      }
+      sel.disabled = false;
+      for (var i=0;i<list.length;i++){
+        var opt = document.createElement("option");
+        opt.value = String(list[i].index);
+        opt.textContent = list[i].description;
+        if (d.selected && d.selected.index === list[i].index) opt.selected = true;
+        sel.appendChild(opt);
+      }
+      if (d.default_filter) $("liveFilter").placeholder = d.default_filter;
+      return d;
+    }).catch(function(e){
+      showErr("live", "Could not list interfaces: " + e.message);
+      return null;
+    });
+  }
+
+  function loadLiveFeed(){
+    getJSON("/api/feed?limit=60").then(function(d){
+      var items = d.items || [];
+      var feed = $("liveFeed");
+      feed.innerHTML = "";
+      liveRows = 0;
+      if (!items.length){
+        var empty = document.createElement("div");
+        empty.className = "feed-empty"; empty.id = "liveEmpty";
+        empty.textContent = "Nothing yet. Start a capture, or browse to an HTTPS site.";
+        feed.appendChild(empty);
+        return;
+      }
+      for (var i=items.length-1;i>=0;i--) feed.appendChild(feedRow(items[i]));
+      liveRows = items.length;
+    }).catch(function(e){
+      showErr("live", "Could not load the feed: " + e.message);
+    });
+  }
+
+  function toggleCapture(){
+    var running = $("liveToggle").textContent.indexOf("stop") === 0;
+    var url = running ? "/api/capture/stop" : "/api/capture/start";
+    var body = running ? {} : {
+      interface: $("liveIface").disabled ? null : $("liveIface").value,
+      filter: $("liveFilter").value || null
+    };
+    fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)})
+      .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
+      .then(function(res){
+        if (!res.ok){
+          showErr("live", res.body.message || res.body.error || "capture request failed");
+        } else {
+          clearErr("live");
+        }
+        if (res.body.status) renderCaptureStatus(res.body.status);
+        else loadLiveStatus();
+      })
+      .catch(function(e){ showErr("live", "Capture request failed: " + e.message); });
+  }
+
+  function wireLive(){
+    $("liveToggle").addEventListener("click", toggleCapture);
+    $("livePause").addEventListener("click", function(){
+      if (livePaused){
+        livePaused = false;
+        $("livePause").textContent = "pause feed";
+        openStream();
+      } else {
+        livePaused = true;
+        $("livePause").textContent = "resume feed";
+        closeStream();
+      }
+    });
+    $("liveClear").addEventListener("click", function(){
+      var feed = $("liveFeed");
+      feed.innerHTML = '<div class="feed-empty" id="liveEmpty">Cleared. New handshakes will appear here.</div>';
+      liveRows = 0;
+    });
+  }
+
   function boot(){
+    wireLive();
     loadHealth();
     loadStats();
     loadAlerts();
@@ -720,6 +999,10 @@
   setInterval(loadAlerts, POLL);
   setInterval(loadFingerprints, POLL);
   setInterval(loadCapture, POLL);
+  setInterval(function(){
+    var live = $("view-live");
+    if (live && live.classList.contains("active")) loadLiveStatus();
+  }, POLL);
 })();
 </script>
 </body>

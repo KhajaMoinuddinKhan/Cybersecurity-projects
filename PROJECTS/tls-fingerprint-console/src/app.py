@@ -16,6 +16,8 @@ import csv
 import io
 import json
 
+import queue
+
 from flask import Flask, Response, jsonify, render_template, request
 
 # The capture scope this console is configured for.  It lives in app.config so
@@ -162,8 +164,10 @@ def _capture_unavailable():
     }
 
 
-def create_app(store, corpus, rules_module=None):
+def create_app(store, corpus, rules_module=None, feed=None, session=None):
     app = Flask(__name__)
+    app.config["FEED"] = feed
+    app.config["CAPTURE_SESSION"] = session
     app.config.setdefault("CAPTURE_SCOPE", dict(DEFAULT_SCOPE))
     app.config["RULES_MODULE"] = _resolve_rules(rules_module)
 
@@ -490,6 +494,88 @@ def create_app(store, corpus, rules_module=None):
                 alert_count += 1
 
         return jsonify({"accepted": accepted, "alerts": alert_count})
+
+    # ----------------------------------------------------------- live feed
+    @app.get("/api/feed")
+    def api_feed():
+        """The most recent feed records, for the first paint of the live view."""
+        if feed is None:
+            return jsonify({"items": [], "stats": None,
+                            "note": "this console was started without a live feed"})
+        try:
+            limit = min(int(request.args.get("limit", 100)), 500)
+        except (TypeError, ValueError):
+            limit = 100
+        kind = request.args.get("kind")
+        if kind not in (None, "event", "alert"):
+            return jsonify({"error": "kind must be event or alert"}), 400
+        return jsonify({"items": feed.recent(limit, kind), "stats": feed.stats()})
+
+    @app.get("/api/stream")
+    def api_stream():
+        """Server-sent events: every new event and alert, as it is published.
+
+        This is what makes the live view a feed rather than a poll. Each record
+        is pushed the moment the sensor produces it; a comment is sent every
+        fifteen seconds so an idle connection is not dropped by a proxy.
+        """
+        if feed is None:
+            return jsonify({"error": "this console was started without a live feed"}), 503
+
+        def generate():
+            q = feed.subscribe()
+            try:
+                yield "event: hello\ndata: %s\n\n" % json.dumps({
+                    "feed": feed.stats(),
+                    "capture": session.status() if session is not None else None,
+                })
+                while True:
+                    try:
+                        record = q.get(timeout=15)
+                    except queue.Empty:
+                        yield ": keepalive\n\n"
+                        continue
+                    yield "event: %s\ndata: %s\n\n" % (
+                        record.get("kind", "message"), json.dumps(record))
+            except GeneratorExit:
+                raise
+            finally:
+                feed.unsubscribe(q)
+
+        return Response(generate(), mimetype="text/event-stream", headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        })
+
+    # ------------------------------------------------------- capture control
+    @app.get("/api/capture/status")
+    def capture_status():
+        if session is None:
+            return jsonify({"running": False,
+                            "note": "this console was started without capture control"})
+        return jsonify(session.status())
+
+    @app.post("/api/capture/start")
+    def capture_start():
+        if session is None:
+            return jsonify({"error": "this console was started without capture control"}), 503
+        payload = request.get_json(silent=True) or {}
+        if isinstance(payload, dict):
+            if payload.get("interface") is not None:
+                session.interface = payload.get("interface")
+            if payload.get("filter") is not None:
+                session.bpf = payload.get("filter")
+        ok, message = session.start()
+        body = {"started": bool(ok), "message": message, "status": session.status()}
+        return jsonify(body), (200 if ok else 409)
+
+    @app.post("/api/capture/stop")
+    def capture_stop():
+        if session is None:
+            return jsonify({"error": "this console was started without capture control"}), 503
+        ok, message = session.stop()
+        return jsonify({"stopped": bool(ok), "message": message, "status": session.status()}), 200
 
     # ------------------------------------------------------------- 404 JSON
     @app.errorhandler(404)

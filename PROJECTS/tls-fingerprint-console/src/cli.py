@@ -52,11 +52,32 @@ def cmd_analyse(args):
 
 def cmd_serve(args):
     from .app import create_app
+    from .feed import CaptureSession, LiveFeed
     from .store import Store
+
     store = Store(args.db)
-    app = create_app(store, _corpus())
+    corpus = _corpus()
+    feed = LiveFeed()
+    session = CaptureSession(store, corpus, feed,
+                             interface=args.interface, bpf=args.filter)
+    app = create_app(store, corpus, feed=feed, session=session)
+
+    if args.capture:
+        ok, message = session.start()
+        print("capture   : %s" % message)
+        if not ok:
+            print("            (the console still runs; start capture from the Live view)")
+
     print("console on http://127.0.0.1:%d  (db %s)" % (args.port, args.db))
-    app.run(host="127.0.0.1", port=args.port, debug=False)
+    print("live feed : /api/stream   capture control: /api/capture/start")
+    # threaded so the event-stream endpoint can hold a connection open while the
+    # capture thread keeps publishing and other requests are still served
+    app.run(host="127.0.0.1", port=args.port, debug=False, threaded=True)
+    try:
+        session.stop()
+    except Exception:
+        pass
+    store.close()
     return 0
 
 
@@ -195,6 +216,11 @@ def main(argv=None):
                             help="stop after this many seconds")
         if name == "serve":
             sp.add_argument("--port", type=int, default=5001)
+            sp.add_argument("--capture", action="store_true",
+                            help="start capturing from a live interface immediately")
+            sp.add_argument("--interface", default=None,
+                            help="interface index or part of its description")
+            sp.add_argument("--filter", default=None, help="a BPF filter expression")
         sp.set_defaults(func=fn)
     args = p.parse_args(argv)
     return args.func(args)
