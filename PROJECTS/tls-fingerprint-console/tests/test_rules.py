@@ -9,6 +9,7 @@ sys.path.insert(0, ROOT)
 from src import rules  # noqa: E402
 from src.rules import (  # noqa: E402
     KNOWN_FP_FAMILY,
+    ech_obscured,
     evaluate,
     first_seen,
     fp_rotation,
@@ -296,9 +297,9 @@ def test_evaluate_never_raises_on_malformed_event():
 
 def test_all_rules_are_separate_callables():
     for name in ("known_bad", "ua_mismatch", "os_mismatch", "first_seen",
-                 "fp_rotation", "monoculture"):
+                 "fp_rotation", "monoculture", "ech_obscured"):
         assert callable(getattr(rules, name))
-    assert len(rules.RULES) == 6
+    assert len(rules.RULES) == 7
 
 
 def test_every_alert_has_the_four_contract_keys():
@@ -308,3 +309,40 @@ def test_every_alert_has_the_four_contract_keys():
     assert alerts
     for a in alerts:
         assert set(a) == {"rule", "severity", "title", "detail"}
+
+
+# -------------------------------------------------------------- ech_obscured
+def test_ech_obscured_fires_on_ech_event():
+    e = ev(ech=True, sni="cover.example",
+           fingerprints={"ja4": "t13dXYZ"})
+    alerts = ech_obscured(e, {})
+    assert len(alerts) == 1
+    a = alerts[0]
+    assert a["rule"] == "ech_obscured"
+    assert a["severity"] == "info"
+    assert a["title"] == "the handshake is hidden"
+    assert "cover.example" in a["detail"]
+    assert "outer" in a["detail"].lower()
+
+
+def test_ech_obscured_silent_without_flag():
+    assert ech_obscured(ev(fingerprints={"ja4": "t13dXYZ"}), {}) == []
+    assert ech_obscured(ev(ech=False, fingerprints={"ja4": "x"}), {}) == []
+    assert ech_obscured(ev(ech=None), {}) == []
+
+
+def test_ech_obscured_malformed_event_does_not_raise():
+    # ech true but no fingerprints / no sni at all
+    ech_obscured({"ech": True}, {})
+    ech_obscured(ev(ech=True, sni=None, fingerprints={}), {})
+    ech_obscured({"ech": True, "sni": 123}, {})
+    assert ech_obscured(None, {}) == []
+    assert ech_obscured("not-a-dict", {}) == []
+    # evaluate must also stay quiet-safe
+    evaluate({"ech": True}, {})
+
+
+def test_ech_obscured_does_not_fire_without_ech_in_evaluate():
+    e = ev(sni="real.example.com", fingerprints={"ja4": "t13dXYZ"})
+    names = {a["rule"] for a in evaluate(e, {})}
+    assert "ech_obscured" not in names

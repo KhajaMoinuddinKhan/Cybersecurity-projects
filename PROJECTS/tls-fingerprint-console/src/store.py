@@ -22,9 +22,21 @@ FP_KINDS = ("ja3", "ja3s", "ja4", "ja4s", "ja4x", "ja4t", "ja4h")
 
 _EVENT_COLS = ("ts", "src_ip", "dst_ip", "src_port", "dst_port", "sni",
                "alpn", "user_agent", "ja3", "ja3s", "ja4", "ja4s", "ja4x",
-               "ja4t", "ja4h", "category", "intel_name")
+               "ja4t", "ja4h", "category", "intel_name",
+               # transport and the QUIC/ECH fields are part of what an event is,
+               # not decoration: without them a stored event cannot say it came
+               # from HTTP/3, and the ECH flag -- which the ech_obscured rule
+               # reads -- would vanish the moment the event was written.
+               "transport", "quic_version", "ech")
 
 _TOP_FP_LIMIT = 10
+
+
+def _int_or_none(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _num(value, default):
@@ -53,7 +65,8 @@ class Store:
                     ts REAL, src_ip TEXT, dst_ip TEXT, src_port INTEGER,
                     dst_port INTEGER, sni TEXT, alpn TEXT, user_agent TEXT,
                     ja3 TEXT, ja3s TEXT, ja4 TEXT, ja4s TEXT, ja4x TEXT,
-                    ja4t TEXT, ja4h TEXT, category TEXT, intel_name TEXT
+                    ja4t TEXT, ja4h TEXT, category TEXT, intel_name TEXT,
+                    transport TEXT, quic_version INTEGER, ech INTEGER
                 )"""
             )
             c.execute(
@@ -71,6 +84,37 @@ class Store:
                 )"""
             )
             c.commit()
+            self._migrate()
+
+    def _migrate(self):
+        """Add columns an older database is missing.
+
+        ``CREATE TABLE IF NOT EXISTS`` leaves an existing table alone, so a
+        store written before a column was introduced would raise on every
+        insert afterwards. Adding the missing columns keeps an existing
+        console's history readable instead of making the operator start over.
+        """
+        want = {
+            "transport": "TEXT",
+            "quic_version": "INTEGER",
+            "ech": "INTEGER",
+        }
+        with self._lock:
+            try:
+                have = {r[1] for r in self._conn.execute("PRAGMA table_info(events)")}
+            except sqlite3.Error:
+                return
+            for column, kind in want.items():
+                if column in have:
+                    continue
+                try:
+                    self._conn.execute("ALTER TABLE events ADD COLUMN %s %s" % (column, kind))
+                except sqlite3.Error:
+                    pass
+            try:
+                self._conn.commit()
+            except sqlite3.Error:
+                pass
 
     # ------------------------------------------------------------------ writes
     def add_event(self, event):
@@ -91,6 +135,9 @@ class Store:
             fps.get("ja3"), fps.get("ja3s"), fps.get("ja4"), fps.get("ja4s"),
             fps.get("ja4x"), fps.get("ja4t"), fps.get("ja4h"),
             event.get("category"), event.get("intel_name"),
+            event.get("transport"),
+            _int_or_none(event.get("quic_version")),
+            1 if event.get("ech") else 0,
         )
         with self._lock:
             cur = self._conn.execute(
@@ -143,6 +190,7 @@ class Store:
         for r in rows:
             d = dict(r)
             d["fingerprints"] = {k: d[k] for k in FP_KINDS if d.get(k)}
+            d["ech"] = bool(d.get("ech"))
             out.append(d)
         return out
 

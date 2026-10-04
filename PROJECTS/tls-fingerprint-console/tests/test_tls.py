@@ -10,6 +10,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fixtures import make_pcap  # noqa: E402
 from src.pcap import read_pcap, reassemble_streams  # noqa: E402
 from src.tls import (  # noqa: E402
+    ECH_EXTENSION,
+    fingerprint_caveat,
+    is_ech,
     iter_tls_records,
     parse_certificate_message,
     parse_client_hello,
@@ -154,3 +157,82 @@ def test_server_stream_parses_hello_and_certificate():
 def test_parse_http_request_rejects_empty():
     with pytest.raises(ValueError):
         parse_http_request(b"\r\n\r\n")
+
+
+# ------------------------------------------------------------- ECH awareness
+def _ech_body(config_id=0x2a):
+    """A well-formed outer ECHClientHello extension body."""
+    return (b"\x00"                       # ECHClientHelloType: outer
+            + b"\x00\x01"                # HpkeSymmetricCipherSuite.kdf_id
+            + b"\x00\x01"                # HpkeSymmetricCipherSuite.aead_id
+            + bytes([config_id])          # config_id
+            + b"\x00\x00"                # enc<0..> length 0
+            + b"\x00\x03" + b"abc")      # payload<1..> length 3
+
+
+def _build_hello_body(exts):
+    """Mirror of make_pcap.build_client_hello_body but with caller extensions."""
+    random = bytes(range(32))
+    session_id = make_pcap.CLIENT_HELLO_SESSION_ID
+    ciphers = b"".join(make_pcap._u16(c) for c in make_pcap.CLIENT_HELLO_CIPHERS)
+    return (make_pcap._u16(0x0303) + random + make_pcap._u8(len(session_id))
+            + session_id + make_pcap._u16(len(ciphers)) + ciphers
+            + make_pcap._u8(1) + make_pcap._u8(0)
+            + make_pcap._u16(len(exts)) + exts)
+
+
+def _base_exts():
+    return make_pcap._build_client_hello_extensions()
+
+
+def _exts_with_ech(ech_body):
+    return _base_exts() + make_pcap._ext(ECH_EXTENSION, ech_body)
+
+
+def test_client_hello_without_ech():
+    hello = parse_client_hello(_build_hello_body(_base_exts()))
+    assert hello["ech"] is False
+    assert hello["ech_outer"] is False
+    assert hello["ech_config_ids"] == []
+    assert is_ech(hello) is False
+    assert fingerprint_caveat(hello) is None
+
+
+def test_client_hello_with_wellformed_ech():
+    hello = parse_client_hello(_build_hello_body(_exts_with_ech(_ech_body(0x2a))))
+    assert hello["ech"] is True
+    assert hello["ech_outer"] is True
+    assert hello["ech_config_ids"] == [0x2a]
+    assert is_ech(hello) is True
+    caveat = fingerprint_caveat(hello)
+    assert isinstance(caveat, str) and caveat.strip()
+    assert "outer" in caveat.lower()
+
+
+def test_client_hello_with_truncated_ech_body_does_not_raise():
+    hello = parse_client_hello(_build_hello_body(_exts_with_ech(b"\x00\x01")))
+    assert hello["ech"] is True
+    assert hello["ech_outer"] is False
+    assert hello["ech_config_ids"] == []
+    assert is_ech(hello) is True
+    assert fingerprint_caveat(hello) is not None
+
+
+def test_client_hello_with_garbage_ech_body_does_not_raise():
+    hello = parse_client_hello(_build_hello_body(_exts_with_ech(b"\xff\xff\xff\xff")))
+    assert hello["ech"] is True
+    assert hello["ech_outer"] is False
+    assert hello["ech_config_ids"] == []
+
+
+def test_client_hello_existing_keys_unchanged_without_ech():
+    canonical = parse_client_hello(make_pcap.build_client_hello_body())
+    hello = parse_client_hello(_build_hello_body(_base_exts()))
+    for key in ("version", "session_id", "ciphers", "extensions", "sni",
+                "alpn", "curves", "point_formats", "sig_algs",
+                "supported_versions", "grease"):
+        assert key in hello
+        assert hello[key] == canonical[key]
+    assert hello["sni"] == make_pcap.CLIENT_HELLO_SNI
+    assert hello["extensions"] == make_pcap.CLIENT_HELLO_EXTENSIONS
+    assert hello["grease"] == make_pcap.CLIENT_HELLO_GREASE

@@ -459,9 +459,37 @@ def monoculture(event, ctx):
 
 
 # --------------------------------------------------------------------------
+# ech_obscured
+# --------------------------------------------------------------------------
+def ech_obscured(event, ctx):
+    """info: the ClientHello offered ECH, so the handshake is hidden.
+
+    This is not a threat but a visibility limit: with ECH the outer hello is
+    deliberately generic and the SNI is a public name, so the fingerprint only
+    describes the outer shell.  Fires solely on the event's ``ech`` flag -- the
+    rule never re-parses anything, and stays quiet when the flag is absent or
+    false.
+    """
+    if not isinstance(event, dict):
+        return []
+    if event.get("ech") is not True:
+        return []
+    public_name = event.get("sni")
+    if not isinstance(public_name, str) or not public_name:
+        public_name = "unknown"
+    detail = (
+        "the ClientHello offered Encrypted Client Hello (ECH): the SNI "
+        "{sni!r} is a public name, not the real destination, and the "
+        "fingerprint describes the outer hello only".format(sni=public_name)
+    )
+    return [_alert("ech_obscured", "info", "the handshake is hidden", detail)]
+
+
+# --------------------------------------------------------------------------
 # evaluate
 # --------------------------------------------------------------------------
-RULES = (known_bad, ua_mismatch, os_mismatch, first_seen, fp_rotation, monoculture)
+RULES = (known_bad, ua_mismatch, os_mismatch, first_seen, fp_rotation, monoculture,
+         ech_obscured)
 
 
 def evaluate(event, ctx=None):

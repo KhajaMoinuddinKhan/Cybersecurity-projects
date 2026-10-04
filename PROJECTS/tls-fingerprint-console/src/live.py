@@ -20,6 +20,11 @@ from . import ja4 as ja4mod
 from . import tls as tlsmod
 from .pipeline import _first, _handshake_records
 
+try:  # QUIC support is optional: it needs a crypto library for the AEAD
+    from . import quic
+except Exception:  # pragma: no cover - import guard
+    quic = None
+
 # How long to wait for a server response after a ClientHello before emitting
 # the event anyway. Long enough to catch a handshake on a slow link, short
 # enough that a one-sided flow still shows up promptly.
@@ -60,6 +65,10 @@ class LiveSensor:
         # and judging those against the wall clock expired every flow the
         # instant it was created.
         self.clock = None
+        # QUIC ClientHellos are split across Initial packets, so the sensor has
+        # to reassemble a CRYPTO stream per connection rather than fingerprint
+        # a single datagram.
+        self._quic_assembler = None
         self.counters = {"packets": 0, "bytes": 0, "flows": 0, "events": 0,
                          "alerts": 0, "expired": 0, "dropped": 0}
 
@@ -72,6 +81,9 @@ class LiveSensor:
         self.counters["packets"] += 1
         payload = packet.get("payload") or b""
         self.counters["bytes"] += len(payload)
+
+        if packet.get("protocol") == "udp":
+            return self._feed_quic(packet, payload)
         if packet.get("protocol") != "tcp":
             return []
 
@@ -161,6 +173,74 @@ class LiveSensor:
             self.flows.pop(k, None)
             self.counters["dropped"] += 1
 
+    def _feed_quic(self, packet, payload):
+        """Fingerprint a QUIC datagram, if it is one we can read.
+
+        QUIC is TLS over UDP, and its Initial packets can be decrypted by
+        anyone: the keys come from a public salt and the connection ID, which
+        is why a passive observer can fingerprint HTTP/3 at all. A datagram
+        that is not QUIC, or whose Initial packet does not decrypt, produces
+        nothing -- and produces it quietly, because most UDP is not QUIC.
+        """
+        if not payload or quic is None or not quic.HAVE_CRYPTO:
+            return []
+        if self._quic_assembler is None:
+            try:
+                self._quic_assembler = quic.CryptoAssembler()
+            except Exception:
+                return []
+        try:
+            found = self._quic_assembler.feed(payload)
+        except Exception:
+            return []
+        if not found:
+            return []
+        try:
+            hello = tlsmod.parse_client_hello(found["client_hello"])
+        except Exception:
+            return []
+        if not hello:
+            return []
+
+        ts = packet.get("ts")
+        if isinstance(ts, (int, float)):
+            self.clock = ts if self.clock is None else max(self.clock, ts)
+        now = self._now()
+
+        fingerprints = {}
+        for kind, fn in (("ja3", ja3mod.ja3), ("ja4", ja4mod.ja4)):
+            try:
+                fingerprints[kind] = fn(hello, proto="q")
+            except TypeError:
+                # ja3 takes no protocol argument: QUIC carries the same client
+                # hello fields, so the same hash applies.
+                try:
+                    fingerprints[kind] = fn(hello)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        if not fingerprints:
+            return []
+
+        alpn = hello.get("alpn") or []
+        event = {
+            "ts": ts if isinstance(ts, (int, float)) else now,
+            "src_ip": packet.get("src_ip"), "src_port": packet.get("src_port"),
+            "dst_ip": packet.get("dst_ip"), "dst_port": packet.get("dst_port"),
+            "sni": hello.get("sni"),
+            "alpn": (alpn[0].decode("ascii", "replace")
+                     if alpn and isinstance(alpn[0], bytes) else (alpn[0] if alpn else None)),
+            "user_agent": None,
+            "fingerprints": fingerprints,
+            "transport": "quic",
+            "quic_version": found.get("version"),
+            "live": True,
+        }
+        if hello.get("ech"):
+            event["ech"] = True
+        return self._publish(event)
+
     def _fingerprint(self, flow):
         """Try to read a handshake out of whatever bytes have arrived so far.
 
@@ -194,6 +274,8 @@ class LiveSensor:
                                   else flow["key"][0])
                 flow["hello_ts"] = flow["hello_ts"] or self._now()
                 flow["sni"] = hello.get("sni")
+                if hello.get("ech"):
+                    flow["ech"] = True
                 alpn = hello.get("alpn") or []
                 if alpn:
                     first = alpn[0]
@@ -295,6 +377,7 @@ class LiveSensor:
         return out
 
     def _emit(self, flow):
+        """Build an event from a TCP flow and publish it."""
         client = flow["client"] or ("", 0)
         server = flow["server"] or ("", 0)
         event = {
@@ -304,9 +387,23 @@ class LiveSensor:
             "sni": flow["sni"], "alpn": flow["alpn"],
             "user_agent": flow["user_agent"],
             "fingerprints": dict(flow["fingerprints"]),
+            "transport": "tcp",
             "live": True,
         }
-        for kind, value in event["fingerprints"].items():
+        if flow.get("ech"):
+            event["ech"] = True
+        flow["emitted"] = True
+        return self._publish(event)
+
+    def _publish(self, event):
+        """Label, judge, store and announce one event.
+
+        Split out from _emit because QUIC builds its event directly -- there is
+        no flow table for a datagram -- and both paths have to run the same
+        intel lookup, the same rules and the same callbacks. Handing a
+        ready-made event to _emit used to fail, because _emit expects a flow.
+        """
+        for kind, value in (event.get("fingerprints") or {}).items():
             try:
                 entry = self.corpus.match(kind, value) if self.corpus is not None else None
             except Exception:
@@ -316,7 +413,6 @@ class LiveSensor:
                 event["intel_name"] = getattr(entry, "name", None)
                 break
 
-        flow["emitted"] = True
         self.counters["events"] += 1
         try:
             produced = self.rules.evaluate(event, self._ctx()) or []

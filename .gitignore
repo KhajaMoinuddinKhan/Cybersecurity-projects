@@ -12,3 +12,7 @@ baseline.json
 # The SIEM writes uploaded captures and alert logs beside the database.
 captures/
 *.jsonl
+
+# Tests keep their temporary files inside the project, so the suite does not
+# depend on the system temp directory being readable.
+.pytest_tmp/

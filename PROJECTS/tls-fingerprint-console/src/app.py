@@ -495,6 +495,39 @@ def create_app(store, corpus, rules_module=None, feed=None, session=None):
 
         return jsonify({"accepted": accepted, "alerts": alert_count})
 
+    # ---------------------------------------------------- identification
+    @app.get("/api/match")
+    def api_match():
+        """Identify one fingerprint, with a confidence and the reasoning.
+
+        An exact lookup answers yes or no. A fingerprint that is nearly a known
+        one -- same cipher list, different version -- is the same software, and
+        saying so with a score is more useful than saying nothing.
+        """
+        kind = (request.args.get("kind") or "").strip().lower()
+        value = (request.args.get("value") or "").strip().lower()
+        if not kind or not value:
+            return jsonify({"error": "kind and value are both required"}), 400
+        try:
+            from .matcher import match_fingerprint
+        except Exception as exc:
+            return jsonify({"error": "matcher unavailable: %s" % exc}), 503
+        return jsonify(match_fingerprint(kind, value, corpus))
+
+    @app.get("/api/diversity")
+    def api_diversity():
+        """How varied each source is, and which fingerprints several share."""
+        try:
+            from .matcher import diversity
+        except Exception as exc:
+            return jsonify({"error": "matcher unavailable: %s" % exc}), 503
+        try:
+            limit = min(int(request.args.get("limit", 5000)), 50000)
+        except (TypeError, ValueError):
+            limit = 5000
+        events = store.events()[-limit:]
+        return jsonify(diversity(events))
+
     # ----------------------------------------------------------- live feed
     @app.get("/api/feed")
     def api_feed():

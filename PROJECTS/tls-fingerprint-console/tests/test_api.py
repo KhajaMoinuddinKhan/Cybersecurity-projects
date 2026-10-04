@@ -463,3 +463,37 @@ def test_index_no_longer_claims_transport_offline(client):
     assert "transport offline" not in html
     # the footer is now driven by /api/capture
     assert "captureFoot" in html
+
+def test_api_match_identifies_a_known_fingerprint(client, corpus):
+    """An exact corpus hit scores 1.0 and names the client."""
+    entry = next(e for e in corpus.entries() if e.kind == "ja3")
+    d = client.get("/api/match?kind=ja3&value=%s" % entry.value).get_json()
+    assert d["confidence"] == 1.0
+    assert d["match"]["name"] == entry.name
+    assert "exact" in d["basis"].lower()
+
+
+def test_api_match_says_so_when_it_does_not_know(client):
+    d = client.get("/api/match?kind=ja3&value=deadbeefdeadbeefdeadbeefdeadbeef").get_json()
+    assert d["confidence"] == 0.0
+    assert d["match"] is None
+    assert d["candidates"] == []
+
+
+def test_api_match_requires_both_arguments(client):
+    assert client.get("/api/match?kind=ja3").status_code == 400
+    assert client.get("/api/match?value=abc").status_code == 400
+
+
+def test_api_diversity_reports_per_source_variety(client, store):
+    for i in range(4):
+        store.add_event({"ts": 1000.0 + i, "src_ip": "10.0.0.1", "sni": "a.example",
+                         "fingerprints": {"ja4": "t13d1516h2_aaaa_bbbb"}})
+    store.add_event({"ts": 2000.0, "src_ip": "10.0.0.2", "sni": "b.example",
+                     "fingerprints": {"ja4": "t13d1516h2_cccc_dddd"}})
+    d = client.get("/api/diversity").get_json()
+    assert d["totals"]["sources"] == 2
+    sources = {s["src_ip"]: s for s in d["sources"]}
+    assert sources["10.0.0.1"]["events"] == 4
+    assert sources["10.0.0.1"]["distinct_ja4"] == 1
+    assert sources["10.0.0.1"]["diversity"] < 0.5

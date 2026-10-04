@@ -60,7 +60,12 @@
     padding:12px 20px;border-bottom:1px solid var(--line);background:var(--rail);
     position:sticky;top:0;z-index:5;
   }
-  .feed{max-height:56vh;overflow-y:auto;border-top:1px solid var(--line);margin-top:12px}
+  .tp{display:inline-block;padding:1px 6px;border-radius:4px;font-size:9px;letter-spacing:.07em;
+        text-transform:uppercase;border:1px solid var(--line);margin-right:6px;vertical-align:1px}
+    .tp.quic{color:var(--violet);border-color:var(--violet)}
+    .tp.tcp{color:#7f8f98;border-color:var(--line)}
+    .tp.ech{color:var(--amber);border-color:var(--amber);text-transform:none}
+    .feed{max-height:56vh;overflow-y:auto;border-top:1px solid var(--line);margin-top:12px}
     .frow{display:grid;grid-template-columns:64px 52px 1fr;gap:12px;padding:8px 2px;
           border-bottom:1px solid var(--line);font-size:12px;align-items:start}
     .frow.is-alert{background:#160f11}
@@ -799,11 +804,25 @@
       who = esc(item.rule) + " \u2014 " + esc(item.title) + (item.src_ip ? "  " + esc(item.src_ip) : "");
       extra = item.detail ? esc(item.detail) : "";
     }
+    // A QUIC handshake and a TCP one are different events, and the feed has to
+    // say which is which: the transport is the first thing a reader wants to
+    // know, and an ECH fingerprint needs its caveat attached or it reads as a
+    // reliable identifier when it is not.
+    var badges = "";
+    if (kind === "event"){
+      var tp = (item.transport || "").toLowerCase();
+      if (tp === "quic"){
+        badges += '<span class="tp quic">quic' + (item.quic_version ? " v" + item.quic_version : "") + '</span>';
+      } else if (tp === "tcp"){
+        badges += '<span class="tp tcp">tcp</span>';
+      }
+      if (item.ech) badges += '<span class="tp ech">ech &mdash; outer hello only</span>';
+    }
     var row = document.createElement("div");
     row.className = "frow" + (kind === "alert" ? " is-alert" : "");
     row.innerHTML = '<span class="t">' + clockOf(item.ts || rec.at) + '</span>'
                   + '<span class="k ' + kind + '">' + kind + '</span>'
-                  + '<span class="body"><span class="who">' + who + '</span>'
+                  + '<span class="body"><span class="who">' + badges + who + '</span>'
                   + (extra ? '<span class="fp">' + esc(extra).replace(/\n/g, "<br>") + '</span>' : '')
                   + '</span>';
     return row;

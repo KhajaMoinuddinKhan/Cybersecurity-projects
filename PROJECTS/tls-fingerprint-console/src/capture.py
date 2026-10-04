@@ -39,7 +39,17 @@ LINKTYPE_LOOP = 108        # OpenBSD loopback
 # The ports a TLS handshake normally appears on, used as the default filter so
 # the console watches handshakes rather than every packet on the wire.
 TLS_PORTS = (443, 8443, 993, 995, 465, 587, 636, 853, 8883, 9443)
-DEFAULT_FILTER = "tcp and (" + " or ".join("port %d" % p for p in TLS_PORTS) + ")"
+
+# QUIC carries TLS over UDP, so a TCP-only filter silently excludes every
+# HTTP/3 handshake -- which is a growing share of real traffic. These are the
+# UDP ports QUIC is normally found on.
+QUIC_PORTS = (443, 8443, 8883)
+
+DEFAULT_FILTER = (
+    "(tcp and (" + " or ".join("port %d" % p for p in TLS_PORTS) + "))"
+    " or "
+    "(udp and (" + " or ".join("port %d" % p for p in QUIC_PORTS) + "))"
+)
 
 
 class CaptureUnavailable(RuntimeError):

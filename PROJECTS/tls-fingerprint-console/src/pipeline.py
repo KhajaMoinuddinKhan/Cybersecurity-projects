@@ -12,6 +12,11 @@ from . import ja4 as ja4mod
 from . import pcap as pcapmod
 from . import tls as tlsmod
 
+try:  # QUIC needs a crypto library for the AEAD; the rest works without it
+    from . import quic
+except Exception:  # pragma: no cover - import guard
+    quic = None
+
 
 def _handshake_records(payload):
     """Every handshake message in a byte stream, as (msg_type, body)."""
@@ -114,6 +119,10 @@ def fingerprint_streams(packets):
                 hello = None
             if hello:
                 rec["sni"] = hello.get("sni")
+                if hello.get("ech"):
+                    # The fingerprint describes the outer hello; the real one is
+                    # encrypted. Mark it so the rules can say so.
+                    rec["ech"] = True
                 alpn = hello.get("alpn") or []
                 if alpn:
                     rec["alpn"] = alpn[0].decode("ascii", "replace") if isinstance(alpn[0], bytes) else str(alpn[0])
@@ -186,10 +195,90 @@ def fingerprint_streams(packets):
     return results
 
 
+def quic_events(packets, corpus=None):
+    """One event per QUIC Initial packet we can decrypt and fingerprint.
+
+    QUIC is TLS over UDP. Its Initial packets are encrypted, but with keys
+    derived from a public salt and the connection ID, so a passive reader can
+    decrypt them -- which is the only way to fingerprint HTTP/3 at all.
+    """
+    if quic is None or not getattr(quic, "HAVE_CRYPTO", False):
+        return []
+    out = []
+    # A QUIC ClientHello is spread over several Initial packets, so the frames
+    # are reassembled per connection rather than read from one datagram.
+    assembler = quic.CryptoAssembler()
+    for packet in packets:
+        if packet.get("protocol") != "udp":
+            continue
+        payload = packet.get("payload") or b""
+        if not payload:
+            continue
+        try:
+            found = assembler.feed(payload)
+        except Exception:
+            found = None
+        if not found:
+            continue
+        try:
+            hello = tlsmod.parse_client_hello(found["client_hello"])
+        except Exception:
+            continue
+        if not hello:
+            continue
+        fingerprints = {}
+        for kind, fn in (("ja3", ja3mod.ja3), ("ja4", ja4mod.ja4)):
+            try:
+                fingerprints[kind] = fn(hello, proto="q")
+            except TypeError:
+                try:
+                    fingerprints[kind] = fn(hello)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        if not fingerprints:
+            continue
+        alpn = hello.get("alpn") or []
+        event = {
+            "ts": packet.get("ts") or 0.0,
+            "src_ip": packet.get("src_ip"), "src_port": packet.get("src_port"),
+            "dst_ip": packet.get("dst_ip"), "dst_port": packet.get("dst_port"),
+            "sni": hello.get("sni"),
+            "alpn": (alpn[0].decode("ascii", "replace")
+                     if alpn and isinstance(alpn[0], bytes) else (alpn[0] if alpn else None)),
+            "user_agent": None,
+            "fingerprints": fingerprints,
+            "transport": "quic",
+            "quic_version": found.get("version"),
+        }
+        if hello.get("ech"):
+            event["ech"] = True
+        _attach_intel(event, corpus)
+        out.append(event)
+    return out
+
+
+def _attach_intel(event, corpus):
+    """Label an event with the first corpus match among its fingerprints."""
+    if corpus is None:
+        return event
+    for kind, value in (event.get("fingerprints") or {}).items():
+        try:
+            entry = corpus.match(kind, value)
+        except Exception:
+            entry = None
+        if entry is not None:
+            event["category"] = getattr(entry, "category", None)
+            event["intel_name"] = getattr(entry, "name", None)
+            break
+    return event
+
+
 def events_from_pcap(path, corpus=None):
     """Read a capture and return one event per fingerprinted TLS flow."""
     packets = pcapmod.read_pcap(path)
-    events = []
+    events = list(quic_events(packets, corpus))
     for rec in fingerprint_streams(packets):
         client = rec["client"] or ("", 0)
         server = rec["server"] or ("", 0)
@@ -203,17 +292,11 @@ def events_from_pcap(path, corpus=None):
             "alpn": rec["alpn"],
             "user_agent": rec["user_agent"],
             "fingerprints": dict(rec["fingerprints"]),
+            "transport": "tcp",
         }
-        if corpus is not None:
-            for kind, value in event["fingerprints"].items():
-                try:
-                    entry = corpus.match(kind, value)
-                except Exception:
-                    entry = None
-                if entry is not None:
-                    event["category"] = getattr(entry, "category", None)
-                    event["intel_name"] = getattr(entry, "name", None)
-                    break
+        if rec.get("ech"):
+            event["ech"] = True
+        _attach_intel(event, corpus)
         events.append(event)
     return events
 

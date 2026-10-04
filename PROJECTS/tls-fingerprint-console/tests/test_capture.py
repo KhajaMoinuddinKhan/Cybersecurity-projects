@@ -115,16 +115,20 @@ def test_pick_interface_default_returns_one_even_if_all_are_pseudo():
 
 # --------------------------------------------------------------- default filter
 
-def test_default_filter_covers_tls_and_looks_like_bpf():
-    expr = capture.DEFAULT_FILTER
-    assert "port 443" in expr
-    assert "tcp" in expr
-    assert expr.startswith("tcp and (")
-    assert " or " in expr
-    assert "8443" in expr
+def test_default_filter_covers_tls_over_tcp_and_quic_over_udp():
+    """The filter must watch both transports.
 
-
-# ------------------------------------------------------------------ LiveCapture
+    A TCP-only filter silently excludes every HTTP/3 handshake, which is why
+    the filter is asserted on both halves rather than just on the TLS ports.
+    """
+    f = capture.DEFAULT_FILTER
+    assert "tcp" in f and "udp" in f, "QUIC is UDP; a tcp-only filter cannot see it"
+    for port in (443, 8443, 993, 995, 465, 587, 636, 853, 8883, 9443):
+        assert "port %d" % port in f, "TLS port %d missing" % port
+    for port in capture.QUIC_PORTS:
+        assert "port %d" % port in f, "QUIC port %d missing" % port
+    # it must actually be a BPF expression, not a sentence
+    assert f.count("(") == f.count(")"), "unbalanced parentheses in the filter"
 
 def test_livecapture_open_on_a_nonexistent_device_raises():
     if not capture.available():

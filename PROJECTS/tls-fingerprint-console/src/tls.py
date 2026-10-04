@@ -14,6 +14,18 @@ import re
 import struct
 
 # ---------------------------------------------------------------------------
+# Encrypted Client Hello (ECH)
+# ---------------------------------------------------------------------------
+# ECH is offered by the client in TLS extension 0xfe0d.  When present, the
+# outer ClientHello a passive observer sees carries a public name (a decoy)
+# instead of the real SNI, and the real extension set is sealed inside an
+# encrypted inner ClientHello.  A JA3/JA4 computed from such a hello describes
+# only the deliberately generic outer shell, so it is NOT a reliable client
+# identifier.  (A second extension, ``ech_grease``, also exists; this module
+# deliberately covers only 0xfe0d, the value we can state with confidence.)
+ECH_EXTENSION = 0xfe0d
+
+# ---------------------------------------------------------------------------
 # TLS records
 # ---------------------------------------------------------------------------
 
@@ -81,6 +93,7 @@ def parse_client_hello(body):
     point_formats = []
     sig_algs = []
     supported_versions = []
+    ech_ext_data = None
 
     if p + 2 <= n:
         ext_total = _need_u16(body, p)
@@ -106,6 +119,16 @@ def parse_client_hello(body):
                 sig_algs = _parse_u16_list(edata, 2)
             elif etype == 0x002B:
                 supported_versions = _parse_u16_list(edata, 1)
+            elif etype == ECH_EXTENSION:
+                ech_ext_data = bytes(edata)
+
+    # ECH awareness: never changes existing keys; a malformed body still
+    # reports ech=True and simply leaves the parsed fields empty.
+    ech = ech_ext_data is not None
+    ech_outer = False
+    ech_config_ids = []
+    if ech:
+        ech_outer, ech_config_ids = _parse_ech(ech_ext_data)
 
     grease = []
     for seq in (ciphers, extensions, curves, point_formats, sig_algs,
@@ -126,7 +149,34 @@ def parse_client_hello(body):
         "sig_algs": sig_algs,
         "supported_versions": supported_versions,
         "grease": grease,
+        "ech": ech,
+        "ech_outer": ech_outer,
+        "ech_config_ids": ech_config_ids,
     }
+
+
+def is_ech(hello):
+    """True when *hello* (a :func:`parse_client_hello` result) offered ECH."""
+    if not isinstance(hello, dict):
+        return False
+    extensions = hello.get("extensions")
+    if not isinstance(extensions, (list, tuple)):
+        return False
+    return ECH_EXTENSION in extensions
+
+
+def fingerprint_caveat(hello):
+    """Return a one-sentence caveat for an ECH hello, or None otherwise.
+
+    The fingerprint of an ECH ClientHello describes the *outer* hello, whose
+    extension set is deliberately generic and may be padded or randomised, and
+    the SNI it carries is a public name rather than the site actually visited.
+    """
+    if not is_ech(hello):
+        return None
+    return ("this fingerprint describes the outer ClientHello, whose extension "
+            "set is deliberately generic, and the SNI shown is a public name, "
+            "so it is not a reliable client identifier.")
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +416,31 @@ def _need_u16(body, p):
 
 def _is_grease(value):
     return (value >> 8) == (value & 0xFF) and (value & 0x0F) == 0x0A
+
+
+def _parse_ech(edata):
+    """Best-effort parse of an ECH (0xfe0d) extension body.
+
+    The body is an ``ECHClientHello``: a one-byte type; for the ``outer`` type
+    it is followed by a cipher suite, a one-byte ``config_id`` and
+    length-prefixed ``enc`` / ``payload`` fields.  Returns
+    ``(outer_parsed, config_ids)``.  A malformed body yields ``(False, [])``
+    and never raises.
+    """
+    try:
+        if not edata:
+            return False, []
+        ech_type = edata[0]
+        if ech_type == 1:  # inner: no plaintext fields to read
+            return True, []
+        if ech_type != 0:  # unknown type
+            return False, []
+        # type(1) + kdf_id(2) + aead_id(2) + config_id(1)
+        if len(edata) < 6:
+            return False, []
+        return True, [edata[5]]
+    except Exception:
+        return False, []
 
 
 def _parse_sni(edata):
