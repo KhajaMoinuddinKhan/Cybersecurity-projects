@@ -6,6 +6,13 @@
 .DS_Store
 *.db
 
+# SQLite keeps a write-ahead log and a shared-memory file beside the
+# database while it is open, and a running server writes a log of its own.
+# None of them is source, and a *.db entry alone leaves all three behind.
+*.db-wal
+*.db-shm
+*.log
+
 # File Integrity Monitor writes its baseline next to the folder it watches.
 baseline.json
 
