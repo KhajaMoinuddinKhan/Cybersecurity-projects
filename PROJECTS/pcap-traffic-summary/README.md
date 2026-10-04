@@ -6,10 +6,7 @@ It is a reading tool, not a capture tool. It never opens an interface, never gen
 
 ## Running it
 
-Install Scapy in the same environment you use for the command:
-
 ```console
-python -m pip install -r requirements.txt
 python -m src.analyze_pcap capture.pcap
 python -m src.analyze_pcap capture.pcap --json
 python -m src.analyze_pcap capture.pcap --top 5

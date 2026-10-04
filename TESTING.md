@@ -4,14 +4,7 @@ A test result is only as broad as the behaviour it exercises, and it is easy to 
 
 ## Running everything
 
-Work from a virtual environment so the runner and the project dependencies stay out of your system Python. Install the test runner and the dependencies for the four projects that need them:
-
 ```console
-python -m pip install pytest
-python -m pip install -r PROJECTS/pcap-traffic-summary/requirements.txt
-python -m pip install -r PROJECTS/network-traffic-analyzer/requirements.txt
-python -m pip install -r PROJECTS/siem-dashboard/requirements.txt
-python -m pip install -r PROJECTS/web-vulnerability-scanner/requirements.txt
 python scripts/check_all.py
 ```
 
@@ -19,7 +12,7 @@ The runner compiles each project's source and runs its tests in a separate Pytho
 
 To work on a single project, `cd` into it and run `python -m pytest -q tests`. Swap `-q` for `-v` when you want to see each test name.
 
-Node.js is needed for one extra check: the SIEM JavaScript controls are exercised in a small DOM harness against a temporary API. Everything else is Python and the standard library.
+Four projects reach past the standard library — the two capture analyzers, the SIEM and the web scanner — and one check needs Node.js: the SIEM's JavaScript controls are exercised in a small DOM harness against a temporary API. Everything else is Python and the standard library.
 
 ## What the automated checks actually cover
 

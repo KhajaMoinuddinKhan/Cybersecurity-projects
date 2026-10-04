@@ -6,10 +6,7 @@ Where the summary tool counts packets, this one also accounts for bytes, groups 
 
 ## Running it
 
-Scapy is the only dependency:
-
 ```console
-python -m pip install -r requirements.txt
 python -m src.analyzer capture.pcap
 python -m src.analyzer capture.pcap --json
 python -m src.analyzer capture.pcap --top 5
