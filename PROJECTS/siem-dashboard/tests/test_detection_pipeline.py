@@ -1,7 +1,22 @@
 """Tests for the detection pipeline: rules, correlation, captures and retention."""
 import json
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+
+def _ago(seconds):
+    """A timestamp *seconds* before now, in the format the ingester parses.
+
+    Correlation looks back over a window measured from the wall clock, so the
+    timestamps these tests feed in have to move with that clock. Hardcoded
+    dates made the suite pass on the day it was written and fail the moment the
+    window slid past them -- the events simply fell out of the lookback and a
+    correct implementation reported no correlation.
+    """
+    moment = datetime.now(timezone.utc) - timedelta(seconds=seconds)
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 import pytest
 
@@ -246,7 +261,7 @@ def test_min_steps_requires_a_repeat(tmp_path):
         db,
         [
             {
-                "timestamp": "2026-10-03T14:00:00Z",
+                "timestamp": _ago(180),
                 "channel": "Security",
                 "event_id": "4625",
                 "message": "Failed logon",
@@ -258,7 +273,7 @@ def test_min_steps_requires_a_repeat(tmp_path):
                 "external_id": "Security:1",
             },
             {
-                "timestamp": "2026-10-03T14:00:30Z",
+                "timestamp": _ago(150),
                 "channel": "Security",
                 "event_id": "4625",
                 "message": "Failed logon",
@@ -279,7 +294,7 @@ def test_min_steps_requires_a_repeat(tmp_path):
         db,
         [
             {
-                "timestamp": "2026-10-03T14:01:00Z",
+                "timestamp": _ago(120),
                 "channel": "Security",
                 "event_id": "4740",
                 "message": "Account locked out",
@@ -304,7 +319,7 @@ def test_correlation_runs_end_to_end_over_stored_alerts(tmp_path):
         db,
         [
             {
-                "timestamp": "2026-10-03T14:02:11Z",
+                "timestamp": _ago(120),
                 "channel": "Microsoft-Windows-PowerShell/Operational",
                 "event_id": "4104",
                 "message": "powershell -enc AAAA",
@@ -312,7 +327,7 @@ def test_correlation_runs_end_to_end_over_stored_alerts(tmp_path):
                 "external_id": "ps:1",
             },
             {
-                "timestamp": "2026-10-03T14:02:20Z",
+                "timestamp": _ago(111),
                 "channel": "Microsoft-Windows-Sysmon/Operational",
                 "event_id": "3",
                 "message": "outbound connection",
@@ -395,7 +410,7 @@ def test_a_capture_and_a_host_event_can_be_correlated(tmp_path):
         db,
         [
             {
-                "timestamp": "2026-10-03T14:02:11Z",
+                "timestamp": _ago(120),
                 "channel": "Microsoft-Windows-PowerShell/Operational",
                 "event_id": "4104",
                 "message": "powershell -enc AAAA",
