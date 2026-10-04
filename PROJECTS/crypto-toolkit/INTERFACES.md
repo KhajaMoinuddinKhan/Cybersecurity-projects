@@ -37,6 +37,13 @@ def xor_bytes(left: bytes, right: bytes) -> bytes: ...
 exactly 16 bytes. `encrypt` / `decrypt` raise `ValueError` when the data length
 is not a multiple of the block size.
 
+`xor_bytes` requires both arguments to be the same length and raises
+`ValueError` when they are not. It does not truncate to the shorter one: inside a
+counter-mode loop a silent truncation would hand back a keystream of the wrong
+length and a ciphertext that is merely wrong, which is harder to notice than an
+error. A caller with a partial final block slices the keystream itself, as
+`src/gcm.py` does.
+
 ## src/gcm.py
 
 ```python
