@@ -82,7 +82,10 @@ def test_enrol_returns_id_and_a_one_time_key(tmp_path):
         assert host["event_count"] == 0
         assert host["enabled"] is True
         assert host["status"] == NEVER_REPORTED
-        assert host["age_seconds"] == 0
+        # A second may tick between the timestamp enrol writes and the timestamp
+        # the record is built from, and the age is truncated to whole seconds, so
+        # the freshly enrolled host reads as zero or one -- never more.
+        assert host["age_seconds"] in (0, 1)
 
 
 def test_platform_and_version_default_to_empty(tmp_path):
@@ -181,7 +184,11 @@ def test_touch_updates_last_seen_and_increments(tmp_path):
         touched = touch_host(conn, host["host_id"], 5)
         assert touched["event_count"] == 5
         assert touched["status"] == ONLINE
-        assert touched["age_seconds"] == 0
+        # The host was aged ten seconds and the touch refreshed it, so the age
+        # drops to nearly nothing. It is not asserted as exactly zero because the
+        # touch stamps last_seen and the record is then built from a second
+        # reading of the clock: a tick in between makes the truncated age one.
+        assert touched["age_seconds"] in (0, 1)
         assert touch_host(conn, host["host_id"], 3)["event_count"] == 8
 
 
