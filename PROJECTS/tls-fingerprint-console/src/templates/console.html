@@ -96,20 +96,20 @@
 
   /* ---- masthead ---- */
   .page{flex:1;min-width:0;width:100%;max-width:1600px;margin:0 auto;padding:0 22px}
-  .masthead{padding:34px 0 24px;border-bottom:1px solid var(--line)}
+  .masthead{padding:20px 0 16px;border-bottom:1px solid var(--line)}
   .masthead .over{
     font-family:var(--mono);font-size:9px;letter-spacing:.26em;
     text-transform:uppercase;color:var(--muted);
   }
   .masthead h1{
     font-family:var(--display);font-weight:400;text-transform:uppercase;
-    font-size:clamp(32px,5vw,66px);line-height:.94;letter-spacing:.012em;
-    margin:12px 0 14px;
+    font-size:clamp(26px,3.4vw,44px);line-height:.98;letter-spacing:.012em;
+    margin:8px 0 10px;
   }
-  .masthead .thesis{max-width:64ch;color:var(--bone);font-size:14px;margin:0 0 24px}
+  .masthead .thesis{max-width:96ch;color:var(--bone);font-size:13px;margin:0 0 16px}
   .metrics{display:flex;align-items:baseline;gap:34px;flex-wrap:wrap}
   .metric{display:flex;align-items:baseline;gap:8px;line-height:1}
-  .metric .n{font-family:var(--display);font-size:26px;color:var(--ink);letter-spacing:.02em}
+  .metric .n{font-family:var(--display);font-size:23px;color:var(--ink);letter-spacing:.02em}
   .metric .l{
     font-family:var(--mono);font-size:9px;letter-spacing:.2em;
     text-transform:uppercase;color:var(--muted);
@@ -119,14 +119,14 @@
   .stamp{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--muted)}
 
   /* ---- body + views ---- */
-  .body{padding:22px 0 52px;min-width:0}
+  .body{padding:16px 0 44px;min-width:0}
 
   /* The deck: the live feed takes the top-left and keeps it, with the reading
      panels down the right. Narrow windows collapse to one column. */
   .deck{display:grid;grid-template-columns:minmax(0,1.95fr) minmax(0,1fr);gap:16px;align-items:start}
   .deck > .col{min-width:0;display:flex;flex-direction:column}
   @media (max-width:1120px){ .deck{grid-template-columns:1fr} }
-  .deck .feed{max-height:62vh}
+  .deck .feed{max-height:64vh}
 
   .recent{display:flex;flex-direction:column}
   .rrow{padding:9px 0;border-bottom:1px solid var(--line-soft);font-family:var(--mono);font-size:11px}
@@ -224,6 +224,7 @@
 
   /* ---- live feed ---- */
   .livebar{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-top:6px}
+  .livebar-tight{gap:16px;margin:0 0 12px}
   .livebar .stat{font-family:var(--mono);font-size:11px;color:var(--muted)}
   .livebar .stat b{color:var(--ink);font-weight:500}
   .ctrl{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:14px}
@@ -231,7 +232,7 @@
     background:#000;border:1px solid var(--line);color:var(--ink);
     padding:8px 10px;font-family:var(--mono);font-size:11px;min-width:150px;
   }
-  .feed{max-height:58vh;overflow-y:auto;border-top:1px solid var(--line);margin-top:14px}
+  .feed{max-height:58vh;overflow-y:auto;border-top:1px solid var(--line);margin-top:10px}
   .frow{
     display:grid;grid-template-columns:66px 46px 1fr;gap:13px;padding:9px 2px;
     border-bottom:1px solid var(--line-soft);font-size:12px;align-items:start;
@@ -310,12 +311,7 @@
     <section class="masthead">
       <span class="over">MKMK &middot; passive wire read &middot; ja3 / ja4 / ja4+ / quic</span>
       <h1>MKMK TLS Fingerprint Console</h1>
-      <p class="thesis">
-        Every client carries a handshake it cannot hide. This deck reads the
-        ClientHello, the server's answer and the certificate behind them, scores
-        what it finds against a bundled corpus, and says plainly when a value is
-        a decoy rather than an identifier.
-      </p>
+      <p class="thesis">Every client carries a handshake it cannot hide. This deck reads the ClientHello, the server's answer and the certificate behind them, scores them against a bundled corpus, and says when a value is a decoy rather than an identifier.</p>
       <div class="metrics">
         <div class="metric"><span class="n" id="mEvents">-</span><span class="l">events</span></div>
         <div class="metric hot"><span class="n" id="mAlerts">-</span><span class="l">alerts</span></div>
@@ -357,14 +353,25 @@
           <div class="col">
             <div class="panel">
               <h2>Live handshakes</h2>
-              <div class="livebar">
+              <div class="livebar livebar-tight">
                 <span class="stat" id="liveState">&mdash;</span>
-                <span class="stat">packets <b id="livePackets">0</b></span>
                 <span class="stat">packets/s <b id="liveRate">0</b></span>
-                <span class="stat">flows <b id="liveFlows">0</b></span>
                 <span class="stat">events <b id="liveEvents">0</b></span>
-                <span class="stat">alerts <b id="liveAlerts">0</b></span>
                 <span class="stat">stream <b id="liveStreamState">closed</b></span>
+              </div>
+              <div class="feed" id="liveFeed">
+                <div class="feed-empty" id="liveEmpty">Nothing yet. Start a capture, or browse to an HTTPS site.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col">
+            <div class="panel">
+              <h2>Capture</h2>
+              <div class="livebar livebar-tight">
+                <span class="stat">packets <b id="livePackets">0</b></span>
+                <span class="stat">flows <b id="liveFlows">0</b></span>
+                <span class="stat">alerts <b id="liveAlerts">0</b></span>
               </div>
               <div class="ctrl">
                 <button class="btn" id="liveToggle">start capture</button>
@@ -377,13 +384,7 @@
                 Handshakes appear here the moment they are fingerprinted. Starting a
                 capture needs a capture driver and normally an elevated shell.
               </div>
-              <div class="feed" id="liveFeed">
-                <div class="feed-empty" id="liveEmpty">Nothing yet. Start a capture, or browse to an HTTPS site.</div>
-              </div>
             </div>
-          </div>
-
-          <div class="col">
             <div class="panel">
               <h2>Distribution</h2>
               <div id="deckSev"><div class="empty">no alerts yet</div></div>
