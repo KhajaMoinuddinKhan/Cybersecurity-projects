@@ -3,216 +3,314 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TLS Fingerprint Console</title>
+<title>MKMK TLS Fingerprint Console</title>
 <style>
+  /* ---------------------------------------------------------------------
+     MKMK TLS Fingerprint Console.
+
+     The deck runs dark: a black ground, bone ink, one hot accent, and data
+     set in mono so a fingerprint reads like a fingerprint. The variable
+     names below (--teal, --amber, --red, --violet) are kept from the first
+     theme because the script at the foot of this file sets a few colours
+     inline; only their values changed.
+     --------------------------------------------------------------------- */
   :root{
-    --bg:#080b0e;
-    --rail:#0c1116;
-    --panel:#0f151b;
-    --panel-2:#121a21;
-    --ink:#d8e4ea;
-    --muted:#63757f;
-    --line:#1b2631;
-    --teal:#31d0b6;
-    --amber:#f0a634;
-    --red:#ff5d68;
-    --violet:#8f9dff;
-    --mono:"DejaVu Sans Mono","Cascadia Mono","Consolas",monospace;
+    --bg:#000000;
+    --rail:#000000;
+    --panel:#070707;
+    --panel-2:#0b0b0b;
+    --ink:#f2f0e9;
+    --bone:#d8d6cd;
+    --muted:#5a5f65;
+    --line:#1e1e1e;
+    --line-soft:#141414;
+    --teal:#ff4d12;
+    --amber:#ffb020;
+    --red:#ff3b30;
+    --violet:#8d939a;
+    /* Local stacks only. The console is self-contained by design: a tool that
+       reads other people's handshakes has no business fetching a webfont, so
+       the display face falls back to a condensed system one. */
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono","Cascadia Mono",Consolas,"DejaVu Sans Mono",monospace;
+    --display:"Arial Narrow","Helvetica Neue Condensed","Haettenschweiler","Franklin Gothic Medium",Impact,sans-serif;
   }
   *{box-sizing:border-box}
-  html,body{margin:0;padding:0;height:100%}
+  html,body{margin:0;padding:0;min-height:100%}
   body{
     background:var(--bg);color:var(--ink);
-    font-family:var(--mono);font-size:13px;line-height:1.45;
+    font-family:var(--sans);font-size:14px;line-height:1.5;
     -webkit-font-smoothing:antialiased;
   }
-  .frame{display:grid;grid-template-columns:212px 1fr;min-height:100vh}
-
-  /* ---- left rail ---- */
-  .rail{
-    background:var(--rail);border-right:1px solid var(--line);
-    display:flex;flex-direction:column;position:sticky;top:0;height:100vh;
+  /* a faint scanline pass over the whole deck, the way a monitor leaves one */
+  body::after{
+    content:"";position:fixed;inset:0;z-index:99;pointer-events:none;
+    background:repeating-linear-gradient(180deg,rgba(255,255,255,.018) 0 1px,rgba(0,0,0,0) 1px 3px);
   }
-  .brand{padding:16px 14px 12px;border-bottom:1px solid var(--line)}
+  @media (prefers-reduced-motion: reduce){ *{animation:none !important} }
+  ::selection{background:var(--teal);color:#000}
+
+  .shell{display:flex;flex-direction:column;min-height:100vh}
+
+  /* ---- top: brand, tabs, status ---- */
+  .top{
+    display:flex;align-items:center;gap:24px;flex-wrap:wrap;
+    padding:13px 22px;border-bottom:1px solid var(--line);
+    position:sticky;top:0;z-index:20;background:rgba(0,0,0,.93);
+    backdrop-filter:blur(6px);
+  }
+  .brand{display:flex;flex-direction:column;gap:3px;min-width:0}
   .brand .mark{
-    display:inline-block;width:9px;height:9px;border-radius:2px;
-    background:var(--teal);box-shadow:0 0 10px var(--teal);margin-right:7px;
+    font-family:var(--display);font-size:19px;letter-spacing:.07em;line-height:1;
+    text-transform:uppercase;color:var(--ink);text-decoration:none;
   }
-  .brand .name{font-weight:700;letter-spacing:.04em;font-size:13px;color:#eaf4f2}
-  .brand .sub{color:var(--muted);font-size:10px;letter-spacing:.14em;text-transform:uppercase;margin-top:4px}
-  nav{display:flex;flex-direction:column;padding:10px 8px;gap:2px}
-  nav button{
-    all:unset;cursor:pointer;padding:9px 11px;border-radius:6px;color:#a9bcc4;
-    font-family:var(--mono);font-size:12px;letter-spacing:.03em;
-    display:flex;align-items:center;gap:9px;border-left:2px solid transparent;
+  .brand .mark em{color:var(--teal);font-style:normal}
+  .brand .tagline{
+    font-family:var(--mono);font-size:9px;letter-spacing:.24em;
+    text-transform:uppercase;color:var(--muted);
   }
-  nav button .dot{width:6px;height:6px;border-radius:50%;background:#2b3a44}
-  nav button:hover{background:#111a20;color:#e6f2f0}
-  nav button.active{background:#0f1c22;color:var(--teal);border-left-color:var(--teal)}
-  nav button.active .dot{background:var(--teal)}
-  .rail-foot{margin-top:auto;padding:12px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:10px}
-  .rail-foot .kv{display:flex;justify-content:space-between;margin-top:3px}
-
-  /* ---- main ---- */
-  main{min-width:0;display:flex;flex-direction:column}
-  .strip{
-    display:flex;align-items:center;gap:18px;flex-wrap:wrap;
-    padding:12px 20px;border-bottom:1px solid var(--line);background:var(--rail);
-    position:sticky;top:0;z-index:5;
+  nav.tabs{display:flex;gap:2px;flex-wrap:wrap;flex:1;min-width:0}
+  nav.tabs button{
+    all:unset;cursor:pointer;padding:7px 12px;color:var(--muted);
+    font-family:var(--mono);font-size:10px;letter-spacing:.18em;
+    text-transform:uppercase;border-bottom:1px solid transparent;
   }
-  .tp{display:inline-block;padding:1px 6px;border-radius:4px;font-size:9px;letter-spacing:.07em;
-        text-transform:uppercase;border:1px solid var(--line);margin-right:6px;vertical-align:1px}
-    .tp.quic{color:var(--violet);border-color:var(--violet)}
-    .tp.tcp{color:#7f8f98;border-color:var(--line)}
-    .tp.ech{color:var(--amber);border-color:var(--amber);text-transform:none}
-    .feed{max-height:56vh;overflow-y:auto;border-top:1px solid var(--line);margin-top:12px}
-    .frow{display:grid;grid-template-columns:64px 52px 1fr;gap:12px;padding:8px 2px;
-          border-bottom:1px solid var(--line);font-size:12px;align-items:start}
-    .frow.is-alert{background:#160f11}
-    .frow .t{color:var(--muted);font-size:11px}
-    .frow .k{font-size:10px;letter-spacing:.06em;text-transform:uppercase}
-    .frow .k.event{color:var(--teal)}
-    .frow .k.alert{color:var(--amber)}
-    .frow .body{min-width:0}
-    .frow .who{color:var(--ink);word-break:break-all}
-    .frow .fp{color:var(--muted);font-size:11px;word-break:break-all;margin-top:3px}
-    .feed-empty{padding:22px 2px;color:var(--muted);font-size:12px}
-    .livebar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:4px}
-    .livebar .stat{font-size:11px;color:var(--muted)}
-    .livebar .stat b{color:var(--ink);font-weight:500}
-    .ctrl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
-    .ctrl select,.ctrl input{background:#0b1319;border:1px solid var(--line);color:var(--ink);
-          border-radius:6px;padding:7px 9px;font-family:var(--mono);font-size:12px;min-width:150px}
-    .btn{border:1px solid var(--line);border-radius:6px;padding:8px 13px;font-size:11px;
-          letter-spacing:.05em;text-transform:uppercase;color:#b8ccd3;background:#0d151b}
-    .btn.on{color:var(--teal);border-color:var(--teal)}
-    .btn.off{color:var(--red);border-color:var(--red)}
-
-.pill{
-    display:inline-flex;align-items:center;gap:7px;padding:4px 11px;border-radius:999px;
-    border:1px solid var(--line);background:#0b1319;font-size:11px;letter-spacing:.05em;
+  nav.tabs button:hover{color:var(--ink)}
+  nav.tabs button.active{color:var(--teal);border-bottom-color:var(--teal)}
+  .status{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .status .coord,.status .clock{
+    font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--muted);max-width:30ch;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
-  .pill .beacon{width:7px;height:7px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px var(--amber)}
+  .pill{
+    display:inline-flex;align-items:center;gap:8px;padding:4px 10px;
+    border:1px solid var(--line);font-family:var(--mono);font-size:9px;
+    letter-spacing:.16em;text-transform:uppercase;color:var(--muted);
+  }
+  .pill .beacon{width:6px;height:6px;border-radius:50%;background:var(--amber)}
+  .pill.ok{color:var(--teal)}
   .pill.ok .beacon{background:var(--teal);box-shadow:0 0 8px var(--teal)}
+  .pill.bad{color:var(--red)}
   .pill.bad .beacon{background:var(--red);box-shadow:0 0 8px var(--red)}
-  .strip .metric{display:flex;flex-direction:column;line-height:1.15}
-  .strip .metric .n{font-size:16px;font-weight:700;color:#eef7f5}
-  .strip .metric .l{font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
-  .strip .spacer{flex:1}
-  .strip .stamp{color:var(--muted);font-size:10px}
 
-  .body{padding:18px 20px 40px;min-width:0}
+  /* ---- masthead ---- */
+  .page{flex:1;min-width:0;width:100%;max-width:1600px;margin:0 auto;padding:0 22px}
+  .masthead{padding:34px 0 24px;border-bottom:1px solid var(--line)}
+  .masthead .over{
+    font-family:var(--mono);font-size:9px;letter-spacing:.26em;
+    text-transform:uppercase;color:var(--muted);
+  }
+  .masthead h1{
+    font-family:var(--display);font-weight:400;text-transform:uppercase;
+    font-size:clamp(32px,5vw,66px);line-height:.94;letter-spacing:.012em;
+    margin:12px 0 14px;
+  }
+  .masthead .thesis{max-width:64ch;color:var(--bone);font-size:14px;margin:0 0 24px}
+  .metrics{display:flex;align-items:flex-end;gap:32px;flex-wrap:wrap}
+  .metric{display:flex;flex-direction:column;line-height:1.1}
+  .metric .n{font-family:var(--display);font-size:30px;color:var(--ink);letter-spacing:.02em}
+  .metric .l{
+    font-family:var(--mono);font-size:9px;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--muted);margin-top:5px;
+  }
+  .metric.hot .n{color:var(--teal)}
+  .metrics .spacer{flex:1}
+  .stamp{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--muted)}
+
+  /* ---- body + views ---- */
+  .body{padding:22px 0 52px;min-width:0}
   .view{display:none}
   .view.active{display:block;animation:fade .18s ease}
   @keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
 
   .panel{
-    background:var(--panel);border:1px solid var(--line);border-radius:9px;
-    padding:14px 16px;margin-bottom:16px;min-width:0;
+    background:var(--panel);border:1px solid var(--line);
+    border-radius:2px;padding:16px 18px;margin-bottom:16px;min-width:0;
   }
   .panel h2{
-    margin:0 0 12px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;
-    color:var(--muted);font-weight:600;display:flex;align-items:center;gap:9px;
+    margin:0 0 14px;font-family:var(--mono);font-size:10px;font-weight:500;
+    letter-spacing:.24em;text-transform:uppercase;color:var(--muted);
+    display:flex;align-items:center;gap:10px;
   }
-  .panel h2::before{content:"";width:12px;height:2px;background:var(--teal)}
-  .grid-4{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
-  .tile{
-    background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:13px 14px;
+  .panel h2::before{content:"";width:14px;height:1px;background:var(--teal)}
+  .grid-4{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px}
+  .tile{background:var(--panel-2);border:1px solid var(--line);padding:14px 15px}
+  .tile .n{font-family:var(--display);font-size:32px;color:var(--ink);line-height:1}
+  .tile .l{
+    font-family:var(--mono);font-size:9px;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--muted);margin-top:6px;
   }
-  .tile .n{font-size:26px;font-weight:700;color:#f2fbf9}
-  .tile .l{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:3px}
   .tile.accent .n{color:var(--teal)}
 
-  .bar{height:9px;border-radius:5px;background:#182530;overflow:hidden;margin-top:5px}
+  .bar{height:2px;background:#1a1a1a;overflow:hidden;margin-top:7px}
   .bar > i{display:block;height:100%;background:var(--teal)}
-  .rowbar{margin:9px 0}
-  .rowbar .top{display:flex;justify-content:space-between;font-size:11px;color:#b8ccd3}
+  .rowbar{margin:11px 0}
+  .rowbar .top{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--bone)}
   .rowbar .top .c{color:var(--muted)}
 
-  table{width:100%;border-collapse:collapse;font-size:12px}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
   th{
-    text-align:left;color:var(--muted);font-weight:600;font-size:10px;letter-spacing:.1em;
-    text-transform:uppercase;padding:7px 9px;border-bottom:1px solid var(--line);white-space:nowrap;
+    text-align:left;color:var(--muted);font-weight:500;font-size:9px;
+    letter-spacing:.18em;text-transform:uppercase;padding:8px 10px;
+    border-bottom:1px solid var(--line);white-space:nowrap;
   }
-  td{padding:8px 9px;border-bottom:1px solid #131c23;vertical-align:top;word-break:break-word}
-  tbody tr:hover{background:#101820}
-  .mono-val{color:#9fe7db}
+  td{padding:9px 10px;border-bottom:1px solid var(--line-soft);vertical-align:top;word-break:break-word}
+  tbody tr:hover{background:#0c0c0c}
+  .mono-val{color:var(--bone)}
   .muted{color:var(--muted)}
   .empty{color:var(--muted);padding:14px 4px;font-style:italic}
 
   .chip{
-    display:inline-block;padding:2px 8px;border-radius:5px;font-size:10px;letter-spacing:.06em;
-    text-transform:uppercase;border:1px solid var(--line);background:#0d151b;color:#b8ccd3;
+    display:inline-block;padding:2px 7px;font-family:var(--mono);font-size:9px;
+    letter-spacing:.14em;text-transform:uppercase;border:1px solid var(--line);
+    background:#000;color:var(--muted);
   }
-  .chip.high{color:var(--red);border-color:#3a2027;background:#1c1216}
-  .chip.medium{color:var(--amber);border-color:#3a3020;background:#1c1710}
-  .chip.low{color:var(--violet);border-color:#232a44;background:#121524}
-  .chip.info{color:var(--teal);border-color:#153a34;background:#0d1b19}
+  .chip.high{color:var(--red);border-color:#3a1512}
+  .chip.medium{color:var(--amber);border-color:#3a2c10}
+  .chip.low{color:var(--bone);border-color:var(--line)}
+  .chip.info{color:var(--teal);border-color:#3a1a0d}
 
-  .controls{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-bottom:12px}
+  .controls{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-bottom:14px}
   input[type=text],select{
-    background:#0a1218;border:1px solid var(--line);color:var(--ink);border-radius:6px;
-    padding:7px 10px;font-family:var(--mono);font-size:12px;outline:none;min-width:130px;
+    background:#000;border:1px solid var(--line);color:var(--ink);
+    padding:8px 10px;font-family:var(--mono);font-size:11px;outline:none;min-width:140px;
   }
   input[type=text]:focus,select:focus{border-color:var(--teal)}
   button.btn{
-    all:unset;cursor:pointer;padding:7px 13px;border-radius:6px;border:1px solid var(--line);
-    background:#101a21;color:#cfe3e8;font-family:var(--mono);font-size:12px;
+    all:unset;cursor:pointer;padding:8px 14px;border:1px solid var(--line);
+    font-family:var(--mono);font-size:10px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--bone);background:#000;
   }
   button.btn:hover{border-color:var(--teal);color:var(--teal)}
-  button.btn.primary{background:#0f2622;border-color:#1c4a42;color:var(--teal)}
-  .filterchips{display:flex;gap:6px;flex-wrap:wrap}
+  button.btn.primary{border-color:var(--teal);color:var(--teal)}
+  .filterchips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
   .filterchips .chip{cursor:pointer}
-  .filterchips .chip.on{background:#0f2622;border-color:var(--teal);color:var(--teal)}
+  .filterchips .chip.on{background:var(--teal);border-color:var(--teal);color:#000}
 
   .err{
-    display:none;margin:0 0 12px;padding:9px 12px;border-radius:7px;
-    border:1px solid #3a2027;background:#1a1013;color:#ffb3b8;font-size:12px;
+    display:none;margin:0 0 14px;padding:10px 13px;border-left:2px solid var(--red);
+    background:#120604;color:#ffb3ad;font-family:var(--mono);font-size:11px;
   }
   .err.show{display:block}
   .notice{
-    padding:9px 12px;border-radius:7px;border:1px dashed var(--line);
-    background:#0c141a;color:var(--muted);font-size:11px;margin-bottom:12px;
+    padding:10px 13px;border-left:2px solid var(--line);background:#080808;
+    color:var(--muted);font-family:var(--mono);font-size:11px;margin-bottom:14px;
   }
-  .scope-kv{display:grid;grid-template-columns:180px 1fr;gap:2px 14px;font-size:12px}
-  .scope-kv dt{color:var(--muted);padding:6px 0}
-  .scope-kv dd{margin:0;padding:6px 0;border-bottom:1px solid #131c23}
-  .tag{display:inline-block;padding:1px 7px;border:1px solid var(--line);border-radius:4px;font-size:10px;color:var(--muted)}
+  .scope-kv{display:grid;grid-template-columns:190px 1fr;gap:0;font-family:var(--mono);font-size:11px}
+  .scope-kv dt{color:var(--muted);padding:8px 0;border-bottom:1px solid var(--line-soft)}
+  .scope-kv dd{
+    margin:0;padding:8px 0;border-bottom:1px solid var(--line-soft);
+    color:var(--bone);word-break:break-all;
+  }
+  .tag{
+    display:inline-block;padding:1px 7px;border:1px solid var(--line);
+    font-family:var(--mono);font-size:9px;color:var(--muted);
+  }
+
+  /* ---- live feed ---- */
+  .livebar{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-top:6px}
+  .livebar .stat{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .livebar .stat b{color:var(--ink);font-weight:500}
+  .ctrl{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:14px}
+  .ctrl select,.ctrl input{
+    background:#000;border:1px solid var(--line);color:var(--ink);
+    padding:8px 10px;font-family:var(--mono);font-size:11px;min-width:150px;
+  }
+  .feed{max-height:58vh;overflow-y:auto;border-top:1px solid var(--line);margin-top:14px}
+  .frow{
+    display:grid;grid-template-columns:70px 58px 1fr;gap:14px;padding:9px 2px;
+    border-bottom:1px solid var(--line-soft);font-size:12px;align-items:start;
+  }
+  .frow.is-alert{background:#120604}
+  .frow .t{font-family:var(--mono);color:var(--muted);font-size:10px}
+  .frow .k{
+    font-family:var(--mono);font-size:9px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--muted);
+  }
+  .frow .k.event{color:var(--teal)}
+  .frow .k.alert{color:var(--amber)}
+  .frow .body{min-width:0}
+  .frow .who{font-family:var(--mono);color:var(--ink);word-break:break-all}
+  .frow .fp{
+    font-family:var(--mono);color:var(--muted);font-size:11px;
+    word-break:break-all;margin-top:4px;display:block;
+  }
+  .feed-empty{padding:22px 2px;color:var(--muted);font-size:12px;font-family:var(--mono)}
+
+  .tp{
+    display:inline-block;padding:1px 6px;margin-right:7px;vertical-align:1px;
+    font-family:var(--mono);font-size:9px;letter-spacing:.14em;
+    text-transform:uppercase;border:1px solid var(--line);color:var(--muted);
+  }
+  .tp.quic{color:var(--teal);border-color:#3a1a0d}
+  .tp.tcp{color:var(--muted);border-color:var(--line)}
+  .tp.ech{color:var(--amber);border-color:#3a2c10;text-transform:none}
+
+  /* ---- footer ---- */
+  .foot{border-top:1px solid var(--line);background:#000}
+  .ticker{display:flex;white-space:nowrap;overflow:hidden;padding:10px 0}
+  .ticker-lane{
+    display:inline-block;animation:slide 64s linear infinite;
+    font-family:var(--mono);font-size:9px;letter-spacing:.26em;
+    text-transform:uppercase;color:var(--muted);
+  }
+  .ticker-lane span{margin:0 26px}
+  .ticker-lane b{color:var(--teal);font-weight:400}
+  @keyframes slide{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  .footbar{
+    display:flex;gap:24px;flex-wrap:wrap;padding:10px 22px;
+    border-top:1px solid var(--line-soft);font-family:var(--mono);
+    font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);
+  }
+  .footbar b{color:var(--bone);font-weight:400}
 </style>
 </head>
 <body>
-<div class="frame">
-  <aside class="rail">
-    <div class="brand">
-      <div><span class="mark"></span><span class="name">TLS Fingerprint Console</span></div>
-      <div class="sub">signal deck / passive</div>
-    </div>
-    <nav id="nav">
-      <button data-view="overview" class="active"><span class="dot"></span>Overview</button>
-      <button data-view="live"><span class="dot"></span>Live</button>
-      <button data-view="alerts"><span class="dot"></span>Alerts</button>
-      <button data-view="fingerprints"><span class="dot"></span>Fingerprints</button>
-      <button data-view="intel"><span class="dot"></span>Intel</button>
-      <button data-view="scope"><span class="dot"></span>Scope</button>
-      <button data-view="export"><span class="dot"></span>Export</button>
-    </nav>
-    <div class="rail-foot">
-      <div class="kv"><span>build</span><span>0.1.0</span></div>
-      <div class="kv"><span>capture</span><span id="captureFoot">checking</span></div>
-    </div>
-  </aside>
+<div class="shell">
 
-  <main>
-    <header class="strip">
+  <header class="top">
+    <div class="brand">
+      <a class="mark" href="/">MKMK <em>TLSFP</em></a>
+      <span class="tagline">passive tls fingerprint console</span>
+    </div>
+    <nav class="tabs" id="nav">
+      <button data-view="overview" class="active">Overview</button>
+      <button data-view="live">Live</button>
+      <button data-view="alerts">Alerts</button>
+      <button data-view="fingerprints">Fingerprints</button>
+      <button data-view="intel">Intel</button>
+      <button data-view="scope">Scope</button>
+      <button data-view="export">Export</button>
+    </nav>
+    <div class="status">
+      <span class="coord" id="hdrIface">&mdash;</span>
+      <span class="clock" id="utcClock">--:--:-- utc</span>
       <span class="pill" id="healthPill"><span class="beacon"></span><span id="healthText">checking</span></span>
-      <div class="metric"><span class="n" id="mEvents">-</span><span class="l">events</span></div>
-      <div class="metric"><span class="n" id="mAlerts">-</span><span class="l">alerts</span></div>
-      <div class="metric"><span class="n" id="mFps">-</span><span class="l">fingerprints</span></div>
-      <div class="metric"><span class="n" id="mIntel">-</span><span class="l">intel</span></div>
-      <div class="spacer"></div>
-      <button class="btn primary" id="ingestBtn">ingest sample</button>
-      <span class="stamp" id="stamp">--:--:--</span>
-    </header>
+    </div>
+  </header>
+
+  <div class="page">
+
+    <section class="masthead">
+      <span class="over">MKMK &middot; passive wire read &middot; ja3 / ja4 / ja4+ / quic</span>
+      <h1>MKMK TLS Fingerprint Console</h1>
+      <p class="thesis">
+        Every client carries a handshake it cannot hide. This deck reads the
+        ClientHello, the server's answer and the certificate behind them, scores
+        what it finds against a bundled corpus, and says plainly when a value is
+        a decoy rather than an identifier.
+      </p>
+      <div class="metrics">
+        <div class="metric"><span class="n" id="mEvents">-</span><span class="l">events</span></div>
+        <div class="metric hot"><span class="n" id="mAlerts">-</span><span class="l">alerts</span></div>
+        <div class="metric"><span class="n" id="mFps">-</span><span class="l">fingerprints</span></div>
+        <div class="metric"><span class="n" id="mIntel">-</span><span class="l">intel records</span></div>
+        <span class="spacer"></span>
+        <button class="btn primary" id="ingestBtn">ingest sample</button>
+        <span class="stamp" id="stamp">--:--:--</span>
+      </div>
+    </section>
 
     <div class="body">
 
@@ -257,7 +355,7 @@
             <button class="btn" id="livePause">pause feed</button>
             <button class="btn" id="liveClear">clear</button>
           </div>
-          <div class="notice" id="liveNote" style="margin-top:12px">
+          <div class="notice" id="liveNote" style="margin-top:14px">
             Handshakes appear here the moment they are fingerprinted. Starting a
             capture needs a capture driver and normally an elevated shell.
           </div>
@@ -335,7 +433,7 @@
           <h2>Capture state</h2>
           <div class="err" id="err-capture"></div>
           <dl class="scope-kv" id="captureKv"></dl>
-          <div class="notice" id="captureNote" style="margin-top:14px">
+          <div class="notice" id="captureNote" style="margin-top:16px">
             Reading capture state&hellip; live capture uses Npcap; when the driver
             is absent, the file and ingest paths still work.
           </div>
@@ -343,7 +441,7 @@
         <div class="panel">
           <h2>Capture scope</h2>
           <dl class="scope-kv" id="scopeKv"></dl>
-          <div class="notice" style="margin-top:14px">
+          <div class="notice" style="margin-top:16px">
             This console is passive by default: it consumes a capture file or
             explicitly ingested events, and only reads a live interface when a
             capture driver is present. It never transmits traffic.
@@ -365,7 +463,37 @@
       </section>
 
     </div>
-  </main>
+  </div>
+
+  <footer class="foot">
+    <div class="ticker">
+      <div class="ticker-lane">
+        <span><b>ja3</b> client hello digest</span>
+        <span><b>ja4</b> sorted capability set</span>
+        <span><b>ja4s</b> server answer</span>
+        <span><b>ja4x</b> certificate chain</span>
+        <span><b>ja4t</b> tcp options</span>
+        <span><b>ja4h</b> plaintext request</span>
+        <span><b>quic</b> http/3 initial, read with the public salt</span>
+        <span><b>ech</b> offer seen &mdash; outer hello only</span>
+        <span><b>ja3</b> client hello digest</span>
+        <span><b>ja4</b> sorted capability set</span>
+        <span><b>ja4s</b> server answer</span>
+        <span><b>ja4x</b> certificate chain</span>
+        <span><b>ja4t</b> tcp options</span>
+        <span><b>ja4h</b> plaintext request</span>
+        <span><b>quic</b> http/3 initial, read with the public salt</span>
+        <span><b>ech</b> offer seen &mdash; outer hello only</span>
+      </div>
+    </div>
+    <div class="footbar">
+      <span>build <b>0.1.0</b></span>
+      <span>capture <b id="captureFoot">checking</b></span>
+      <span>passive &middot; never transmits &middot; never decrypts a session</span>
+      <span><b>MKMK TLS Fingerprint Console</b></span>
+    </div>
+  </footer>
+
 </div>
 
 <script>
@@ -398,6 +526,17 @@
       if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
       return r.json();
     });
+  }
+
+  /* ---------------- clock + header status ---------------- */
+  function pad2(n){ return ("0" + n).slice(-2); }
+
+  function tickClock(){
+    var el = $("utcClock");
+    if (!el) return;
+    var d = new Date();
+    el.textContent = pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes()) +
+                     ":" + pad2(d.getUTCSeconds()) + " utc";
   }
 
   /* ---------------- navigation ---------------- */
@@ -658,6 +797,11 @@
     if (el) el.textContent = text;
   }
 
+  function setHeaderInterface(text){
+    var el = $("hdrIface");
+    if (el) el.textContent = text;
+  }
+
   function renderCaptureState(d){
     var modeLabel = (d.mode === "live") ? "live capture available" : "file / ingest only";
     var iface = d.selected;
@@ -689,6 +833,7 @@
     var n = $("captureNote");
     if (n) n.textContent = note;
     setCaptureFoot(d.mode === "live" ? "live" : "file only");
+    setHeaderInterface(iface ? (iface.description || iface.name || "") : modeLabel);
   }
 
   function loadCapture(){
@@ -711,7 +856,7 @@
       var a = document.createElement("a");
       var objUrl = URL.createObjectURL(blob);
       a.href = objUrl;
-      a.download = "tls-console-export." + fmt;
+      a.download = "mkmk-tls-console-export." + fmt;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -781,7 +926,7 @@
   function clockOf(ts){
     if (typeof ts !== "number" || !isFinite(ts)) return "--:--:--";
     var d = new Date(ts * 1000);
-    return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)+":"+("0"+d.getSeconds()).slice(-2);
+    return pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
   }
 
   function fingerprintLines(fp){
@@ -804,10 +949,10 @@
       who = esc(item.rule) + " \u2014 " + esc(item.title) + (item.src_ip ? "  " + esc(item.src_ip) : "");
       extra = item.detail ? esc(item.detail) : "";
     }
-    // A QUIC handshake and a TCP one are different events, and the feed has to
-    // say which is which: the transport is the first thing a reader wants to
-    // know, and an ECH fingerprint needs its caveat attached or it reads as a
-    // reliable identifier when it is not.
+    /* A QUIC handshake and a TCP one are different events, and the feed has to
+       say which is which: the transport is the first thing a reader wants to
+       know, and an ECH offer needs its caveat attached or the fingerprint reads
+       as a reliable identifier when it may be a decoy. */
     var badges = "";
     if (kind === "event"){
       var tp = (item.transport || "").toLowerCase();
@@ -816,7 +961,7 @@
       } else if (tp === "tcp"){
         badges += '<span class="tp tcp">tcp</span>';
       }
-      if (item.ech) badges += '<span class="tp ech">ech &mdash; outer hello only</span>';
+      if (item.ech) badges += '<span class="tp ech">ech offer</span>';
     }
     var row = document.createElement("div");
     row.className = "frow" + (kind === "alert" ? " is-alert" : "");
@@ -893,6 +1038,7 @@
       $("liveAlerts").textContent = s.alerts || 0;
       $("liveToggle").textContent = "stop capture";
       $("liveToggle").className = "btn off";
+      if (s.interface) setHeaderInterface(s.interface);
     } else {
       el.innerHTML = '<b style="color:var(--muted)">idle</b> \u2014 not capturing';
       $("liveToggle").textContent = "start capture";
@@ -1002,6 +1148,7 @@
   }
 
   function boot(){
+    tickClock();
     wireLive();
     loadHealth();
     loadStats();
@@ -1013,6 +1160,7 @@
   }
   boot();
 
+  setInterval(tickClock, 1000);
   setInterval(loadHealth, POLL);
   setInterval(loadStats, POLL);
   setInterval(loadAlerts, POLL);

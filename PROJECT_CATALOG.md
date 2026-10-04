@@ -31,7 +31,7 @@ The bundled `sample_*` files are fixtures, not evidence. They exist so you can s
 | [Phishing URL Detector](PROJECTS/phishing-url-detector) | One or more URL strings | Keeping a heuristic score explainable, and separating clues from verdicts. |
 | [Network Traffic Analyzer](PROJECTS/network-traffic-analyzer) | The same kind of PCAP, possibly a large one | Streaming instead of loading, accounting in bytes and flows, and filtering a report without losing the totals. |
 | [File Integrity Monitor](PROJECTS/file-integrity-monitor) | A folder and a trusted baseline | Hashing contents and telling added, changed and removed files apart, and why a permission change is its own kind of change. |
-| [TLS Fingerprint Console](PROJECTS/tls-fingerprint-console) | A capture containing TLS or QUIC/HTTP-3 handshakes, or a network interface to watch live | Reading a handshake field by field, and why a fingerprint is only ever as good as the intel it is matched against. |
+| [MKMK TLS Fingerprint Console](PROJECTS/tls-fingerprint-console) | A capture containing TLS or QUIC/HTTP-3 handshakes, or a network interface to watch live | Reading a handshake field by field, and why a fingerprint is only ever as good as the intel it is matched against. |
 | [PCAP Traffic Summary](PROJECTS/pcap-traffic-summary) | A PCAP from your lab | Pulling fields out of packets and turning them into a summary someone can read. |
 | [Hash Cracker](PROJECTS/hash-cracker) | A digest you are authorised to test, and a wordlist | Comparing candidates offline and measuring the actual work involved. |
 
