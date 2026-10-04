@@ -46,6 +46,25 @@ Each is a real weakness in a real construction rather than a contrived puzzle,
 and each is demonstrated against the code above. `python -m src.cli attack all`
 runs all four against freshly generated keys and reports what came out.
 
+## The output
+
+`python -m src.cli attack all` runs each attack against keys, nonces and messages
+generated at that moment, and reports what it recovered or forged. Nothing is
+compared to a stored answer: the forged MAC goes back into the MAC function with
+the real secret, the forged GCM tag into `GCM.decrypt`, and the recovered ECDSA
+key into a fresh signature the real verifier has to accept.
+
+![The four attacks](docs/screenshots/01-the-four-attacks.png)
+
+The same primitives are reachable from the shell, and the published vectors
+reproduce there without a test runner. A tampered tag is refused before anything
+is written to standard output, which is the behaviour the `GCM.decrypt` path is
+built around.
+
+![The command line](docs/screenshots/02-the-command-line.png)
+
+![The published vectors and the suite](docs/screenshots/03-vectors-and-tests.png)
+
 ## Why write a cipher out by hand
 
 AES has a shape that is easy to describe and hard to get exactly right. The
