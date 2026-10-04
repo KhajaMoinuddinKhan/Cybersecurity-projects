@@ -320,7 +320,7 @@ def test_ech_obscured_fires_on_ech_event():
     a = alerts[0]
     assert a["rule"] == "ech_obscured"
     assert a["severity"] == "info"
-    assert a["title"] == "the handshake is hidden"
+    assert a["title"] == "an ECH offer may hide the handshake"
     assert "cover.example" in a["detail"]
     assert "outer" in a["detail"].lower()
 

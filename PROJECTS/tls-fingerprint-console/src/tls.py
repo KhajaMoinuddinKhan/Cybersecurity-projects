@@ -16,13 +16,20 @@ import struct
 # ---------------------------------------------------------------------------
 # Encrypted Client Hello (ECH)
 # ---------------------------------------------------------------------------
-# ECH is offered by the client in TLS extension 0xfe0d.  When present, the
-# outer ClientHello a passive observer sees carries a public name (a decoy)
-# instead of the real SNI, and the real extension set is sealed inside an
-# encrypted inner ClientHello.  A JA3/JA4 computed from such a hello describes
-# only the deliberately generic outer shell, so it is NOT a reliable client
-# identifier.  (A second extension, ``ech_grease``, also exists; this module
-# deliberately covers only 0xfe0d, the value we can state with confidence.)
+# ECH is offered by the client in TLS extension 0xfe0d.  When the offer is
+# honoured, the outer ClientHello a passive observer sees carries a public name
+# (a decoy) instead of the real SNI, and the real extension set is sealed inside
+# an encrypted inner ClientHello.  A JA3/JA4 computed from such a hello then
+# describes only the deliberately generic outer shell, so it is NOT a reliable
+# client identifier.
+#
+# The extension is an offer, not a proof.  Chrome offers ECH to every host it
+# talks to -- including hosts that publish no ECHConfig at all -- and it shapes
+# the offer exactly like a real one, with a well-formed outer structure and
+# random ``config_id`` and ``enc``/``payload`` bytes, so a passive reader cannot
+# tell a real offer from GREASE.  This module therefore reports what was seen
+# (an offer, its shape, the config ids it could read) and never asserts that the
+# SNI beside it is a decoy.
 ECH_EXTENSION = 0xfe0d
 
 # ---------------------------------------------------------------------------
@@ -168,15 +175,19 @@ def is_ech(hello):
 def fingerprint_caveat(hello):
     """Return a one-sentence caveat for an ECH hello, or None otherwise.
 
-    The fingerprint of an ECH ClientHello describes the *outer* hello, whose
-    extension set is deliberately generic and may be padded or randomised, and
-    the SNI it carries is a public name rather than the site actually visited.
+    The extension says the client offered ECH; it does not say the offer was
+    honoured, because a GREASE offer is shaped exactly like a real one and only
+    the destination's ECHConfig would tell them apart.  If it was honoured, the
+    fingerprint describes the *outer* hello, whose extension set is deliberately
+    generic and may be padded or randomised, and the SNI it carries is a public
+    name rather than the site actually visited.
     """
     if not is_ech(hello):
         return None
-    return ("this fingerprint describes the outer ClientHello, whose extension "
-            "set is deliberately generic, and the SNI shown is a public name, "
-            "so it is not a reliable client identifier.")
+    return ("this ClientHello offered ECH (or an ECH GREASE shaped exactly like "
+            "one); if the offer was honoured the fingerprint describes the outer "
+            "ClientHello, whose extension set is deliberately generic, so it is "
+            "not a reliable client identifier.")
 
 
 # ---------------------------------------------------------------------------

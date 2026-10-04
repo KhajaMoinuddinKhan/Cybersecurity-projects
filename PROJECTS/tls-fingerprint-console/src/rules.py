@@ -462,13 +462,17 @@ def monoculture(event, ctx):
 # ech_obscured
 # --------------------------------------------------------------------------
 def ech_obscured(event, ctx):
-    """info: the ClientHello offered ECH, so the handshake is hidden.
+    """info: the ClientHello offered ECH, so the fingerprint may be a decoy.
 
-    This is not a threat but a visibility limit: with ECH the outer hello is
-    deliberately generic and the SNI is a public name, so the fingerprint only
-    describes the outer shell.  Fires solely on the event's ``ech`` flag -- the
-    rule never re-parses anything, and stays quiet when the flag is absent or
-    false.
+    This is not a threat but a visibility limit, and it is a limit with a
+    caveat of its own: the extension proves only that the client *offered* ECH.
+    Chrome offers it by default, to hosts that publish no ECHConfig at all, and
+    shapes the offer exactly like a real one, so a passive reader cannot tell a
+    real offer from GREASE.  When the offer was honoured the outer hello is
+    deliberately generic and the SNI is a public name, so the fingerprint
+    describes the outer shell and nothing behind it.  Fires solely on the
+    event's ``ech`` flag -- the rule never re-parses anything, and stays quiet
+    when the flag is absent or false.
     """
     if not isinstance(event, dict):
         return []
@@ -478,11 +482,15 @@ def ech_obscured(event, ctx):
     if not isinstance(public_name, str) or not public_name:
         public_name = "unknown"
     detail = (
-        "the ClientHello offered Encrypted Client Hello (ECH): the SNI "
-        "{sni!r} is a public name, not the real destination, and the "
-        "fingerprint describes the outer hello only".format(sni=public_name)
+        "the ClientHello offered Encrypted Client Hello (ECH, extension "
+        "0xfe0d). If the offer was honoured, {sni!r} is a public name and this "
+        "fingerprint describes the outer hello only. An offer cannot be told "
+        "from ECH GREASE on the wire, so read the value as possibly a decoy "
+        "rather than as proof that this destination was hidden".format(
+            sni=public_name)
     )
-    return [_alert("ech_obscured", "info", "the handshake is hidden", detail)]
+    return [_alert("ech_obscured", "info",
+                   "an ECH offer may hide the handshake", detail)]
 
 
 # --------------------------------------------------------------------------
