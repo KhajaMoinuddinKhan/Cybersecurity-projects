@@ -969,7 +969,7 @@ def dashboard_app(
         from flask import Flask, jsonify, redirect, render_template, request
     except ImportError as exc:
         raise RuntimeError(
-            "Flask is required. Run: python -m pip install -r requirements.txt"
+            "Flask is required to run the console, and it is not available here."
         ) from exc
 
     source_dir = Path(__file__).resolve().parent

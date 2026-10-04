@@ -141,8 +141,8 @@ class CaptureSession:
                 return False, "a capture is already running"
             from . import capture as capture_mod
             if not capture_mod.available():
-                return False, ("no capture driver found; install Npcap "
-                               "(https://npcap.com/) to capture live traffic")
+                return False, ("no capture driver found; live capture needs Npcap "
+                               "present on the machine")
             try:
                 iface = capture_mod.pick_interface(self.interface)
             except capture_mod.CaptureUnavailable as exc:

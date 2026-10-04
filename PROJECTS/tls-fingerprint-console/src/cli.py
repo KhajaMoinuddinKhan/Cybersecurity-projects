@@ -39,7 +39,15 @@ def cmd_analyse(args):
     from .store import Store
     store = Store(args.db)
     corpus = _corpus()
-    events, alerts = analyse(args.capture, store, corpus)
+    try:
+        events, alerts = analyse(args.capture, store, corpus)
+    except (OSError, ValueError) as exc:
+        # A capture that cannot be read is an answer, not a crash: the reader
+        # raises ValueError with a sentence in it, and a traceback would bury
+        # that sentence under six frames of our own code.
+        store.close()
+        print("could not read %s: %s" % (args.capture, exc), file=sys.stderr)
+        return 1
     print("read      : %s" % args.capture)
     print("events    : %d" % len(events))
     print("alerts    : %d" % len(alerts))
@@ -86,8 +94,8 @@ def cmd_interfaces(args):
     from . import capture
     print("capture driver :", "available" if capture.available() else "NOT FOUND")
     if not capture.available():
-        print("  Install Npcap (https://npcap.com/) to capture live traffic; the file and")
-        print("  ingest paths work without it.")
+        print("  Live capture needs a capture driver -- Npcap on Windows -- and normally")
+        print("  an elevated shell. The file and ingest paths work without either.")
         return 1
     print("default filter :", capture.DEFAULT_FILTER)
     print()
@@ -110,8 +118,9 @@ def cmd_watch(args):
     from .store import Store
 
     if not capture.available():
-        print("No capture driver found. Install Npcap (https://npcap.com/) and re-run.")
-        print("Live capture also normally needs an elevated shell.")
+        print("No capture driver found, so there is no interface to open.")
+        print("Live capture needs a capture driver -- Npcap on Windows -- and normally")
+        print("an elevated shell. The file and ingest paths work without either.")
         return 1
 
     try:
@@ -223,7 +232,11 @@ def main(argv=None):
             sp.add_argument("--filter", default=None, help="a BPF filter expression")
         sp.set_defaults(func=fn)
     args = p.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (OSError, ValueError) as exc:
+        print("%s failed: %s" % (args.cmd, exc), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

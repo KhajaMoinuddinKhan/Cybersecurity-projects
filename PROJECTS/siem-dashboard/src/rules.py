@@ -322,7 +322,7 @@ def _load_mapping(path: Path) -> dict[str, Any]:
     if path.suffix.lower() in {".yml", ".yaml"}:
         if yaml is None:
             raise RuleError(
-                f"{path.name} needs PyYAML. Run: python -m pip install -r requirements.txt"
+                f"{path.name} needs PyYAML, which is not available here."
             )
         try:
             data = yaml.safe_load(text)

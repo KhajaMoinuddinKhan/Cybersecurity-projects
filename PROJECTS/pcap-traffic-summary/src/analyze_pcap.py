@@ -386,7 +386,7 @@ def main() -> None:
         summary = analyse_pcap(args.pcap)
     except ImportError as exc:
         raise SystemExit(
-            "Scapy is required. Run: python -m pip install -r requirements.txt"
+            "Scapy is required to read a capture, and it is not available here."
         ) from exc
     except (ValueError, OSError) as exc:
         raise SystemExit(str(exc)) from exc

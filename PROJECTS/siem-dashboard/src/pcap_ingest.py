@@ -55,7 +55,7 @@ def _scapy():
         from scapy.error import Scapy_Exception
     except ImportError as exc:  # pragma: no cover - depends on the environment
         raise PcapError(
-            "Reading a capture needs Scapy. Run: python -m pip install -r requirements.txt"
+            "Reading a capture needs Scapy, which is not available here."
         ) from exc
     return PcapReader, IP, IPv6, TCP, UDP, DNS, DNSQR, Scapy_Exception
 

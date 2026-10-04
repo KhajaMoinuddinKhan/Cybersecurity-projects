@@ -272,9 +272,9 @@ def decrypt_initial(packet, keys):
     """
     if not HAVE_CRYPTO:
         raise QuicUnavailable(
-            "QUIC Initial decryption needs the 'cryptography' package "
-            "(pip install 'cryptography>=42'); the header was parsed but the "
-            "payload cannot be decrypted"
+            "QUIC Initial decryption needs the 'cryptography' package, which is "
+            "not available here; the header was parsed but the payload cannot "
+            "be decrypted"
         )
     raw = bytes(packet["raw"])
     pn_offset = packet.get("pn_offset")

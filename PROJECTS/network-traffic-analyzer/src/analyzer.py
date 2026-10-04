@@ -334,7 +334,7 @@ def analyze_pcap(path: Path, *, top: int = 10, filters: Filters | None = None) -
         with PcapReader(str(path)) as reader:
             return summarize((packet_record(packet) for packet in reader), top=top, filters=filters)
     except ImportError as exc:
-        raise RuntimeError("Scapy is required; install requirements.txt") from exc
+        raise RuntimeError("Reading a capture needs Scapy") from exc
     except (OSError, ValueError, Scapy_Exception) as exc:
         raise ValueError(f"Could not read PCAP {path}: {exc}") from exc
 

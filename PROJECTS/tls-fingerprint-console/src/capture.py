@@ -109,8 +109,8 @@ def _load():
         lib.pcap_geterr.restype = c_char_p
         return lib
     raise CaptureUnavailable(
-        "no capture driver found (looked for wpcap.dll in %s). Install Npcap from "
-        "https://npcap.com/ and re-run; Npcap is the driver Wireshark installs."
+        "no capture driver found (looked for wpcap.dll in %s); live capture needs "
+        "Npcap present on the machine."
         % ", ".join(DLL_CANDIDATES)
     )
 
