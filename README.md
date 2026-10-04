@@ -8,7 +8,11 @@ Each project is self-contained: its own source, tests, run instructions and lear
 
 ## The projects
 
-Listed largest first.
+Two of these are the substantial ones, and they come first. The [SIEM Dashboard](PROJECTS/siem-dashboard) and the [MKMK TLS Fingerprint Console](PROJECTS/tls-fingerprint-console) are each several times larger than anything else here, and they differ in kind as much as in size: both have a test suite that covers the integration and not only the units, both are built around a real source of data rather than a fixture, and both carry a written account of the limits they do not cross. The SIEM collects telemetry from agents on many machines and puts a triage workflow in front of it; the console reads TLS and HTTP/3 handshakes off a live interface and names the client behind them.
+
+The rest are smaller, single-purpose tools. Each does one job well and stops there, which is the point of them — one is worth reading in an afternoon, and none of them pretends to be a platform.
+
+The table below is ordered largest first.
 
 | Project | What it does |
 | --- | --- |

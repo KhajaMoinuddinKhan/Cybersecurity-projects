@@ -2,6 +2,8 @@
 
 The projects, grouped by what you have to bring, largest group first and largest project first within each group. Pick the row that matches the data in front of you; the last column is what that project is really teaching.
 
+Two of the rows are flagships rather than tools. The [SIEM Dashboard](PROJECTS/siem-dashboard) and the [MKMK TLS Fingerprint Console](PROJECTS/tls-fingerprint-console) are several times larger than everything else here, and they are the two that go past doing a job correctly into owning a whole pipeline: collection, validation, storage, detection and a workflow on top. They appear in their groups below like any other row, but they are the two worth reading first if you want to see where the set is heading.
+
 ## You have a live system or a service
 
 | Project | Bring this | What you will practise |
