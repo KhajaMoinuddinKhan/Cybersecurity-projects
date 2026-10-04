@@ -10,6 +10,8 @@ The pipeline has five stages, and it is worth naming them because every panel on
 
 A useful session starts with collector health and the host inventory, because a channel that is not connected or a host that has never reported explains an empty panel better than any investigation will. From there the route is a time window or a channel, then the triage queue, then the individual detection, then the raw event. When a question needs a shape rather than a name, the search panel's query language and the baseline panel's view of what is normal for a host are the two ways to ask something the rules cannot answer.
 
+The project guide carries a current screenshot of every one of those panels with a written walkthrough beside it, which is the quickest way to see what this note describes before running anything. The images are not decoration: each one was taken from a live run of the console, so the numbers in them are real and specific to one machine, and the panels are the part that transfers.
+
 Open the raw record before deciding what an alert means. A service installation can be expected maintenance or an unexpected persistence mechanism. An LSASS read can be a security product doing its job or someone dumping credentials. The dashboard provides the event context and the rule that matched; it does not provide the final judgment, and it should not pretend to. Working a detection means moving it through a status, leaving a note the next analyst can read, and, when the rule is simply noisy on this host, applying a suppression that hides it from the queue without pretending the rule is wrong.
 
 [Run instructions and troubleshooting](../README.md)
