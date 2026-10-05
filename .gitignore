@@ -23,3 +23,8 @@ captures/
 # Tests keep their temporary files inside the project, so the suite does not
 # depend on the system temp directory being readable.
 .pytest_tmp/
+
+# pytest also leaves a cache directory beside each project's tests, holding the
+# last run's node ids and failure list. It is regenerated on every run and has no
+# business in the repository, but a *.pyc entry does not cover it.
+.pytest_cache/
