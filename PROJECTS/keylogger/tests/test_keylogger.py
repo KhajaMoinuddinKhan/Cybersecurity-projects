@@ -84,7 +84,15 @@ class FakeTty:
         self.descriptor = descriptor
 
 
-@pytest.mark.skipif(os.name == "nt", reason="unix terminal mode only")
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason=(
+        "the unix terminal path cannot be reached on Windows: iter_terminal_keys branches "
+        "on os.name and takes the msvcrt arm, so the faked termios and tty below are never "
+        "imported. That arm blocks on a real keypress rather than failing, so forcing this "
+        "test hangs the run instead of reporting an error. CI covers it on Linux."
+    ),
+)
 def test_end_of_input_ends_a_unix_style_session(monkeypatch, tmp_path):
     monkeypatch.setattr(keylogger, "windows_console_attached", lambda: True)
     monkeypatch.setitem(sys.modules, "termios", FakeTermios())
