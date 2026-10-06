@@ -339,3 +339,40 @@ whole message.
 
 `recover_private_key` returns the ECDSA private key from two signatures that
 share a nonce.
+
+
+## src/web.py
+
+The local web console. Standard library only, for the same reason everything
+else is: nothing under `src/` may import a third-party package, and that rule is
+asserted by walking the source with `ast` rather than by trusting a comment.
+
+```python
+TEMPLATE_PATH = Path(...) / "templates" / "console.html"
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8088
+
+def published_vectors() -> dict: ...
+def run_length_extension() -> dict: ...
+def run_gcm_nonce_reuse() -> dict: ...
+def run_padding_oracle() -> dict: ...
+def run_ecdsa_nonce_reuse() -> dict: ...
+
+class Handler(BaseHTTPRequestHandler): ...
+def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *, quiet: bool = False) -> None: ...
+```
+
+The routes are `GET /` for the page, `GET /api/vectors`, `GET /api/attack/<name>`
+for any of the four, and `POST` to `/api/hash`, `/api/hmac`, `/api/gcm/seal` and
+`/api/gcm/open`. A bad request is a 400 carrying an `error` string; an unknown
+route is a 404. A failed attack is a 200 with `worked: false`, because a failed
+attack is a result and not a crash.
+
+`DEFAULT_HOST` is the loopback address and must stay that way. The console takes
+a key and a plaintext from whoever opens it and will encrypt with them.
+
+The page at `src/templates/console.html` is **self-contained**: no stylesheet,
+font or script is fetched from anywhere, and every request it makes is a relative
+path back to the server that served it. The tests assert the absence of `http://`,
+`https://`, `<link`, `<script src`, `@import` and `integrity=` in the file, so the
+contract cannot be broken by adding a convenience import.

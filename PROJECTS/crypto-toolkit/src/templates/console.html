@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cryptographic toolkit and attack lab</title>
+<style>
+  /* ---------------------------------------------------------------------
+     The toolkit console.
+
+     Self-contained by design: no stylesheet, font or script is fetched from
+     anywhere, and every request this page makes is a relative path back to the
+     server that served it. A project that argues about constant time and
+     nonce reuse has no business telling a font server when it is open, and the
+     page has to render on a machine with no network at all.
+     --------------------------------------------------------------------- */
+  :root{
+    --bg:#000000;
+    --panel:#070707;
+    --panel-2:#0b0b0b;
+    --ink:#f2f0e9;
+    --bone:#d8d6cd;
+    --muted:#6f7479;
+    --line:#1e1e1e;
+    --line-soft:#141414;
+    --accent:#ff4d12;
+    --good:#3ddc84;
+    --bad:#ff3b30;
+    --warn:#ffb020;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono","Cascadia Mono",Consolas,"DejaVu Sans Mono",monospace;
+    --display:"Arial Narrow","Helvetica Neue Condensed",Impact,"Franklin Gothic Medium",sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);}
+  body{color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;}
+  a{color:var(--accent);}
+  header{border-bottom:1px solid var(--line);padding:26px 40px 20px;display:flex;
+         justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;}
+  h1{font-family:var(--display);font-weight:900;text-transform:uppercase;letter-spacing:-.5px;
+     font-size:40px;line-height:1;margin:0;}
+  h1 span{color:var(--accent);}
+  .sub{color:var(--muted);margin-top:8px;max-width:70ch;}
+  .status{font-family:var(--mono);font-size:12px;color:var(--muted);text-align:right;}
+  .status b{color:var(--good);font-weight:400;}
+  nav{border-bottom:1px solid var(--line);padding:0 40px;display:flex;gap:2px;}
+  nav button{background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);
+             font-family:var(--display);text-transform:uppercase;letter-spacing:1px;font-size:15px;
+             padding:14px 18px;cursor:pointer;}
+  nav button:hover{color:var(--ink);}
+  nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent);}
+  main{padding:28px 40px 60px;max-width:1500px;}
+  section[hidden]{display:none;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:18px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);
+        padding:18px 20px;display:flex;flex-direction:column;gap:12px;}
+  .card[data-worked="true"]{border-left-color:var(--good);}
+  .card[data-worked="false"]{border-left-color:var(--bad);}
+  .card h2{font-family:var(--display);text-transform:uppercase;letter-spacing:.6px;
+           font-size:19px;margin:0;font-weight:700;}
+  .card p{margin:0;color:var(--muted);font-size:14px;}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  button.run{background:var(--accent);color:#000;border:0;font-weight:700;font-family:var(--display);
+             text-transform:uppercase;letter-spacing:.8px;padding:9px 16px;cursor:pointer;font-size:14px;}
+  button.run:hover{filter:brightness(1.12);}
+  button.run:disabled{opacity:.5;cursor:default;}
+  pre{font-family:var(--mono);font-size:12.5px;line-height:1.5;background:var(--panel-2);
+      border:1px solid var(--line-soft);padding:12px 14px;margin:0;overflow-x:auto;
+      white-space:pre-wrap;word-break:break-word;color:var(--bone);}
+  .verdict{font-family:var(--mono);font-size:13px;}
+  .verdict.ok{color:var(--good);}
+  .verdict.no{color:var(--bad);}
+  label{display:block;color:var(--muted);font-size:13px;margin-bottom:4px;}
+  input,textarea{width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--ink);
+                 font-family:var(--mono);font-size:13px;padding:9px 11px;}
+  input:focus,textarea:focus{outline:1px solid var(--accent);border-color:var(--accent);}
+  .fields{display:grid;gap:12px;}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px;}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line-soft);}
+  th{color:var(--muted);font-weight:400;text-transform:uppercase;letter-spacing:.6px;font-size:12px;}
+  .pill{font-family:var(--mono);font-size:12px;padding:2px 8px;border:1px solid var(--line);}
+  .pill.ok{color:var(--good);border-color:var(--good);}
+  .pill.no{color:var(--bad);border-color:var(--bad);}
+  footer{border-top:1px solid var(--line);padding:18px 40px;color:var(--muted);font-size:13px;}
+  .note{border-left:2px solid var(--warn);padding-left:12px;color:var(--muted);font-size:13px;margin-top:8px;}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Crypto<span>graphic</span> toolkit &amp; attack lab</h1>
+    <div class="sub">The primitives and the four attacks, running in the same process as the
+      command line. Every button calls the library directly, so what you see is what the
+      toolkit computed, not a parallel copy of it.</div>
+  </div>
+  <div class="status">
+    server <b id="server-state">ready</b><br>
+    bound to the loopback address<br>
+    <span id="vectors-state">checking the published vectors&hellip;</span>
+  </div>
+</header>
+
+<nav role="tablist">
+  <button role="tab" aria-selected="true" data-view="attacks">Attacks</button>
+  <button role="tab" aria-selected="false" data-view="primitives">Primitives</button>
+  <button role="tab" aria-selected="false" data-view="vectors">Published vectors</button>
+</nav>
+
+<main>
+  <!-- ---------------------------------------------------------------- -->
+  <section id="view-attacks">
+    <div class="grid" id="attack-grid"></div>
+    <div class="note">Each attack generates its own key, nonce and messages when you press the
+      button, then checks the result against the genuine implementation: the forged MAC goes back
+      into the MAC function with the real secret, the forged tag into the decryption path, and the
+      recovered key into a fresh signature the real verifier has to accept.</div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="view-primitives" hidden>
+    <div class="grid">
+      <div class="card">
+        <h2>SHA-256</h2>
+        <p>The FIPS 180-4 digest of whatever you type, computed by this project's own compression function.</p>
+        <div class="fields">
+          <div><label for="hash-input">message</label><input id="hash-input" value="abc"></div>
+          <div class="row"><button class="run" data-action="hash">Hash it</button></div>
+          <pre id="hash-out">(nothing yet)</pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>HMAC-SHA256</h2>
+        <p>RFC 2104 over the same SHA-256, which is the construction that does not have the
+          length-extension problem.</p>
+        <div class="fields">
+          <div><label for="hmac-key">key</label><input id="hmac-key" value="Jefe"></div>
+          <div><label for="hmac-msg">message</label><input id="hmac-msg" value="what do ya want for nothing?"></div>
+          <div class="row"><button class="run" data-action="hmac">Sign it</button></div>
+          <pre id="hmac-out">(nothing yet)</pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>GCM: seal and open</h2>
+        <p>Authenticated encryption. The opening path verifies the tag before it decrypts, so a
+          tampered ciphertext is refused rather than returned.</p>
+        <div class="fields">
+          <div><label for="gcm-key">key (hex, 16 bytes)</label><input id="gcm-key" value="feffe9928665731c6d6a8f9467308308"></div>
+          <div><label for="gcm-nonce">nonce (hex, 12 bytes)</label><input id="gcm-nonce" value="cafebabefacedbaddecaf888"></div>
+          <div><label for="gcm-pt">plaintext</label><input id="gcm-pt" value="a message that has to survive the trip"></div>
+          <div><label for="gcm-aad">associated data</label><input id="gcm-aad" value=""></div>
+          <div class="row">
+            <button class="run" data-action="seal">Seal</button>
+            <button class="run" data-action="open">Open</button>
+            <button class="run" data-action="tamper">Open with one nibble flipped</button>
+          </div>
+          <pre id="gcm-out">(nothing yet)</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="view-vectors" hidden>
+    <div class="card">
+      <h2>Re-checked on the spot</h2>
+      <p>The worked examples the standards publish, recomputed here every time this page loads.
+        Nothing is compared against a stored answer: these are the values NIST and the IETF wrote
+        down, and the arithmetic either reproduces them or does not.</p>
+      <div id="vectors-out"><pre>(loading)</pre></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  A teaching implementation, not a hardened one. The keys you type here go to a server on this
+  machine and nowhere else.
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var ATTACKS = [
+    { id: "length-extension", title: "Length extension",
+      blurb: "A MAC built as sha256(secret || message) can be extended by anyone who has seen " +
+             "one message and its tag. The secret is never needed, only its length." },
+    { id: "gcm-nonce-reuse", title: "GCM nonce reuse",
+      blurb: "Three messages under one nonce give up the hash subkey, which turns into the " +
+             "ability to forge a tag the real decryption path accepts." },
+    { id: "padding-oracle", title: "Padding oracle",
+      blurb: "One bit per query -- is this padding valid? -- is enough to recover the whole " +
+             "plaintext from CBC, with no key." },
+    { id: "ecdsa-nonce-reuse", title: "ECDSA nonce reuse",
+      blurb: "Two signatures that share a nonce hand over the private key outright. No root " +
+             "finding, no extra messages." }
+  ];
+
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) { node.className = cls; }
+    if (text !== undefined) { node.textContent = text; }
+    return node;
+  }
+
+  function buildAttackCards() {
+    var grid = document.getElementById("attack-grid");
+    ATTACKS.forEach(function (attack) {
+      var card = el("div", "card");
+      card.id = "card-" + attack.id;
+      card.appendChild(el("h2", null, attack.title));
+      card.appendChild(el("p", null, attack.blurb));
+      var row = el("div", "row");
+      var button = el("button", "run", "Run it");
+      button.addEventListener("click", function () { runAttack(attack.id, button); });
+      row.appendChild(button);
+      var verdict = el("span", "verdict", "");
+      verdict.id = "verdict-" + attack.id;
+      row.appendChild(verdict);
+      card.appendChild(row);
+      var out = el("pre", null, "(not run yet)");
+      out.id = "out-" + attack.id;
+      card.appendChild(out);
+      grid.appendChild(card);
+    });
+  }
+
+  function report(id, payload, lines) {
+    var card = document.getElementById("card-" + id);
+    var verdict = document.getElementById("verdict-" + id);
+    var out = document.getElementById("out-" + id);
+    var worked = payload && payload.worked === true;
+    card.setAttribute("data-worked", worked ? "true" : "false");
+    verdict.className = "verdict " + (worked ? "ok" : "no");
+    verdict.textContent = worked ? "the attack worked" : (payload && payload.error ? "failed" : "did not work");
+    out.textContent = lines.join("\n");
+  }
+
+  function runAttack(id, button) {
+    button.disabled = true;
+    document.getElementById("out-" + id).textContent = "running against freshly generated values...";
+    fetch("/api/attack/" + id)
+      .then(function (r) { return r.json(); })
+      .then(function (payload) {
+        var lines = [];
+        if (id === "length-extension") {
+          lines.push("the attacker knows the tag and that the secret is " + payload.secret_length + " bytes");
+          lines.push("");
+          lines.push("original   " + JSON.stringify(payload.original));
+          lines.push("forged     " + JSON.stringify(payload.forged));
+          lines.push("");
+          lines.push("the MAC function accepts the forged tag : " + payload.accepted_by_the_mac);
+          lines.push("the same forgery against HMAC           : " + (payload.hmac_resists ? "refused" : "ACCEPTED, which would be a bug"));
+        } else if (id === "gcm-nonce-reuse") {
+          lines.push(payload.messages + " messages encrypted under one nonce; only the ciphertexts are public");
+          lines.push("");
+          lines.push("recovered subkey  " + payload.recovered_subkey);
+          lines.push("the real subkey   " + payload.real_subkey);
+          lines.push("they match        " + payload.subkey_recovered);
+          lines.push("");
+          lines.push("message the attacker chose  " + JSON.stringify(payload.chosen_message));
+          lines.push("forged tag                  " + payload.forged_tag);
+          lines.push("accepted by the real GCM    " + payload.accepted_by_gcm);
+        } else if (id === "padding-oracle") {
+          lines.push("the only thing the attacker can do is ask whether padding is valid");
+          lines.push("");
+          lines.push("the message  " + JSON.stringify(payload.message));
+          lines.push("recovered    " + JSON.stringify(payload.recovered));
+          lines.push("");
+          lines.push("yes-or-no questions asked  " + payload.queries);
+          lines.push("the recovery is exact      " + payload.recovered_matches);
+        } else if (id === "ecdsa-nonce-reuse") {
+          lines.push("two published signatures, sharing an r because the signer reused a nonce");
+          lines.push("shared r        " + payload.shared_r);
+          lines.push("");
+          lines.push("recovered key   " + payload.recovered_key);
+          lines.push("the real key    " + payload.real_key);
+          lines.push("they match      " + payload.key_recovered);
+          lines.push("");
+          lines.push("a signature made with the recovered key verifies: " + payload.signature_verified);
+        }
+        if (payload.error) { lines.push(""); lines.push("error: " + payload.error); }
+        report(id, payload, lines);
+      })
+      .catch(function (err) {
+        report(id, { worked: false, error: String(err) }, ["the request failed: " + err]);
+      })
+      .then(function () { button.disabled = false; });
+  }
+
+  function post(path, body, target) {
+    var out = document.getElementById(target);
+    out.textContent = "working...";
+    fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    })
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); })
+      .then(function (res) {
+        if (res.status !== 200) { out.textContent = "refused: " + (res.body.error || "bad request"); return; }
+        var lines = [];
+        Object.keys(res.body).forEach(function (k) {
+          lines.push(k + ": " + res.body[k]);
+        });
+        out.textContent = lines.join("\n");
+      })
+      .catch(function (err) { out.textContent = "the request failed: " + err; });
+  }
+
+  var ACTIONS = {
+    hash: function () {
+      post("/api/hash", { data: document.getElementById("hash-input").value }, "hash-out");
+    },
+    hmac: function () {
+      post("/api/hmac", {
+        key: document.getElementById("hmac-key").value,
+        message: document.getElementById("hmac-msg").value
+      }, "hmac-out");
+    },
+    seal: function () {
+      post("/api/gcm/seal", {
+        key: document.getElementById("gcm-key").value,
+        nonce: document.getElementById("gcm-nonce").value,
+        plaintext: document.getElementById("gcm-pt").value,
+        aad: document.getElementById("gcm-aad").value
+      }, "gcm-out");
+    },
+    open: function () {
+      var state = window.__sealed;
+      if (!state) { document.getElementById("gcm-out").textContent = "seal something first"; return; }
+      post("/api/gcm/open", {
+        key: state.key, nonce: state.nonce,
+        ciphertext: state.ciphertext, tag: state.tag, aad: state.aad
+      }, "gcm-out");
+    },
+    tamper: function () {
+      var state = window.__sealed;
+      if (!state) { document.getElementById("gcm-out").textContent = "seal something first"; return; }
+      var flipped = (state.tag[0] === "0" ? "1" : "0") + state.tag.slice(1);
+      post("/api/gcm/open", {
+        key: state.key, nonce: state.nonce,
+        ciphertext: state.ciphertext, tag: flipped, aad: state.aad
+      }, "gcm-out");
+    }
+  };
+
+  // Remember the last sealing so the open and tamper buttons have something real to work on.
+  var realPost = window.fetch;
+  window.fetch = function (url, options) {
+    return realPost.apply(window, arguments).then(function (response) {
+      if (url === "/api/gcm/seal" && options && options.body) {
+        try {
+          var sent = JSON.parse(options.body);
+          response.clone().json().then(function (payload) {
+            if (payload && payload.ciphertext) {
+              window.__sealed = {
+                key: sent.key, nonce: sent.nonce, aad: sent.aad || "",
+                ciphertext: payload.ciphertext, tag: payload.tag
+              };
+            }
+          });
+        } catch (err) { /* the visible error already covers this */ }
+      }
+      return response;
+    });
+  };
+
+  function loadVectors() {
+    var host = document.getElementById("vectors-out");
+    fetch("/api/vectors").then(function (r) { return r.json(); }).then(function (payload) {
+      var table = el("table");
+      var head = el("tr");
+      ["case", "ciphertext", "tag"].forEach(function (h) { head.appendChild(el("th", null, h)); });
+      table.appendChild(head);
+      payload.gcm.forEach(function (row) {
+        var tr = el("tr");
+        tr.appendChild(el("td", null, row.name));
+        tr.appendChild(el("td", null, row.ciphertext_matches ? "matches" : "MISMATCH"));
+        tr.appendChild(el("td", null, row.tag_matches ? "matches" : "MISMATCH"));
+        table.appendChild(tr);
+      });
+      payload.digests.forEach(function (row) {
+        var tr = el("tr");
+        tr.appendChild(el("td", null, row.name));
+        var td = el("td", null, row.digest);
+        td.colSpan = 2;
+        tr.appendChild(td);
+        table.appendChild(tr);
+      });
+      host.innerHTML = "";
+      host.appendChild(table);
+      document.getElementById("vectors-state").textContent =
+        payload.all_match ? "all published vectors reproduce" : "a published vector does not reproduce";
+      document.getElementById("vectors-state").style.color = payload.all_match ? "#3ddc84" : "#ff3b30";
+    }).catch(function (err) {
+      host.innerHTML = "";
+      host.appendChild(el("pre", null, "could not load the vectors: " + err));
+    });
+  }
+
+  document.querySelectorAll("nav button").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      document.querySelectorAll("nav button").forEach(function (other) {
+        other.setAttribute("aria-selected", String(other === tab));
+      });
+      ["attacks", "primitives", "vectors"].forEach(function (view) {
+        document.getElementById("view-" + view).hidden = (view !== tab.dataset.view);
+      });
+    });
+  });
+
+  document.querySelectorAll("button[data-action]").forEach(function (button) {
+    button.addEventListener("click", function () { ACTIONS[button.dataset.action](); });
+  });
+
+  buildAttackCards();
+  loadVectors();
+})();
+</script>
+</body>
+</html>

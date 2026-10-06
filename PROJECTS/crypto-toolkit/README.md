@@ -72,6 +72,32 @@ attacks on this machine.
 
 ![Running in Visual Studio Code](docs/screenshots/04-in-visual-studio-code.png)
 
+## The console
+
+There is a web console for the case where you want to watch rather than type.
+One command starts it, it binds to the loopback address, and the page that opens
+has the four attacks as buttons: press one and it generates its own key, nonce
+and messages, mounts the attack, and shows you what it recovered or forged and
+whether the genuine implementation accepted it. Alongside them are the
+primitives -- a hash, an HMAC, and a seal and open pair where you can flip a
+nibble of the tag and watch the decryption path refuse it.
+
+![The web console with all four attacks run](docs/screenshots/05-web-console.png)
+
+It is a standard-library server and one self-contained page, and both of those
+are deliberate. The server is `http.server` because this project's rule is that
+nothing under `src/` imports a third-party package, and that rule is checked by
+reading the source rather than by trusting anyone -- a console built on a
+framework would break it. The page fetches nothing from anywhere: no stylesheet,
+no font, no script, and every request it makes is a relative path back to the
+server that served it. A project that argues about nonce reuse has no business
+telling a font server when it is open, and the page has to render on a machine
+with no network.
+
+It is also not a service. It binds to `127.0.0.1` and nothing else by default,
+because it will encrypt whatever you paste into it with whatever key you paste
+in, and that is not a thing to put on a network.
+
 ## Why write a cipher out by hand
 
 AES has a shape that is easy to describe and hard to get exactly right. The

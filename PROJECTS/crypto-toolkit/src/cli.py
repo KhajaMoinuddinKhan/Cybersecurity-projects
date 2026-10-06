@@ -23,6 +23,7 @@ from .ecdsa import P256_N, PrivateKey, generate_private_key, sign, verify
 from .gcm import GCM, InvalidTag
 from .hmac import hmac_sha256_hex
 from .sha256 import sha256, sha256_hex
+from .web import DEFAULT_HOST, DEFAULT_PORT, serve
 
 
 def _hex(value: str, what: str) -> bytes:
@@ -253,6 +254,13 @@ def cmd_attack(args) -> int:
     return 1 if failures else 0
 
 
+def cmd_serve(args) -> int:
+    """Run the web console until interrupted."""
+
+    serve(args.host, args.port)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="crypto-toolkit",
@@ -285,6 +293,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     vectors = sub.add_parser("vectors", help="re-check the published GCM vectors")
     vectors.set_defaults(func=cmd_vectors)
+
+    serving = sub.add_parser("serve", help="run the local web console over the toolkit and the attacks")
+    serving.add_argument("--host", default=DEFAULT_HOST,
+                         help="the address to bind; the loopback address unless you insist")
+    serving.add_argument("--port", type=int, default=DEFAULT_PORT, help="the port to listen on")
+    serving.set_defaults(func=cmd_serve)
 
     attack = sub.add_parser("attack", help="mount one of the attacks against fresh values")
     attack.add_argument("which", choices=sorted(DEMOS) + ["all"],
