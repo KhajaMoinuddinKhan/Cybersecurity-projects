@@ -65,6 +65,19 @@ class RuleScore:
     windows_matched: list[str] = field(default_factory=list)
     windows_missed: list[str] = field(default_factory=list)
     windows_false: list[str] = field(default_factory=list)
+    # Whether the corpus can say anything about this rule at all. A rule naming
+    # a technique nobody ran, which never fired either, has twelve true negatives
+    # and they mean nothing: it was not tested, it was absent. Reporting that as
+    # a clean sheet is the most misleading thing a measurement like this can do,
+    # because a rule that has never been exercised looks exactly like a rule that
+    # has been exercised and passed.
+    tested: bool = True
+
+    @property
+    def evidence(self) -> str:
+        if not self.tested:
+            return "no evidence"
+        return "measured"
 
     @property
     def precision(self) -> float | None:
@@ -95,8 +108,12 @@ class RuleScore:
             "fp": self.false_positives,
             "fn": self.false_negatives,
             "tn": self.true_negatives,
-            "precision": rounded(self.precision),
-            "recall": rounded(self.recall),
+            "tested": self.tested,
+            "evidence": self.evidence,
+            # a precision of 0.00 next to "no evidence" would be a different
+            # claim from a precision of 0.00 next to a rule that was tested
+            "precision": rounded(self.precision) if self.tested else None,
+            "recall": rounded(self.recall) if self.tested else None,
             "f1": rounded(self.f1),
             "windows_matched": list(self.windows_matched),
             "windows_missed": list(self.windows_missed),
@@ -144,11 +161,18 @@ def measure_corpus(corpus: dict, engine: RuleEngine | None = None) -> dict:
                     seen.add(rule.id)
         fired[str(index)] = seen
 
+    # a rule starts untested and is promoted by evidence, in either direction
+    for rule in engine.rules:
+        scores[rule.id].tested = any(
+            _technique_key(window["label"]) in covered[rule.id] for window in windows)
+
     for index, window in enumerate(windows):
         label = window["label"]
         for rule in engine.rules:
             score = scores[rule.id]
             named = _technique_key(label) in covered[rule.id]
+            if named:
+                score.tested = True      # the corpus ran something this rule names
             did_fire = rule.id in fired[str(index)]
             if named and did_fire:
                 score.true_positives += 1
@@ -159,6 +183,7 @@ def measure_corpus(corpus: dict, engine: RuleEngine | None = None) -> dict:
             elif not named and did_fire:
                 score.false_positives += 1
                 score.windows_false.append(label)
+                score.tested = True      # it fired, so its precision is a real number
             else:
                 score.true_negatives += 1
 
@@ -183,12 +208,18 @@ def format_scores(result: dict) -> str:
     for row in result["rules"]:
         def show(value):
             return "  n/a" if value is None else "%.2f" % value
-        lines.append("%-46s %-6s %4d %4d %4d %4d %9s %7s %6s" % (
+        note = "" if row.get("tested", True) else "   <- no evidence"
+        lines.append("%-46s %-6s %4d %4d %4d %4d %9s %7s %6s%s" % (
             row["rule_id"][:46], row["severity"][:6], row["tp"], row["fp"], row["fn"],
-            row["tn"], show(row["precision"]), show(row["recall"]), show(row["f1"])))
+            row["tn"], show(row["precision"]), show(row["recall"]), show(row["f1"]), note))
 
     detected = [r for r in result["rules"] if r["tp"] > 0]
+    untested = [r for r in result["rules"] if not r.get("tested", True)]
     lines.append("")
+    if untested:
+        lines.append("%d of %d rules were never exercised by this corpus. Their true "
+                     "negatives are absences, not passes: the corpus ran five techniques "
+                     "and these rules name none of them." % (len(untested), len(result["rules"])))
     lines.append("%d of %d rules detected anything at all in a corpus of %d windows "
                  "(%d benign, %d technique windows, %d events)."
                  % (len(detected), len(result["rules"]), result["windows"],
@@ -262,6 +293,12 @@ def measurement_snapshot(corpus_path: str | Path | None = None,
                 "benign_flagged": clean["mean_flagged_benign"],
                 "attack_flagged": clean["mean_flagged_attack"],
                 "separation": clean["separation"],
+                "language_model": anomaly["visibility"].get("language_model"),
+                "evasions": [
+                    {"name": e["name"], "forest": e["separation"],
+                     "commands": (e.get("language_model") or {}).get("separation")}
+                    for e in anomaly.get("evasions", [])
+                ],
                 "survived": anomaly["survived"],
                 "attempts": anomaly["attempts"],
                 "attempts_note": ("%d of %d evasion attempts left at least half the separation intact."

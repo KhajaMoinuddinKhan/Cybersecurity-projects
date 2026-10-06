@@ -469,6 +469,27 @@ of the benign events as anomalous, so it is a detector that finds the signal and
 far too much else, and it is not something to deploy without a great deal of
 tuning.
 
+Two things about that result are worth stating plainly, because both are the
+kind of thing a measurement is for.
+
+**Most of the rules were not tested, and the table says so.** The corpus runs five
+techniques, so it can only say anything about the rules naming those five. The
+others were marked `no evidence` rather than given twelve true negatives, because
+a rule that has never been exercised looks exactly like a rule that was exercised
+and passed, and reporting the first as the second is the most misleading thing
+this kind of table can do. `sysmon-encoded-powershell-command` is one of them: it
+is the High-severity rule for the one technique endpoint protection would not let
+the lab run, so the rule that most deserves a number is the one with none.
+
+**The command model is the one that survives evasion.** The isolation forest reads
+an event's shape -- its id, its channel, its message length, whether its image
+sits in System32 -- and feature mimicry rewrites exactly those, which is why it
+falls. The command language model reads the words of the command line, which
+mimicry does not touch, and it holds at 0.913 separation where the forest drops to
+minus 0.052 on the same evasion. The two are reported side by side rather than
+combined, because they fail in different directions: dilution hurts the command
+model more, mimicry hurts the forest more, and a reader can see which.
+
 All of this is in the console, under **How well the rules actually do**. When
 there is no corpus on the machine the panel says so and names the command that
 would capture one, because an empty table reads as a fault rather than as an

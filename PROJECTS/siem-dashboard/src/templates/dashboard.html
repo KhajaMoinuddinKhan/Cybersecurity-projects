@@ -1143,11 +1143,16 @@
 
     var anomaly = data.anomaly;
     if (anomaly && anomaly.separation !== undefined) {
-      text("measurement-anomaly",
-        "A learned anomaly detector, trained on the benign windows only, flags " +
+      var note = "A learned anomaly detector, trained on the benign windows only, flags " +
         (anomaly.attack_flagged * 100).toFixed(1) + "% of attack-window events and " +
         (anomaly.benign_flagged * 100).toFixed(1) + "% of benign ones (separation " +
-        anomaly.separation.toFixed(3) + "). " + (anomaly.attempts_note || ""));
+        anomaly.separation.toFixed(3) + "). " + (anomaly.attempts_note || "");
+      if (anomaly.language_model) {
+        note += " A second model reads the command lines instead of the events' shape: " +
+          (anomaly.language_model.separation).toFixed(3) + " separation, and it is the one " +
+          "that survives feature mimicry, which rewrites the shape and not the words.";
+      }
+      text("measurement-anomaly", note);
     } else {
       text("measurement-anomaly", "");
     }

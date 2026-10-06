@@ -261,3 +261,39 @@ def test_the_dashboard_renders_the_measurement_panel():
     assert "refreshMeasurement" in html
     # a rule that fired on the wrong window must be visibly marked, not silently green
     assert "row.fp > 0" in html
+
+
+def test_a_rule_the_corpus_never_exercised_is_marked_as_such(patched):
+    """Twelve true negatives from a corpus that ran nothing it names are absences.
+
+    Reporting them as a clean sheet is the most misleading thing a measurement
+    like this can do: a rule that has never been tested looks exactly like a rule
+    that was tested and passed.
+    """
+    rules = [_FakeRule("never-ran", ["T1059.001"])]
+    engine = patched(rules, {})
+    result = _measure(_corpus(["T1082", "benign"]), engine)
+    row = result["rules"][0]
+    assert row["tested"] is False
+    assert row["evidence"] == "no evidence"
+    assert row["precision"] is None and row["recall"] is None
+    assert "no evidence" in format_scores(result)
+
+
+def test_a_rule_that_fired_has_evidence_even_on_the_wrong_technique(patched):
+    """Firing is evidence: it makes the precision a real number, if a bad one."""
+    rules = [_FakeRule("noisy", ["T1059.001"])]
+    engine = patched(rules, {"noisy": {0}})
+    result = _measure(_corpus(["T1082", "benign"]), engine)
+    row = result["rules"][0]
+    assert row["tested"] is True
+    assert row["precision"] == 0.0
+
+
+def test_a_rule_naming_a_technique_that_ran_has_evidence(patched):
+    rules = [_FakeRule("ran", ["T1082"])]
+    engine = patched(rules, {})
+    result = _measure(_corpus(["T1082", "benign"]), engine)
+    row = result["rules"][0]
+    assert row["tested"] is True
+    assert row["recall"] == 0.0

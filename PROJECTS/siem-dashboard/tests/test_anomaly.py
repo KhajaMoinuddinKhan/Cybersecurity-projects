@@ -241,3 +241,45 @@ def test_an_evasion_that_works_is_reported_as_having_worked():
         expected = (row["separation"] or -1) >= floor
         assert (row["name"], expected) in [(r["name"], (r["separation"] or -1) >= floor)
                                            for r in result["evasions"]]
+
+
+def test_the_command_model_reads_the_words_not_the_shape():
+    """The whole reason it exists.
+
+    Feature mimicry rewrites an event's shape -- its id, its channel, its message
+    length, whether its image sits in System32 -- and the isolation forest falls
+    to it. The command model scores the command line, which mimicry does not
+    touch, so it should not fall.
+    """
+    benign = [_event(event_id=str(i % 3), message="ordinary",
+                     command=r"C:\Windows\System32\cmd.exe /C dir") for i in range(40)]
+    attack = [_event(event_id="1", message="m",
+                     command=r'C:\Windows\System32\cmd.exe /C "whoami /all"',
+                     image=r"C:\Windows\System32\cmd.exe") for _ in range(8)]
+    corpus = {"windows": [{"label": "benign", "events": benign},
+                          {"label": "T1033", "events": attack}]}
+    result = evaluate(corpus)
+    assert result["visibility"]["language_model"], "the command model must be measured"
+    for row in result["evasions"]:
+        assert "language_model" in row, "each evasion must be scored by both models"
+
+
+def test_the_two_models_are_reported_side_by_side():
+    benign = [_event(event_id=str(i % 3), message="ordinary",
+                     command=r"C:\Windows\System32\cmd.exe /C dir") for i in range(40)]
+    attack = [_event(event_id="1", message="m",
+                     command=r'C:\Windows\System32\cmd.exe /C "whoami /all"') for _ in range(8)]
+    corpus = {"windows": [{"label": "benign", "events": benign},
+                          {"label": "T1033", "events": attack}]}
+    text = format_report(evaluate(corpus))
+    assert "commands" in text
+    assert "shape" in text and "words" in text
+
+
+def test_the_command_model_is_empty_safe_when_there_are_no_commands():
+    benign = [_event(event_id="3", message="ordinary") for _ in range(10)]
+    attack = [_event(event_id="3", message="m") for _ in range(3)]
+    corpus = {"windows": [{"label": "benign", "events": benign},
+                          {"label": "T1033", "events": attack}]}
+    result = evaluate(corpus)          # must not raise on a corpus with no command lines
+    assert result["visibility"]["events"] == 0

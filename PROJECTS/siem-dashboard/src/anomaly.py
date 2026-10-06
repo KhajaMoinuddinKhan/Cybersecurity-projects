@@ -343,6 +343,39 @@ def _window_scores(corpus: dict, forest: IsolationForest, extractor: FeatureExtr
     return per_window
 
 
+def _commands_of(events: list[dict]) -> list[str]:
+    return [str((e.get("fields") or {}).get("CommandLine") or "") for e in events]
+
+
+def _language_separation(model, benign_commands: list[str], events: list[dict],
+                         percentile: float = 95.0) -> dict:
+    """The same question asked of the model that can see the words.
+
+    It reads the command line, so an evasion that rewrites an event's *shape* --
+    its id, its channel, its message length, whether its image sits in System32 --
+    does not touch what this scores. That is the whole reason it exists: the
+    forest fell to exactly that, and this should not.
+    """
+    commands = [c for c in _commands_of(events) if c.strip()]
+    if not commands or not benign_commands:
+        return {"events": len(commands), "technique_flagged": None, "benign_flagged": None,
+                "separation": None}
+    familiar = model.score_all(benign_commands)
+    strange = model.score_all(commands)
+    ordered = sorted(familiar)
+    cut = ordered[min(len(ordered) - 1, int(percentile / 100.0 * (len(ordered) - 1)))]
+    benign_rate = sum(1 for s in familiar if s > cut) / len(familiar)
+    technique_rate = sum(1 for s in strange if s > cut) / len(strange)
+    return {
+        "events": len(commands),
+        "benign_flagged": round(benign_rate, 3),
+        "technique_flagged": round(technique_rate, 3),
+        "separation": round(technique_rate - benign_rate, 3),
+        "mean_benign_score": round(sum(familiar) / len(familiar), 3),
+        "mean_technique_score": round(sum(strange) / len(strange), 3),
+    }
+
+
 def _visibility(events: list[dict], benign_vectors: list[list[float]],
                 forest: IsolationForest, extractor: FeatureExtractor,
                 threshold: float) -> dict:
@@ -481,24 +514,12 @@ def evaluate(corpus: dict, threshold: float | None = None,
     benign_commands = [str((e.get("fields") or {}).get("CommandLine") or "") for e in benign]
     benign_commands = [c for c in benign_commands if c.strip()]
     technique_commands = [str((e.get("fields") or {}).get("CommandLine") or "") for e in technique_events]
+    language = None
     if benign_commands and technique_commands:
         language = CommandLanguageModel().fit(benign_commands)
-        familiar = language.score_all(benign_commands)
-        strange = language.score_all(technique_commands)
-        # the same 95th-percentile convention, so the two models are comparable
-        ordered = sorted(familiar)
-        cut = ordered[min(len(ordered) - 1, int(0.95 * (len(ordered) - 1)))]
-        visibility["language_model"] = {
-            "trained_on_commands": len(benign_commands),
-            "benign_flagged": round(sum(1 for s in familiar if s > cut) / len(familiar), 3),
-            "technique_flagged": round(sum(1 for s in strange if s > cut) / len(strange), 3),
-            "separation": round(
-                sum(1 for s in strange if s > cut) / len(strange)
-                - sum(1 for s in familiar if s > cut) / len(familiar), 3),
-            "threshold": round(cut, 3),
-            "mean_benign_score": round(sum(familiar) / len(familiar), 3),
-            "mean_technique_score": round(sum(strange) / len(strange), 3),
-        }
+        visibility["language_model"] = _language_separation(
+            language, benign_commands, technique_events)
+        visibility["language_model"]["trained_on_commands"] = len(benign_commands)
 
     # The evasions are scored by putting the mimicked or diluted events back
     # into a copy of the corpus, so the same code path scores all three.
@@ -530,6 +551,10 @@ def evaluate(corpus: dict, threshold: float | None = None,
                 survived_events = evaded[:max(1, len(events))]
             row = _visibility(survived_events, benign_vectors, forest, extractor, threshold)
             row["name"] = "%s (%s)" % (name, label)
+            if language is not None:
+                # what the evasion did to the model that reads the words
+                row["language_model"] = _language_separation(
+                    language, benign_commands, survived_events)
             evasions.append(row)
 
     # "survived" now means the detector could still see the technique's events
@@ -576,6 +601,21 @@ def format_report(result: dict) -> str:
         if (v["separation"] or 0.0) <= 0.01:
             lines.append("The detector cannot see the techniques. The window figures above "
                          "are noise, and tuning the threshold will not change that.")
+    lines.append("")
+    lines.append("")
+    lines.append("Under evasion, the two models side by side -- the forest reads an event's "
+                 "shape, the command model reads its words:")
+    lines.append("")
+    lines.append("%-24s %10s %12s" % ("scenario", "forest", "commands"))
+    lines.append("-" * 48)
+    for row in result.get("evasions", []):
+        commands = row.get("language_model") or {}
+        lines.append("%-24s %10s %12s" % (
+            row["name"][:24], row["separation"], commands.get("separation")))
+    lines.append("")
+    lines.append("The forest falls to feature mimicry and the command model does not: "
+                 "mimicry rewrites the event's shape, and the shape is not what the "
+                 "command model reads.")
     lines.append("")
     lines.append("separation is the mean fraction of events flagged anomalous: attack minus benign.")
     lines.append("%d of %d evasion attempts left at least half the separation intact."
