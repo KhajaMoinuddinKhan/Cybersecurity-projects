@@ -7,9 +7,12 @@ capture, which would only prove the code agrees with itself.
 
 from __future__ import annotations
 
+import time
+from pathlib import Path
+
 import pytest
 
-from src.measure import RuleScore, measure_corpus, format_scores
+from src.measure import RuleScore, load_corpus, measure_corpus, format_scores
 
 
 class _FakeRule:
@@ -201,8 +204,20 @@ def test_the_default_corpus_path_is_overridable(monkeypatch, tmp_path):
     from src.measure import default_corpus_path
     monkeypatch.setenv("SIEM_LAB_CORPUS", str(tmp_path / "mine.json"))
     assert default_corpus_path() == tmp_path / "mine.json"
-    monkeypatch.delenv("SIEM_LAB_CORPUS")
-    assert default_corpus_path().name == "corpus.json"
+
+
+def test_the_default_corpus_path_falls_back_to_the_committed_fixture(monkeypatch):
+    """A local capture wins; the committed fixture is what a fresh clone gets.
+
+    Without this, CI and anyone reading the repository could see the measured
+    numbers but not re-derive them, which for a project whose claim is "measured
+    rather than assumed" is the wrong way round.
+    """
+    from src.measure import default_corpus_path
+    monkeypatch.delenv("SIEM_LAB_CORPUS", raising=False)
+    resolved = default_corpus_path()
+    assert resolved.exists()
+    assert resolved.name in ("corpus.json", "attack-lab-corpus.json")
 
 
 def test_the_endpoint_serves_the_measurement(tmp_path, monkeypatch):
@@ -297,3 +312,95 @@ def test_a_rule_naming_a_technique_that_ran_has_evidence(patched):
     row = result["rules"][0]
     assert row["tested"] is True
     assert row["recall"] == 0.0
+
+
+# --- the committed fixture, so the numbers are reproducible ---------------
+
+FIXTURE = Path(__file__).resolve().parent / "vectors" / "attack-lab-corpus.json"
+
+
+def test_the_committed_fixture_is_present_and_scrubbed():
+    """The capture is real telemetry from a real machine, so it is scrubbed.
+
+    It is committed anyway, because a measurement a reader cannot re-derive is a
+    claim rather than a measurement. The scrubbing is asserted here rather than
+    trusted: a leak into a public repository is not something to find out about
+    afterwards.
+    """
+    import re as _re
+    assert FIXTURE.exists(), "the fixture must be committed for the numbers to be reproducible"
+    blob = FIXTURE.read_text(encoding="utf-8")
+    for pattern, what in ((r"LAPTOP-[A-Z0-9]+", "the machine name"),
+                          (r"Khan", "the account name"),
+                          (r"S-1-5-21-\d+-\d+-\d+-\d+", "a real SID"),
+                          (r"tlsquic", "a scratch path")):
+        assert not _re.search(pattern, blob, _re.I), what + " is still in the fixture"
+    leftovers = {ip for ip in _re.findall(r"(?:\d{1,3}\.){3}\d{1,3}", blob)
+                 if not ip.startswith(("198.51.100.", "127.", "0.0.0.0"))}
+    assert not leftovers, "real addresses remain: %s" % sorted(leftovers)[:5]
+
+
+def test_the_fixture_reproduces_the_measured_result():
+    """Every number in the README has to be re-derivable from the repository.
+
+    This is the point of committing the fixture at all. If a rule's behaviour or
+    a model's separation changes, this fails, which is what a documented result
+    should do.
+    """
+    from src.anomaly import evaluate
+    result = measure_corpus(load_corpus(FIXTURE))
+    detected = {row["rule_id"] for row in result["rules"] if row["tp"] > 0}
+    assert detected == {
+        "disc-system-information", "disc-process-listing", "disc-network-configuration",
+        "disc-software-inventory", "disc-account-discovery",
+    }, "the five discovery rules are the ones the README says detect something"
+    assert result["windows"] == 12
+    assert result["benign_windows"] == 2
+
+    anomaly = evaluate(load_corpus(FIXTURE))
+    visibility = anomaly["visibility"]
+    assert visibility["separation"] > 0.5, "the forest must separate on the committed corpus"
+    assert visibility["language_model"]["separation"] > 0.5
+    assert anomaly["survived"] >= 1
+
+
+def test_the_fixture_marks_the_untested_rules_as_untested():
+    """The corpus runs five techniques, so most rules have no evidence in it."""
+    result = measure_corpus(load_corpus(FIXTURE))
+    untested = [row["rule_id"] for row in result["rules"] if not row["tested"]]
+    assert "sysmon-encoded-powershell-command" in untested
+    assert len(untested) > 10
+
+
+def test_the_snapshot_is_cached_until_the_corpus_changes(tmp_path):
+    """The console asks for this on every refresh, and answering it is expensive.
+
+    It scores every rule against every window and trains an isolation forest, so
+    doing it per page refresh made the endpoint the slowest thing on the
+    dashboard. Keyed on the file's modification time and size, so a new capture
+    is still picked up by itself.
+    """
+    import json as _json
+    from src.measure import measurement_snapshot
+    path = tmp_path / "corpus.json"
+    path.write_text(_json.dumps({"windows": [
+        {"label": "benign", "events": []},
+        {"label": "T1082", "events": []},
+    ]}), encoding="utf-8")
+
+    first = measurement_snapshot(path, with_anomaly=False)
+    second = measurement_snapshot(path, with_anomaly=False)
+    assert first is second, "the second call must be served from the cache"
+
+    time.sleep(0.01)
+    path.write_text(_json.dumps({"windows": [
+        {"label": "benign", "events": []},
+        {"label": "T1082", "events": []},
+        {"label": "T1057", "events": []},
+    ]}), encoding="utf-8")
+    third = measurement_snapshot(path, with_anomaly=False)
+    assert third is not first, "a changed corpus must be re-measured"
+    assert third["windows"] == 3
+
+    fresh = measurement_snapshot(path, with_anomaly=False, use_cache=False)
+    assert fresh is not third

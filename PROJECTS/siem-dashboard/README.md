@@ -497,6 +497,26 @@ experiment nobody has run yet. The captured corpus is not committed: it is real
 telemetry from a real machine, hostname and account name included, and it belongs
 on the machine that produced it.
 
+## Re-deriving the numbers
+
+Every figure in the section above comes from a corpus captured on one machine, and
+that corpus is committed at `tests/vectors/attack-lab-corpus.json` so the figures
+can be checked rather than believed. It is a measurement a reader cannot reproduce
+that is only a claim, and this project's whole argument is that a rule should be
+measured instead of asserted.
+
+The capture is real telemetry, so it is scrubbed before it is committed: the
+machine's name, the account name, its security identifier and its real network
+destinations are replaced. Addresses are replaced consistently, through a hash, so
+the same address always becomes the same documentation-range placeholder and a
+flow still reads as a flow. A test asserts the scrubbing rather than trusting it,
+because a leak into a public repository is not something to find out about later.
+
+A local capture wins when there is one, since a measurement of the machine you are
+sitting at is the more useful of the two. The fixture is the fallback, which is
+what a fresh clone and CI get. `python -m src.lab capture` writes the local one,
+and needs an elevated shell for the Sysmon and Security channels.
+
 ## Limits
 
 Three rules fire on traffic they were not written for, and the measurement says

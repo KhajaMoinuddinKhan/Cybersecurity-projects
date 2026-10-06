@@ -236,16 +236,39 @@ def format_scores(result: dict) -> str:
 # from a real machine, hostname and account name included -- so the path is
 # configurable and the console says plainly when there is nothing to measure.
 def default_corpus_path() -> Path:
+    """Where the measurement reads from.
+
+    A local capture wins, because a measurement of *this* machine is the more
+    useful one and `corpus.json` is what the lab writes. The committed fixture is
+    the fallback, so a fresh clone and CI can still re-derive every number in the
+    README instead of taking them on trust. It is scrubbed: the machine's name,
+    the account name, its SID and its real destinations are replaced.
+    """
     import os
     override = os.environ.get("SIEM_LAB_CORPUS")
     if override:
         return Path(override)
-    return Path(__file__).resolve().parent.parent / "corpus.json"
+    local = Path(__file__).resolve().parent.parent / "corpus.json"
+    if local.exists():
+        return local
+    return Path(__file__).resolve().parent.parent / "tests" / "vectors" / "attack-lab-corpus.json"
+
+
+_SNAPSHOT_CACHE: dict[tuple, dict] = {}
+
+
+def _cache_key(path: Path, with_anomaly: bool):
+    try:
+        stat = path.stat()
+        return (str(path), stat.st_mtime_ns, stat.st_size, with_anomaly)
+    except OSError:
+        return (str(path), 0, 0, with_anomaly)
 
 
 def measurement_snapshot(corpus_path: str | Path | None = None,
                          engine: RuleEngine | None = None,
-                         with_anomaly: bool = True) -> dict:
+                         with_anomaly: bool = True,
+                         use_cache: bool = True) -> dict:
     """What the console shows: the measured rates, or why there are none.
 
     Returning an explanation rather than an empty table is deliberate. A console
@@ -253,6 +276,14 @@ def measurement_snapshot(corpus_path: str | Path | None = None,
     corpus has not been captured on this host looks like what it is.
     """
     path = Path(corpus_path) if corpus_path else default_corpus_path()
+    # The console asks for this on every refresh, and the answer only changes when
+    # the corpus does -- but answering it means scoring every rule against every
+    # window and training an isolation forest. Doing that per page refresh made
+    # the endpoint the slowest thing on the dashboard. Keyed on the file's
+    # modification time and size, so a new capture is picked up by itself.
+    key = _cache_key(path, with_anomaly)
+    if use_cache and key in _SNAPSHOT_CACHE:
+        return _SNAPSHOT_CACHE[key]
     if not path.exists():
         return {
             "available": False,
@@ -306,4 +337,6 @@ def measurement_snapshot(corpus_path: str | Path | None = None,
             }
         except (ValueError, ImportError) as exc:
             result["anomaly"] = {"available": False, "reason": str(exc)}
+    if use_cache:
+        _SNAPSHOT_CACHE[key] = result
     return result

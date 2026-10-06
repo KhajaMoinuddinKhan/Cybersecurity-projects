@@ -34,5 +34,8 @@ captures/
 # They are inputs to the measurement, not fixtures, and they belong on the
 # machine that produced them rather than in a public repository. Re-capture with
 # `python -m src.lab capture` (needs an elevated shell for the Sysmon channel).
-*attack-lab-corpus*.json
 PROJECTS/siem-dashboard/corpus*.json
+# The committed fixture is the exception and is meant to be tracked: it is
+# scrubbed, and it is what lets a fresh clone re-derive the measured numbers
+# instead of taking them on trust.
+!PROJECTS/siem-dashboard/tests/vectors/attack-lab-corpus.json
