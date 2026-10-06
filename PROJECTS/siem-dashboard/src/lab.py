@@ -498,16 +498,28 @@ BENIGN_WORKLOAD: tuple[tuple[str, str], ...] = (
 )
 
 
-def capture_benign(seconds: float = 12.0, workload=None) -> Window:
+def capture_benign(seconds: float = 12.0, workload=None, rotation: int = 0) -> Window:
     """A window of ordinary activity.
 
     This is the half that makes a false positive measurable. A rule that fires
     here fired on the machine going about its business.
+
+    The workload rotates rather than repeating. Running the same nine commands in
+    every window made `ipconfig` appear six times, and the network-discovery rule
+    was then scored at 0.25 precision for meeting a command that a real person
+    types once, not once per hour. The baseline is meant to be ordinary, and
+    ordinary activity is not identical every time.
     """
     started = time.time()
     marks = {channel: _highest_record_id(channel) for channel in CHANNELS}
     if workload is None:
-        workload = BENIGN_WORKLOAD
+        # always the dull core, then a couple of the others by rotation, so the
+        # overlap is realistic rather than constant
+        core = BENIGN_WORKLOAD[:4]
+        extra = BENIGN_WORKLOAD[4:]
+        take = 2
+        start = (rotation * take) % len(extra)
+        workload = core + tuple(extra[(start + i) % len(extra)] for i in range(take))
     # spread over the window rather than fired off at once, so the events land
     # where ordinary activity would land instead of in a single burst
     pause = max(0.0, seconds / max(1, len(workload)))
@@ -543,7 +555,7 @@ def capture_corpus(techniques=ALLOWED_TECHNIQUES, benign_windows: int = 3,
     for index in range(benign_windows):
         progress("  benign window %d of %d (%.0fs of ordinary activity)"
                  % (index + 1, benign_windows, benign_seconds))
-        window = capture_benign(benign_seconds)
+        window = capture_benign(benign_seconds, rotation=index)
         progress("          -> %d event(s)" % len(window.events))
         windows.append(window)
     return {

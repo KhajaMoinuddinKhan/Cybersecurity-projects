@@ -65,6 +65,19 @@ class RuleScore:
     windows_matched: list[str] = field(default_factory=list)
     windows_missed: list[str] = field(default_factory=list)
     windows_false: list[str] = field(default_factory=list)
+    # A rule with `alert: false` records its identity on an event so a correlation
+    # can use it, and by its own declaration does not raise an alert. Scoring it
+    # for precision and recall against a technique is a category error: the
+    # network rule names command-and-control and fires on every outbound
+    # connection, which is not a failed detection but a rule that never claimed to
+    # be one. Context rules are reported separately, with their firing rate, so
+    # the information stays and the label is right.
+    #
+    # These two sit after the counters deliberately: a dataclass is built
+    # positionally in the tests, and putting them first silently shifted every
+    # argument by two and made a rule with two true positives report none.
+    raises_alert: bool = True
+    windows_fired: int = 0
     # Whether the corpus can say anything about this rule at all. A rule naming
     # a technique nobody ran, which never fired either, has twelve true negatives
     # and they mean nothing: it was not tested, it was absent. Reporting that as
@@ -110,6 +123,8 @@ class RuleScore:
             "tn": self.true_negatives,
             "tested": self.tested,
             "evidence": self.evidence,
+            "raises_alert": self.raises_alert,
+            "windows_fired": self.windows_fired,
             # a precision of 0.00 next to "no evidence" would be a different
             # claim from a precision of 0.00 next to a rule that was tested
             "precision": rounded(self.precision) if self.tested else None,
@@ -134,7 +149,8 @@ def measure_corpus(corpus: dict, engine: RuleEngine | None = None) -> dict:
     labels = [window["label"] for window in windows]
     scores = {
         rule.id: RuleScore(rule_id=rule.id, title=rule.title, severity=rule.level,
-                           techniques=tuple(rule.techniques))
+                           techniques=tuple(rule.techniques),
+                           raises_alert=getattr(rule, "raises_alert", True))
         for rule in engine.rules
     }
     # a rule's techniques, in the same form the corpus labels windows with
@@ -174,6 +190,13 @@ def measure_corpus(corpus: dict, engine: RuleEngine | None = None) -> dict:
             if named:
                 score.tested = True      # the corpus ran something this rule names
             did_fire = rule.id in fired[str(index)]
+            if did_fire:
+                score.windows_fired += 1
+            if not score.raises_alert:
+                # counted, reported, not scored
+                if named:
+                    score.true_positives += 1
+                continue
             if named and did_fire:
                 score.true_positives += 1
                 score.windows_matched.append(label)
@@ -206,6 +229,8 @@ def format_scores(result: dict) -> str:
         "-" * 108,
     ]
     for row in result["rules"]:
+        if not row.get("raises_alert", True):
+            continue
         def show(value):
             return "  n/a" if value is None else "%.2f" % value
         note = "" if row.get("tested", True) else "   <- no evidence"
@@ -213,8 +238,10 @@ def format_scores(result: dict) -> str:
             row["rule_id"][:46], row["severity"][:6], row["tp"], row["fp"], row["fn"],
             row["tn"], show(row["precision"]), show(row["recall"]), show(row["f1"]), note))
 
-    detected = [r for r in result["rules"] if r["tp"] > 0]
-    untested = [r for r in result["rules"] if not r.get("tested", True)]
+    scored = [r for r in result["rules"] if r.get("raises_alert", True)]
+    context = [r for r in result["rules"] if not r.get("raises_alert", True)]
+    detected = [r for r in scored if r["tp"] > 0]
+    untested = [r for r in scored if not r.get("tested", True)]
     lines.append("")
     if untested:
         lines.append("%d of %d rules were never exercised by this corpus. Their true "
@@ -229,6 +256,19 @@ def format_scores(result: dict) -> str:
     for blocked in result["blocked_techniques"]:
         lines.append("Not executed: %s (%s) -- %s"
                      % (blocked["attack_id"], blocked["name"], blocked["reason"]))
+    if context:
+        lines.append("")
+        lines.append("Context rules (alert: false). These record their identity so a "
+                     "correlation can use them and do not raise an alert, so they are not "
+                     "scored for precision or recall -- but how often they fire is still "
+                     "worth knowing, because a rule that fires in every window adds "
+                     "nothing to a correlation either.")
+        lines.append("")
+        lines.append("%-46s %-6s %14s" % ("rule", "level", "windows it fired in"))
+        lines.append("-" * 70)
+        for row in context:
+            lines.append("%-46s %-6s %6d of %d" % (
+                row["rule_id"][:46], row["severity"][:6], row["windows_fired"], result["windows"]))
     return "\n".join(lines)
 
 

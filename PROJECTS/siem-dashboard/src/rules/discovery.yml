@@ -36,6 +36,9 @@ rules:
           - "systeminfo"
           - "REG QUERY HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography"
           - "Get-ComputerInfo"
+          - "reg query"
+          - "REG  QUERY"
+          - "/C set"
       condition: selection and keywords
     falsepositives:
       - An administrator or an inventory agent checking a build.

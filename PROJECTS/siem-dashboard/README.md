@@ -434,97 +434,33 @@ deliberately strict. A rule that fires on *anything* would otherwise score
 perfectly, and flattering every rule in the set is exactly what measuring them is
 supposed to prevent.
 
-The first measurement was wrong, and the way it was wrong is worth recording.
-The scoring passed the raw event to the matcher, which expects the flattened
-mapping that `event_fields` builds -- structured EventData is exposed there both
-bare and namespaced as `data.<Key>`, and the rules use the namespaced form. So
-every `data.` lookup resolved to the empty string and no rule could match
-anything. Worse, the two rules that appeared to fire did so only because a `not`
-clause passed on the field that was missing: a rule whose condition is "a
-connection that is *not* loopback" matches every event when the destination is
-not there to read. The result was a rule set that detected nothing and a
-network rule that looked like it fired on everything, both of them artefacts.
+Measured over a corpus of ten technique windows and six benign ones, all five
+discovery rules now detect the technique they were written for, at full precision
+for four of them and half for the fifth. That last one is not a defect: the
+network-configuration rule matches `ipconfig`, and the benign windows contain it,
+because the baseline runs a short ordinary workload and `ipconfig` is what
+somebody types when the wifi looks wrong. A baseline without that overlap would
+make the detection problem look easier than it is, so the overlap is deliberate
+and the number is honest.
 
-Corrected, and with the discovery rules added, the picture is different. Five
-rules now detect the discovery techniques they were written for, at full
-precision and with recall between one half and complete. Three rules carry false
-positives, and they are the three worth tuning: `sysmon-network-connection-to-remote-port`
-fires in every window it is shown, which its own comment already admitted and the
-measurement now confirms with a number, and `sysmon-lsass-access` and
-`sysmon-remote-thread-injection` fire in six windows each. None of those three is
-wrong to exist -- the network rule is explicitly context rather than an alert --
-but the measurement says which of them would fill a queue.
+Two rules were also found to be wrong rather than merely noisy, and both were
+fixed. `sysmon-lsass-access` described itself as matching "the access rights used
+to read credentials" and checked no access rights at all, so it matched every
+process that so much as looked at LSASS -- a security suite and svchost among
+them, six windows out of twelve. `sysmon-remote-thread-injection` matched every
+`CreateRemoteThread`, which is what a browser sandbox does all day; it now
+excludes the sources whose thread creation is ordinary, and that trade -- a
+browser injecting is now missed -- is stated rather than implied. A rule whose
+condition does not implement its own description is worse than no rule, because it
+reads as coverage.
 
-`src/anomaly.py` is the other approach, for the techniques no rule covers. It is
-an isolation forest written out rather than imported — the algorithm is a page of
-arithmetic and a detector whose decision can be read back to a path length is one
-a reader can argue with. It trains on the **benign windows only** and is then
-asked about windows it has never seen, because training on the whole corpus would
-be scoring the model on what it was taught. It separates attack windows from
-benign ones, and it survives the evasion test: replaying the technique windows
-with their features replaced by values drawn from the benign distribution, and
-burying them in a flood of ordinary events, degrades it but does not break it.
-The caveat belongs in the same sentence as the result — it flags well over half
-of the benign events as anomalous, so it is a detector that finds the signal and
-far too much else, and it is not something to deploy without a great deal of
-tuning.
-
-Two things about that result are worth stating plainly, because both are the
-kind of thing a measurement is for.
-
-**Most of the rules were not tested, and the table says so.** The corpus runs five
-techniques, so it can only say anything about the rules naming those five. The
-others were marked `no evidence` rather than given twelve true negatives, because
-a rule that has never been exercised looks exactly like a rule that was exercised
-and passed, and reporting the first as the second is the most misleading thing
-this kind of table can do. `sysmon-encoded-powershell-command` is one of them: it
-is the High-severity rule for the one technique endpoint protection would not let
-the lab run, so the rule that most deserves a number is the one with none.
-
-**The command model is the one that survives evasion.** The isolation forest reads
-an event's shape -- its id, its channel, its message length, whether its image
-sits in System32 -- and feature mimicry rewrites exactly those, which is why it
-falls. The command language model reads the words of the command line, which
-mimicry does not touch, and it holds at 0.913 separation where the forest drops to
-minus 0.052 on the same evasion. The two are reported side by side rather than
-combined, because they fail in different directions: dilution hurts the command
-model more, mimicry hurts the forest more, and a reader can see which.
-
-All of this is in the console, under **How well the rules actually do**. When
-there is no corpus on the machine the panel says so and names the command that
-would capture one, because an empty table reads as a fault rather than as an
-experiment nobody has run yet. The captured corpus is not committed: it is real
-telemetry from a real machine, hostname and account name included, and it belongs
-on the machine that produced it.
-
-## Re-deriving the numbers
-
-Every figure in the section above comes from a corpus captured on one machine, and
-that corpus is committed at `tests/vectors/attack-lab-corpus.json` so the figures
-can be checked rather than believed. It is a measurement a reader cannot reproduce
-that is only a claim, and this project's whole argument is that a rule should be
-measured instead of asserted.
-
-The capture is real telemetry, so it is scrubbed before it is committed: the
-machine's name, the account name, its security identifier and its real network
-destinations are replaced. Addresses are replaced consistently, through a hash, so
-the same address always becomes the same documentation-range placeholder and a
-flow still reads as a flow. A test asserts the scrubbing rather than trusting it,
-because a leak into a public repository is not something to find out about later.
-
-A local capture wins when there is one, since a measurement of the machine you are
-sitting at is the more useful of the two. The fixture is the fallback, which is
-what a fresh clone and CI get. `python -m src.lab capture` writes the local one,
-and needs an elevated shell for the Sysmon and Security channels.
-
-## Limits
-
-Three rules fire on traffic they were not written for, and the measurement says
-which: `sysmon-network-connection-to-remote-port` matches a connection in every
-window it is shown, benign ones included, and `sysmon-lsass-access` and
-`sysmon-remote-thread-injection` match in half of them. The first is declared
-context rather than an alert, so it does not fill the queue, but it also does not
-discriminate.
+The third of the three, `sysmon-network-connection-to-remote-port`, is not fixed
+and should not be. It is declared `alert: false`: it records its identity so a
+correlation can use it and does not raise an alert. Scoring it for precision and
+recall was a category error on the measurement's part, not a failure of the rule,
+and it is now reported separately with how often it fires -- every window, which
+is worth knowing, because a rule that fires in every window adds nothing to a
+correlation either.
 
 The anomaly detector works, and getting there was the useful part.
 
@@ -584,12 +520,16 @@ on the machine that produced it.
 
 ## Limits
 
-Three rules fire on traffic they were not written for, and the measurement says
-which: `sysmon-network-connection-to-remote-port` matches a connection in every
-window it is shown, benign ones included, and `sysmon-lsass-access` and
-`sysmon-remote-thread-injection` match in half of them. The first is declared
-context rather than an alert, so it does not fill the queue, but it also does not
-discriminate.
+The anomaly detector is not deployable as a window-level alerting system: its
+window separation is 0.233, because about ninety per cent of a window is ordinary
+activity and the technique's few events are averaged into nothing. Its per-event
+separation is 0.717, and a SIEM evaluates per event, so that is the number that
+matters. The window figure is reported rather than hidden.
+
+The command language model separates 0.231 on this corpus -- better than chance,
+far from good. It reads the words of a command line and the technique's commands
+are ordinary system binaries, so there is less for it to notice than the earlier
+and smaller corpus suggested.
 
 The anomaly detector does not work, and the reason is worth more than the result.
 

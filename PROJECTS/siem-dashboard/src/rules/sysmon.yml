@@ -111,10 +111,26 @@ rules:
       selection:
         event_id: "10"
         data.TargetImage|endswith: "\\lsass.exe"
-      condition: selection
+      # The description always said "the access rights used to read credentials"
+      # and the detection never checked any, so it matched every process that so
+      # much as looked at LSASS -- a security suite and svchost among them, six
+      # windows out of twelve. The rights below are the ones that appear in
+      # credential dumping: read plus query, and the broad all-access masks.
+      # A rule whose condition does not implement its own description is worse
+      # than no rule, because it reads as coverage.
+      access:
+        data.GrantedAccess|contains:
+          - "0x1010"
+          - "0x1410"
+          - "0x1418"
+          - "0x1438"
+          - "0x143a"
+          - "0x1fffff"
+          - "0x1f0fff"
+      condition: selection and access
     falsepositives:
-      - Endpoint security software and some backup agents legitimately read
-        LSASS. Compare the calling image before treating this as an incident.
+      - Backup and endpoint agents that read LSASS with those rights, which is a
+        narrower set than "anything that touches LSASS" but not an empty one.
     tags:
       - attack.credential_access
       - attack.t1003.001
@@ -131,9 +147,25 @@ rules:
     detection:
       selection:
         event_id: "8"
-      condition: selection
+      # CreateRemoteThread on its own is what browsers, security suites and
+      # debuggers do all day: measured here, every match was a Chromium sandbox
+      # thread. The sources below are the ones whose thread creation is ordinary,
+      # so the rule fires on the rest. It is a trade -- injection *from* a browser
+      # is now missed -- and that trade is stated rather than implied.
+      known_good:
+        data.SourceImage|endswith:
+          - "\\chrome.exe"
+          - "\\msedge.exe"
+          - "\\firefox.exe"
+          - "\\svchost.exe"
+          - "\\csrss.exe"
+          - "\\services.exe"
+          - "\\MsMpEng.exe"
+          - "\\SearchIndexer.exe"
+      condition: selection and not known_good
     falsepositives:
       - Debuggers, and some application compatibility shims.
+      - Injection from a browser or from system software, which is excluded above.
     tags:
       - attack.defense_evasion
       - attack.t1055
