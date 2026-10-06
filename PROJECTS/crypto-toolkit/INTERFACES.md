@@ -376,3 +376,174 @@ font or script is fetched from anywhere, and every request it makes is a relativ
 path back to the server that served it. The tests assert the absence of `http://`,
 `https://`, `<link`, `<script src`, `@import` and `integrity=` in the file, so the
 contract cannot be broken by adding a convenience import.
+
+
+## src/keccak.py
+
+The permutation ML-KEM is built on. It is here rather than inside
+`src/mlkem.py` because the sponge is a primitive in its own right and the tests
+check it against its own standard.
+
+```python
+KECCAK_LANES = 25                     # 5x5 lanes of 64 bits = 1600 bits
+
+SHA3_224_RATE = 144                   # bytes; (1600 - 2*224) / 8
+SHA3_256_RATE = 136
+SHA3_384_RATE = 104
+SHA3_512_RATE = 72
+SHAKE128_RATE = 168
+SHAKE256_RATE = 136
+
+SHA3_DOMAIN_SUFFIX = 0x06             # FIPS 202: the bits 01, then pad10*1
+SHAKE_DOMAIN_SUFFIX = 0x1F            # FIPS 202: the bits 1111, then pad10*1
+
+def keccak_f1600(state: list[int]) -> None: ...      # in place, 25 lanes of 64 bits
+
+def sha3_224(data: bytes) -> bytes: ...              # 28 bytes
+def sha3_256(data: bytes) -> bytes: ...              # 32 bytes
+def sha3_384(data: bytes) -> bytes: ...              # 48 bytes
+def sha3_512(data: bytes) -> bytes: ...              # 64 bytes
+def sha3_256_hex(data: bytes) -> str: ...
+
+def shake_128(data: bytes, length: int) -> bytes: ... # exactly `length` bytes
+def shake_256(data: bytes, length: int) -> bytes: ...
+```
+
+`shake_*` return exactly `length` bytes, squeezing as many blocks as it takes; a
+negative `length` raises `ValueError`. The six functions share one sponge: rate
+and domain suffix are the only things that differ, and writing the sponge once is
+what keeps them from drifting apart.
+
+## src/rsa.py
+
+```python
+RSA_PUBLIC_EXPONENT = 65537
+OAEP_HASH_LENGTH = 32                 # SHA-256, from src/sha256.py
+
+class DecryptionError(ValueError): ...
+
+@dataclass(frozen=True)
+class RSAPublicKey:
+    n: int
+    e: int
+    def size_bytes(self) -> int: ...   # k, the modulus length in bytes
+
+@dataclass(frozen=True)
+class RSAPrivateKey:
+    n: int
+    e: int
+    d: int
+    p: int
+    q: int
+    dp: int                            # d mod (p-1), for the CRT
+    dq: int                            # d mod (q-1)
+    qinv: int                          # q^-1 mod p
+
+def generate_key_pair(bits: int = 2048) -> tuple[RSAPublicKey, RSAPrivateKey]: ...
+
+def rsaep(public_key: RSAPublicKey, m: int) -> int: ...      # m^e mod n
+def rsadp(private_key: RSAPrivateKey, c: int) -> int: ...    # c^d mod n, via the CRT
+
+def mgf1(seed: bytes, length: int) -> bytes: ...             # MGF1 over SHA-256
+
+def oaep_encode(message: bytes, k: int, label: bytes = b"") -> bytes: ...
+def oaep_decode(encoded: bytes, k: int, label: bytes = b"") -> bytes: ...
+
+def encrypt(public_key: RSAPublicKey, message: bytes, label: bytes = b"") -> bytes: ...
+def decrypt(private_key: RSAPrivateKey, ciphertext: bytes, label: bytes = b"") -> bytes: ...
+```
+
+`generate_key_pair` requires `bits >= 512` and `bits % 8 == 0`, and raises
+`ValueError` otherwise. `encrypt` raises `ValueError` when the message is longer
+than `k - 2*OAEP_HASH_LENGTH - 2` bytes, because that is the point at which the
+OAEP block can no longer hold it -- the caller gets told rather than silently
+handed a truncation.
+
+`decrypt` raises `DecryptionError` for a ciphertext whose length is not `k`, for
+a representative outside `[0, n)`, and for an OAEP block that does not decode.
+All three are the same exception on purpose: an OAEP decoder that told the caller
+*which* check failed is the oracle the padding attack in this repository exists
+to demonstrate.
+
+`mgf1` must use `src/sha256.py`. `src/rsa.py` may use `src/sha256.py` and
+nothing else.
+
+## src/mlkem.py
+
+FIPS 203. The parameter sets are the standard's own, read from Table 2 of the
+document, and the toy set below is not one of them.
+
+```python
+MLKEM_Q = 3329
+MLKEM_N = 256
+MLKEM_SYMBYTES = 32                   # d, z, m and the shared secret are all 32 bytes
+
+@dataclass(frozen=True)
+class MLKEMParameters:
+    name: str
+    k: int
+    eta1: int
+    eta2: int
+    du: int
+    dv: int
+    security_category: int
+    def encapsulation_key_bytes(self) -> int: ...   # 384*k + 32
+    def decapsulation_key_bytes(self) -> int: ...   # 768*k + 96
+    def ciphertext_bytes(self) -> int: ...          # 32*(du*k + dv)
+
+MLKEM_512  = MLKEMParameters("ML-KEM-512",  2, 3, 2, 10, 4, 1)
+MLKEM_768  = MLKEMParameters("ML-KEM-768",  3, 2, 2, 10, 4, 3)
+MLKEM_1024 = MLKEMParameters("ML-KEM-1024", 4, 2, 2, 11, 5, 5)
+MLKEM_TOY  = MLKEMParameters("ML-KEM-toy",  1, 2, 2, 10, 4, 0)
+
+def keygen(d: bytes, z: bytes, parameters: MLKEMParameters = MLKEM_768) -> tuple[bytes, bytes]: ...
+def encapsulate(ek: bytes, m: bytes, parameters: MLKEMParameters = MLKEM_768) -> tuple[bytes, bytes]: ...
+def decapsulate(dk: bytes, c: bytes, parameters: MLKEMParameters = MLKEM_768) -> bytes: ...
+
+def generate_key_pair(parameters: MLKEMParameters = MLKEM_768) -> tuple[bytes, bytes]: ...
+def encapsulate_random(ek: bytes, parameters: MLKEMParameters = MLKEM_768) -> tuple[bytes, bytes]: ...
+
+def encapsulation_key_is_valid(ek: bytes, parameters: MLKEMParameters = MLKEM_768) -> bool: ...
+def decapsulation_key_is_valid(dk: bytes, parameters: MLKEMParameters = MLKEM_768) -> bool: ...
+```
+
+The three core functions are **deterministic**, taking the randomness as an
+argument, because that is the only way to check them against the published
+vectors: the standard's own test vectors fix `d`, `z` and `m` and expect one
+exact `ek`, `dk`, `c` and `K`. `generate_key_pair` and `encapsulate_random` are
+the same code with the randomness drawn from `os.urandom`, and they are the ones
+a caller should use.
+
+`decapsulate` is **total**: an invalid or malformed ciphertext returns the
+implicit-rejection shared secret rather than raising. That is the design, not
+leniency -- a decapsulation oracle that raised would leak whether the ciphertext
+was well formed.
+
+`MLKEM_TOY` is a reduced parameter set (k = 1) that no standard defines. It
+exists so the benchmark can show what the lattice dimension costs, and it is not
+secure and must not be used for anything. It carries `security_category` 0 to
+make that visible in any output that prints it.
+
+`encapsulation_key_is_valid` and `decapsulation_key_is_valid` implement the
+input checks of FIPS 203 Section 7.2 and Section 7.3: a key is invalid when it
+is the wrong length, or when any of its 12-bit coefficients is not less than
+`MLKEM_Q`.
+
+## Published vectors for the new modules
+
+**`src/keccak.py`** -- NIST CAVP, `SHA3_{224,256,384,512}ShortMsg.rsp` and
+`...LongMsg.rsp`, from the SHA-3 byte-oriented test vectors. `Len` is in bits,
+so a `Len` of 0 is the empty message and a `Len` of 8 is one byte.
+
+**`src/rsa.py`** -- the Wycheproof corpus
+`rsa_oaep_2048_sha256_mgf1sha256_test.json`: one published 2048-bit key and 37
+ciphertexts, 18 of which must decrypt and 19 of which must be refused. The
+`invalid` cases are the point -- a decryptor that returns something for every
+input passes the 18 and fails the 19.
+
+**`src/mlkem.py`** -- NIST ACVP `ML-KEM-keyGen-FIPS203` and
+`ML-KEM-encapDecap-FIPS203`: `keygen` against the `(d, z) -> (ek, dk)` vectors,
+`encapsulate` against `(ek, m) -> (c, K)`, `decapsulate` against
+`(dk, c) -> K`, and the two key-check functions against the `...KeyCheck`
+groups. A documented subset is vendored under `tests/vectors/`; the files are
+NIST's and the values are verbatim.

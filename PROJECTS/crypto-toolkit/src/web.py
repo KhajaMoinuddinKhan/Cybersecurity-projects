@@ -33,6 +33,10 @@ from .cbc import CBC, PaddingError, pkcs7_unpad
 from .ecdsa import P256_N, PrivateKey, generate_private_key, sign, verify
 from .gcm import GCM, InvalidTag
 from .hmac import hmac_sha256, hmac_sha256_hex
+from .mlkem import MLKEM_768
+from .mlkem import decapsulate as mlkem_decapsulate
+from .mlkem import encapsulate_random as mlkem_encapsulate
+from .mlkem import generate_key_pair as mlkem_keygen
 from .sha256 import sha256, sha256_hex
 
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "console.html"
@@ -159,6 +163,40 @@ ATTACKS = {
 # --------------------------------------------------------------------------
 # The primitives, over the same functions the command line uses.
 # --------------------------------------------------------------------------
+
+def run_mlkem() -> dict:
+    """A key pair, an encapsulation, and the two sides agreeing.
+
+    ML-KEM is here rather than in a separate view because it is a primitive and
+    the point of this page is that the primitives are reachable. The interesting
+    line is the last one: a tampered ciphertext is refused by returning a
+    different secret, not by raising, and that is a design decision rather than
+    an arithmetic one -- a decapsulation that raised would answer the question
+    "was this ciphertext well formed".
+    """
+    parameters = MLKEM_768
+    encapsulation_key, decapsulation_key = mlkem_keygen(parameters)
+    sender_secret, ciphertext = mlkem_encapsulate(encapsulation_key, parameters)
+    receiver_secret = mlkem_decapsulate(decapsulation_key, ciphertext, parameters)
+
+    tampered = bytearray(ciphertext)
+    tampered[len(ciphertext) // 2] ^= 0x01
+    rejected = mlkem_decapsulate(decapsulation_key, bytes(tampered), parameters)
+
+    return {
+        "worked": sender_secret == receiver_secret and rejected != sender_secret,
+        "parameter_set": parameters.name,
+        "security_category": parameters.security_category,
+        "encapsulation_key_bytes": len(encapsulation_key),
+        "decapsulation_key_bytes": len(decapsulation_key),
+        "ciphertext_bytes": len(ciphertext),
+        "shared_secret_bytes": len(sender_secret),
+        "shared_secret": sender_secret.hex(),
+        "sender_and_receiver_agree": sender_secret == receiver_secret,
+        "tampered_ciphertext_rejected_implicitly": rejected != sender_secret,
+        "rejection_returned_a_secret_not_an_error": len(rejected) == 32,
+    }
+
 
 def published_vectors() -> dict:
     """Re-check the published GCM examples and the FIPS and RFC digests."""
@@ -313,6 +351,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, body, "text/html; charset=utf-8")
             return
+        if path == "/api/mlkem":
+            self._json(200, run_mlkem())
         if path == "/api/vectors":
             self._json(200, published_vectors())
             return

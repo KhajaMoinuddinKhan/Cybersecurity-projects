@@ -265,3 +265,37 @@ def test_a_malformed_body_is_refused(server):
     except urllib.error.HTTPError as exc:
         status = exc.code
     assert status == 400
+
+def test_the_mlkem_endpoint_round_trips_and_rejects_implicitly(server):
+    """The console's ML-KEM card is driven by a real key pair, not a stored one.
+
+    Run twice and the shared secret must differ. A value that repeated across
+    two runs would be a value that was not generated here, which is exactly the
+    thing a reader of this page cannot check for themselves.
+    """
+    status, body = call(server, "/api/mlkem")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["worked"] is True
+    assert payload["parameter_set"] == "ML-KEM-768"
+    assert payload["sender_and_receiver_agree"] is True
+    assert payload["tampered_ciphertext_rejected_implicitly"] is True
+    assert payload["rejection_returned_a_secret_not_an_error"] is True
+    assert len(payload["shared_secret"]) == 64
+
+    status, body = call(server, "/api/mlkem")
+    again = json.loads(body)
+    assert again["shared_secret"] != payload["shared_secret"]
+
+
+def test_the_mlkem_sizes_on_the_page_are_the_standards(server):
+    """The sizes come from a real key pair, so they must equal what FIPS 203
+    Table 3 specifies for ML-KEM-768. A card that printed its own numbers would
+    look the same and mean nothing."""
+    status, body = call(server, "/api/mlkem")
+    payload = json.loads(body)
+    assert payload["encapsulation_key_bytes"] == 1184
+    assert payload["decapsulation_key_bytes"] == 2400
+    assert payload["ciphertext_bytes"] == 1088
+    assert payload["shared_secret_bytes"] == 32
+    assert payload["security_category"] == 3

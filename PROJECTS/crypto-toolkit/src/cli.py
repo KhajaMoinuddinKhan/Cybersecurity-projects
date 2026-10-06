@@ -18,10 +18,20 @@ from .attacks.length_extension import forge_mac, naive_mac
 from .attacks.nonce_reuse_ecdsa import recover_private_key
 from .attacks.nonce_reuse_gcm import forge_tag, recover_hash_subkey
 from .attacks.padding_oracle import padding_oracle, recover_plaintext
+from .benchmark import format_report
+from .benchmark import run as run_benchmark
 from .cbc import CBC, pkcs7_unpad
 from .ecdsa import P256_N, PrivateKey, generate_private_key, sign, verify
 from .gcm import GCM, InvalidTag
 from .hmac import hmac_sha256_hex
+from .mlkem import MLKEM_512, MLKEM_768, MLKEM_1024
+from .mlkem import decapsulate as mlkem_decapsulate
+from .mlkem import encapsulate_random as mlkem_encapsulate
+from .mlkem import generate_key_pair as mlkem_keygen
+from .rsa import DecryptionError
+from .rsa import decrypt as rsa_decrypt
+from .rsa import encrypt as rsa_encrypt
+from .rsa import generate_key_pair as rsa_keygen
 from .sha256 import sha256, sha256_hex
 from .web import DEFAULT_HOST, DEFAULT_PORT, serve
 
@@ -261,6 +271,75 @@ def cmd_serve(args) -> int:
     return 0
 
 
+MLKEM_SETS = {"512": MLKEM_512, "768": MLKEM_768, "1024": MLKEM_1024}
+
+
+def cmd_rsa(args) -> int:
+    """Generate a key, encrypt a message, and open it again."""
+
+    public, private = rsa_keygen(args.bits)
+    message = args.message.encode()
+    print("generated a %d-bit key" % args.bits)
+    print("  the modulus is %d bytes" % public.size_bytes())
+    try:
+        ciphertext = rsa_encrypt(public, message)
+    except ValueError as exc:
+        print("  %s" % exc)
+        return 2
+    print("  %d bytes of message became %d bytes of ciphertext" % (len(message), len(ciphertext)))
+    print("  the message came back: %s" % (rsa_decrypt(private, ciphertext) == message))
+
+    tampered = bytearray(ciphertext)
+    tampered[-1] ^= 0x01
+    try:
+        rsa_decrypt(private, bytes(tampered))
+    except DecryptionError:
+        print("  a ciphertext with one bit flipped was refused")
+    else:
+        print("  A TAMPERED CIPHERTEXT WAS ACCEPTED -- that is a bug")
+        return 1
+    return 0
+
+
+def cmd_mlkem(args) -> int:
+    """Generate a key pair, encapsulate a secret, and recover it."""
+
+    parameters = MLKEM_SETS[args.parameter_set]
+    public, private = mlkem_keygen(parameters)
+    print("%s, security category %d" % (parameters.name, parameters.security_category))
+    print("  encapsulation key %d bytes, decapsulation key %d bytes"
+          % (len(public), len(private)))
+
+    sender_secret, ciphertext = mlkem_encapsulate(public, parameters)
+    print("  %d bytes of ciphertext carry a %d-byte shared secret"
+          % (len(ciphertext), len(sender_secret)))
+    receiver_secret = mlkem_decapsulate(private, ciphertext, parameters)
+    print("  the two sides agree: %s" % (sender_secret == receiver_secret))
+
+    tampered = bytearray(ciphertext)
+    tampered[len(ciphertext) // 2] ^= 0x01
+    rejected = mlkem_decapsulate(private, bytes(tampered), parameters)
+    print("  a ciphertext with one bit flipped was rejected implicitly: %s"
+          % (rejected != sender_secret))
+    print("  it returned a secret rather than an error, which is the design: a")
+    print("  decapsulation that raised would answer whether the ciphertext was well formed")
+    return 0
+
+
+def cmd_benchmark(args) -> int:
+    """Measure RSA against ML-KEM on size, speed and quoted security strength."""
+
+    result = run_benchmark(
+        rsa_bits=tuple(args.rsa_bits),
+        include_toy=args.include_toy,
+        keygen_iterations=args.keygen_iterations,
+        mlkem_keygen_iterations=args.keygen_iterations,
+        operation_iterations=args.iterations,
+    )
+    print(format_report(result))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="crypto-toolkit",
@@ -304,6 +383,28 @@ def build_parser() -> argparse.ArgumentParser:
     attack.add_argument("which", choices=sorted(DEMOS) + ["all"],
                         help="which attack to run, or all of them")
     attack.set_defaults(func=cmd_attack)
+
+    rsa_verb = sub.add_parser("rsa", help="generate an RSA key and open a message with it")
+    rsa_verb.add_argument("message", nargs="?", default="a message to protect",
+                          help="the message to encrypt and decrypt again")
+    rsa_verb.add_argument("--bits", type=int, default=2048, help="the modulus size")
+    rsa_verb.set_defaults(func=cmd_rsa)
+
+    kem = sub.add_parser("mlkem", help="generate an ML-KEM key pair and establish a secret")
+    kem.add_argument("--parameter-set", dest="parameter_set", default="768",
+                     choices=sorted(MLKEM_SETS), help="which FIPS 203 parameter set")
+    kem.set_defaults(func=cmd_mlkem)
+
+    bench = sub.add_parser("benchmark", help="measure RSA against ML-KEM")
+    bench.add_argument("--rsa-bits", dest="rsa_bits", type=int, nargs="+", default=[2048, 3072],
+                       help="which RSA key sizes to measure")
+    bench.add_argument("--iterations", type=int, default=20,
+                       help="how many operations to time for encryption and decapsulation")
+    bench.add_argument("--keygen-iterations", dest="keygen_iterations", type=int, default=1,
+                       help="how many key generations to time; one is slow enough already")
+    bench.add_argument("--include-toy", dest="include_toy", action="store_true",
+                       help="also measure the reduced parameter set, which is not a standard one")
+    bench.set_defaults(func=cmd_benchmark)
 
     return parser
 

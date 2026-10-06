@@ -159,6 +159,17 @@
           <pre id="gcm-out">(nothing yet)</pre>
         </div>
       </div>
+      <div class="card">
+        <h2>ML-KEM</h2>
+        <p>FIPS 203. A key pair is generated, a shared secret is encapsulated to the public
+          key, and the private key recovers it. The last line is the one worth reading: a
+          tampered ciphertext is refused by returning a different secret rather than by
+          raising, which is the implicit-rejection design and not an accident.</p>
+        <div class="fields">
+          <div class="row"><button class="run" data-action="mlkem">Run it</button></div>
+          <pre id="mlkem-out">(nothing yet)</pre>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -344,6 +355,26 @@
         key: state.key, nonce: state.nonce,
         ciphertext: state.ciphertext, tag: flipped, aad: state.aad
       }, "gcm-out");
+    },
+    mlkem: function () {
+      var out = document.getElementById("mlkem-out");
+      out.textContent = "generating a key pair, encapsulating and decapsulating...";
+      fetch("/api/mlkem").then(function (r) { return r.json(); }).then(function (p) {
+        if (!p.worked) { out.textContent = "ML-KEM did not round-trip: " + JSON.stringify(p); return; }
+        out.textContent = [
+          p.parameter_set + ", security category " + p.security_category,
+          "  encapsulation key " + p.encapsulation_key_bytes + " bytes, decapsulation key "
+            + p.decapsulation_key_bytes + " bytes",
+          "  " + p.ciphertext_bytes + " bytes of ciphertext carry a "
+            + p.shared_secret_bytes + "-byte shared secret",
+          "  shared secret      " + p.shared_secret,
+          "  the two sides agree: " + p.sender_and_receiver_agree,
+          "  one bit flipped    " + (p.tampered_ciphertext_rejected_implicitly
+            ? "rejected implicitly" : "NOT REJECTED"),
+          "  and it came back as a secret rather than an error: "
+            + p.rejection_returned_a_secret_not_an_error
+        ].join("\n");
+      }).catch(function (err) { out.textContent = "ML-KEM failed: " + err; });
     }
   };
 

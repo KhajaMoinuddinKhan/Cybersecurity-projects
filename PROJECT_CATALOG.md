@@ -47,7 +47,7 @@ The fingerprint console is the third way into the same traffic, and the only one
 | --- | --- | --- |
 | [Cryptographic toolkit and attack lab](PROJECTS/crypto-toolkit) | Nothing at all | Reading a specification closely enough to reproduce its own worked examples, and why a primitive tested against its own output is being asked to mark its own homework. Then what happens when the same construction is used slightly wrongly, which is the half that makes the rules memorable. |
 
-This is the one project here that is a library rather than a tool, so it is the one that needs no data. It is also the one that is unfinished: the primitives are complete and checked against the published vectors, four attacks run against those same constructions, and RSA, key exchange and the post-quantum benchmark are still to be written. The README names each of those gaps.
+This is the one project here that is a library rather than a tool, so it is the one that needs no data. Every primitive is checked against its standard's own published vectors, four attacks run against those same constructions and are verified by handing the forgery back to the genuine implementation, and a benchmark measures RSA against ML-KEM on size, speed and quoted security strength. The README names what it does not do, which is the part worth reading before relying on any of it.
 
 ## Before running anything
 

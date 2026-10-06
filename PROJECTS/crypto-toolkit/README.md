@@ -32,6 +32,9 @@ the test runs.
 | SHA-256 | `src/sha256.py` | the compression function, a one-shot digest, a streaming class, and resumption from a known state |
 | HMAC-SHA256 | `src/hmac.py` | RFC 2104 over the local SHA-256, including the key-padding rule at both ends of the block size |
 | ECDSA over P-256 | `src/ecdsa.py` | field arithmetic, point operations, scalar multiplication, sign, verify, and the RFC 6979 deterministic nonce |
+| RSA-OAEP | `src/rsa.py` | key generation from Miller-Rabin primes, the CRT decryption path, MGF1 over SHA-256, and the OAEP encoding of PKCS #1 |
+| Keccak and SHA-3 | `src/keccak.py` | the Keccak-f[1600] permutation, the sponge, SHA3-224/256/384/512 and the SHAKE128/256 extendable-output functions |
+| ML-KEM | `src/mlkem.py` | the ring and its number-theoretic transform, rejection and binomial sampling, compression, the K-PKE scheme and the Fujisaki-Okamoto transform, at all three FIPS 203 parameter sets |
 
 ## What is attacked
 
@@ -178,7 +181,20 @@ and still be wrong for every longer message. `cryptography` therefore appears in
 `requirements.txt` and nowhere else: it is an oracle for the tests, and `src/`
 must never import it. The suite fails rather than skips if it is missing,
 because a differential test that quietly does nothing is worse than no test at
-all.
+all. The SHA-3 functions are compared against `hashlib`, which is an
+independent implementation of the same standard, and RSA-OAEP against
+`cryptography`'s.
+
+**ML-KEM has no such oracle.** There is no ML-KEM in `cryptography`, none in the
+standard library, and none this project is willing to import. The published
+vectors are therefore not one of two checks there -- they are the only external
+check, which is why all three functions and all three parameter sets are
+exercised rather than sampled. It is also why the structural properties are
+tested directly: that the transform is an isomorphism, that multiplication in
+the transform domain agrees with negacyclic schoolbook multiplication, and that
+compression round-trips. Those hold independently of any vector, and a twiddle
+table or a scaling constant that was wrong in both directions would still pass a
+round trip while failing them.
 
 The attacks are checked a third way, which is the one that matters most: the
 forgery is handed back to the genuine implementation and has to be accepted.
@@ -198,6 +214,43 @@ before it does anything else -- hand it a tampered tag and it says so, exits
 non-zero, and writes nothing at all to standard output, which is the same
 promise the `GCM.decrypt` path keeps in the library.
 
+## The post-quantum comparison
+
+`python -m src.cli benchmark` measures both families on the three axes the
+project set out to compare. These are real numbers from one run on the machine
+this was written on, in pure Python:
+
+```
+scheme           public  private  ciphertext    keygen    encaps    decaps  strength
+-------------- -------- -------- ----------- --------- --------- --------- ---------
+RSA-2048            256      256         256  1087.17ms     3.63ms    12.01ms  112 bits
+RSA-3072            384      384         384  2426.11ms     4.87ms    27.41ms  128 bits
+ML-KEM-512          800     1632         768    26.82ms    27.88ms    29.52ms  128 bits
+ML-KEM-768         1184     2400        1088    44.16ms    47.22ms    48.95ms  192 bits
+ML-KEM-1024        1568     3168        1568    73.48ms    74.91ms    75.49ms  256 bits
+```
+
+The security column is quoted, never computed: the RSA figures are the
+comparable security strengths of NIST SP 800-57 Part 1 Rev 5 Table 2, and the
+ML-KEM figures are the security categories of FIPS 203 Section 8. A key size the
+cited table does not cover is reported as `not quoted` rather than interpolated,
+because a security level nobody published is the one number a reader cannot
+check.
+
+Two things in that table are worth reading carefully, because the easy story
+about post-quantum cryptography is wrong in both directions. ML-KEM is **not**
+smaller -- at a comparable strength its keys and ciphertexts are several times
+RSA's. What it buys is resistance to Shor's algorithm, which breaks RSA
+outright, and a key generation that is roughly ninety times faster here. And the
+speed comparison is not one-sided: RSA's encryption is the cheapest operation in
+the table because it uses a small public exponent, while ML-KEM's encapsulation
+costs more than that and about the same as its own decapsulation. Against RSA's
+*decryption* at the same strength, ML-KEM is faster.
+
+`--include-toy` adds the reduced parameter set, which is not a standard one and
+is labelled as such wherever it appears.
+
+
 ## Limits
 
 These are part of the description rather than a disclaimer, because they bound
@@ -212,11 +265,18 @@ what the code is for.
   that claim: the AES S-box is a table lookup, and a table lookup on a shared
   cache is a timing signal. That is a real property of this code, and it is why
   it is not a library.
-- **The public-key half is one algorithm, not a family.** There is ECDSA over
-  P-256 and nothing else: no RSA, no RSA-OAEP, no key exchange, no other curve,
-  and no signature scheme other than ECDSA.
-- **No post-quantum implementation yet.** ML-KEM at a toy parameter set, and the
-  benchmark against RSA, are still to come.
+- **Two public-key algorithms, and neither is a family.** ECDSA over P-256 for
+  signatures and RSA-OAEP for encryption, plus ML-KEM for key establishment.
+  There is no RSA signing, no key exchange, no curve other than P-256 and no
+  other KEM.
+- **The post-quantum implementation is the standard's, but it is not
+  side-channel hardened.** The arithmetic runs in Python on variable-time
+  integers, so the comparison with RSA is about size and speed and says nothing
+  about resistance to timing analysis. A real deployment needs a constant-time
+  implementation, which is a different piece of work.
+- **The toy parameter set is not secure and is not a standard one.** It exists
+  so the benchmark can show what the lattice dimension costs, and every surface
+  that prints it says so.
 - **The attacks are demonstrations, not tools.** Each one targets the
   construction named in its own docstring, and the padding oracle needs a caller
   who actually answers differently for bad padding than for a bad MAC -- which
@@ -252,6 +312,11 @@ from src.cbc import CBC, pkcs7_unpad
 from src.ecdsa import generate_private_key, sign, sign_deterministic, verify
 from src.gcm import GCM, InvalidTag
 from src.hmac import hmac_sha256_hex
+from src.keccak import sha3_256, shake_256
+from src.mlkem import MLKEM_768, decapsulate, encapsulate_random
+from src.mlkem import generate_key_pair as kem_generate_key_pair
+from src.rsa import DecryptionError, decrypt, encrypt
+from src.rsa import generate_key_pair as rsa_generate_key_pair
 from src.sha256 import sha256_hex
 
 sha256_hex(b"abc")                       # the FIPS-180-4 digest, as hex
@@ -259,6 +324,14 @@ ciphertext, tag = GCM(key).encrypt(nonce, plaintext, aad)
 plaintext = GCM(key).decrypt(nonce, ciphertext, tag, aad)   # raises InvalidTag
 key = generate_private_key(os.urandom(32))
 signature = sign_deterministic(key, digest)                 # RFC 6979, no reuse
+
+public, private = rsa_generate_key_pair(2048)
+sealed = encrypt(public, b"a message")                      # RSA-OAEP
+opened = decrypt(private, sealed)                           # raises DecryptionError
+
+ek, dk = kem_generate_key_pair(MLKEM_768)                   # FIPS 203
+sender_secret, capsule = encapsulate_random(ek)
+receiver_secret = decapsulate(dk, capsule)                  # equal to sender_secret
 ```
 
 ## Tests
