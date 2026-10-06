@@ -1178,6 +1178,18 @@ def dashboard_app(
             }
         )
 
+    @app.get("/api/measurement")
+    def api_measurement():
+        """How well the rules actually do, and what the detector found.
+
+        This is the one endpoint whose answer does not come from the event store.
+        It reports the rules' measured accuracy against a corpus captured on this
+        machine, and when there is no corpus it says so plainly -- a blank table
+        would read as a fault rather than as an unexperimented one.
+        """
+        from .measure import measurement_snapshot
+        return jsonify(measurement_snapshot())
+
     @app.post("/api/correlate")
     def api_correlate():
         window = request.args.get("since", "120").strip()

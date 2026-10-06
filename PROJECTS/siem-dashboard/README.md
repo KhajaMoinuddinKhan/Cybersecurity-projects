@@ -335,6 +335,7 @@ There are four mappers, auto-detected from the record when the caller does not n
 | `GET /health` | Confirms the app is up, and reports the rule, indicator and auth counts. |
 | `GET /api/dashboard` | The whole dashboard snapshot, with every filter accepted as a query parameter. |
 | `GET /api/rules` | Every loaded detection and correlation rule, its ATT&CK techniques and its documented false positives. |
+| `GET /api/measurement` | The measured accuracy of every rule against the corpus captured on this machine, plus the anomaly detector's result. Explains itself when there is no corpus. |
 | `GET /api/schema` | The canonical event schema, so the page can document itself. |
 | `GET /api/me` | The signed-in user's name and role, or 401. |
 | `GET /api/setup` | Whether this console still needs its first account. |
@@ -398,7 +399,80 @@ Every PowerShell process the collector starts has its process id recorded, and r
 
 Two places have to be checked, and installing Sysmon is what made the second one obvious. A Windows channel record carries the process that raised it in the record header. A **Sysmon** record carries Sysmon's own process id there, and names the process the event is *about* in the event body — so a naive header check misses every Sysmon event about the collector's own children, and 87 of the first 107 process-creation events were the collector's PowerShell. The structured fields `ProcessId`, `SourceProcessId` and `ParentProcessId` are checked as well.
 
+## Measuring the rules instead of assuming them
+
+A rule that reads sensibly is not the same as a rule that works, and the
+difference only shows up when something is run past it whose answer you already
+know. So the rules are measured against a corpus captured on this machine, where
+every window of telemetry is labelled with the technique that was running during
+it. The labels come from the run rather than from the telemetry, which is what
+makes them worth anything: nothing in the events themselves says which technique
+produced them.
+
+The techniques are Atomic Red Team's, narrowed to a list held in `src/lab.py`.
+That narrowing is the point of the file. The atomics tree contains tests under
+the same technique identifiers that download and execute PowerShell from a URL,
+and they are excluded permanently; what is left is read-only reconnaissance —
+listing processes, reading the system information, asking who you are. The
+command text lives in the file rather than being read from the tree at run time,
+so the tree is the source and the file is the decision about it. Each entry names
+the atomic it came from, a test asserts that no allowed command reaches the
+network or changes the machine, and the capture refuses to write a corpus at all
+if a channel could not be read — because a corpus missing Sysmon while looking
+complete is the worst possible failure for something whose whole job is to
+produce a number you can trust.
+
+`src/measure.py` then scores every rule against every window. The unit is the
+window rather than the event. A technique happens over a few seconds and leaves
+dozens of events behind, so counting events would let one noisy technique
+outweigh a quiet one and would make "recall" mean something no analyst would
+recognise. Each window is scored once per rule: a rule firing somewhere in a
+window labelled with a technique it names is a true positive, a rule firing in a
+window labelled with something else is a false positive, and a rule naming a
+technique whose window it never fires in has missed it. That definition is
+deliberately strict. A rule that fires on *anything* would otherwise score
+perfectly, and flattering every rule in the set is exactly what measuring them is
+supposed to prevent.
+
+The first measurement is worth stating plainly, because it is not flattering. On
+a corpus of ten technique windows and two benign ones, **not one of the 23 rules
+detects any of the five discovery techniques that were run**. The rule set is
+built for execution, persistence, credential access and defence evasion, and the
+corpus contains none of those, so the honest reading is a coverage gap rather
+than a failure of the rules at what they were written for. The second finding is
+sharper: `sysmon-network-connection-to-remote-port` fires in **every window**,
+including both benign ones, so as written it carries no information at all.
+`sysmon-remote-thread-injection` fires in four. Those two are the ones worth
+tuning, and before this nobody could have known that from the rules alone.
+
+`src/anomaly.py` is the other approach, for the techniques no rule covers. It is
+an isolation forest written out rather than imported — the algorithm is a page of
+arithmetic and a detector whose decision can be read back to a path length is one
+a reader can argue with. It trains on the **benign windows only** and is then
+asked about windows it has never seen, because training on the whole corpus would
+be scoring the model on what it was taught. It separates attack windows from
+benign ones, and it survives the evasion test: replaying the technique windows
+with their features replaced by values drawn from the benign distribution, and
+burying them in a flood of ordinary events, degrades it but does not break it.
+The caveat belongs in the same sentence as the result — it flags well over half
+of the benign events as anomalous, so it is a detector that finds the signal and
+far too much else, and it is not something to deploy without a great deal of
+tuning.
+
+All of this is in the console, under **How well the rules actually do**. When
+there is no corpus on the machine the panel says so and names the command that
+would capture one, because an empty table reads as a fault rather than as an
+experiment nobody has run yet. The captured corpus is not committed: it is real
+telemetry from a real machine, hostname and account name included, and it belongs
+on the machine that produced it.
+
 ## Limits
+
+The rules have no coverage of discovery techniques, and the measurement says so
+with a number rather than an impression: the corpus contains five of them and no
+rule fires on any. One network rule is also far too broad to be useful as
+written, matching a connection in every window it was shown, benign ones
+included.
 
 Read this before treating a clean dashboard as a clean machine.
 

@@ -157,3 +157,105 @@ def test_the_report_names_the_blocked_techniques(patched):
     text = format_scores(result)
     assert "T1059.001" in text
     assert "endpoint protection refused the spawn" in text
+
+
+# --- the console's view of the measurement ---------------------------------
+
+def test_a_snapshot_without_a_corpus_explains_itself(tmp_path):
+    """No corpus is not an empty table. It is an experiment that has not been run."""
+    from src.measure import measurement_snapshot
+    result = measurement_snapshot(tmp_path / "absent.json", with_anomaly=False)
+    assert result["available"] is False
+    assert "not committed" in result["reason"]
+    assert result["how_to_capture"]
+    assert result["rules"] == []
+
+
+def test_a_snapshot_over_a_corpus_reports_the_headline(tmp_path, patched):
+    """The whole path: a corpus on disk becomes the numbers the console shows."""
+    import json as _json
+    from src.measure import measurement_snapshot
+    rules = [_FakeRule("quiet", ["T1082"]), _FakeRule("noisy", [])]
+    engine = patched(rules, {"noisy": {0, 1}})
+    corpus = _corpus(["T1082", "benign"])
+    tagged = {"windows": [
+        {**w, "events": [{**e, "fields": {"__window__": i}} for e in w["events"]]}
+        for i, w in enumerate(corpus["windows"])]}
+    path = tmp_path / "corpus.json"
+    path.write_text(_json.dumps(tagged), encoding="utf-8")
+
+    result = measurement_snapshot(path, engine=engine, with_anomaly=False)
+    assert result["available"] is True
+    assert result["windows"] == 2
+    assert result["summary"]["rules"] == 2
+    assert result["summary"]["rules_that_detected_anything"] == 0
+    assert result["summary"]["rules_with_false_positives"] == 1
+    assert "2 rules" in result["summary"]["headline"]
+    assert result["noisiest"][0]["rule_id"] == "noisy"
+    assert result["noisiest"][0]["false_positives"] == 2
+
+
+def test_the_default_corpus_path_is_overridable(monkeypatch, tmp_path):
+    from src.measure import default_corpus_path
+    monkeypatch.setenv("SIEM_LAB_CORPUS", str(tmp_path / "mine.json"))
+    assert default_corpus_path() == tmp_path / "mine.json"
+    monkeypatch.delenv("SIEM_LAB_CORPUS")
+    assert default_corpus_path().name == "corpus.json"
+
+
+def test_the_endpoint_serves_the_measurement(tmp_path, monkeypatch):
+    """The console's endpoint, over the real Flask app.
+
+    Without a corpus it must still answer, and answer with an explanation: the
+    panel is loaded on every refresh, and on a machine that has not captured a
+    corpus that is the normal case rather than an error.
+    """
+    from src.app import dashboard_app
+    monkeypatch.setenv("SIEM_LAB_CORPUS", str(tmp_path / "absent.json"))
+    client = dashboard_app(tmp_path / "live.db").test_client()
+    response = client.get("/api/measurement")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["available"] is False
+    assert body["how_to_capture"]
+    assert "not committed" in body["reason"]
+
+
+def test_the_endpoint_reports_over_a_real_corpus(tmp_path, monkeypatch):
+    """And with one present, the numbers the panel renders."""
+    import json as _json
+    from src.app import dashboard_app
+    corpus = {"windows": [
+        {"label": "benign", "technique": "benign", "started": 0.0, "ended": 1.0,
+         "events": [{"channel": "System", "event_id": "1", "level": "Information",
+                     "message": "m", "fields": {}}]},
+        {"label": "T1082", "technique": "T1082", "started": 0.0, "ended": 1.0,
+         "events": [{"channel": "System", "event_id": "1", "level": "Information",
+                     "message": "m", "fields": {}}]},
+    ]}
+    path = tmp_path / "corpus.json"
+    path.write_text(_json.dumps(corpus), encoding="utf-8")
+    monkeypatch.setenv("SIEM_LAB_CORPUS", str(path))
+
+    client = dashboard_app(tmp_path / "live.db").test_client()
+    body = client.get("/api/measurement").get_json()
+    assert body["available"] is True
+    assert body["windows"] == 2
+    assert body["benign_windows"] == 1
+    assert len(body["rules"]) == 23
+    assert body["summary"]["headline"].endswith("windows.")
+    # the detector is trained on the benign window, so it must have an answer
+    assert "separation" in body.get("anomaly", {})
+    assert 0.0 <= body["anomaly"]["benign_flagged"] <= 1.0
+
+
+def test_the_dashboard_renders_the_measurement_panel():
+    """The panel exists in the page, wired to the endpoint."""
+    import pathlib
+    page = pathlib.Path(__file__).resolve().parent.parent / "src" / "templates" / "dashboard.html"
+    html = page.read_text(encoding="utf-8")
+    assert 'id="measurement"' in html
+    assert "/api/measurement" in html
+    assert "refreshMeasurement" in html
+    # a rule that fired on the wrong window must be visibly marked, not silently green
+    assert "row.fp > 0" in html

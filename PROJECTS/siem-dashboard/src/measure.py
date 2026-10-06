@@ -33,7 +33,8 @@ from pathlib import Path
 
 from .rules import RuleEngine, rule_matches
 
-__all__ = ["RuleScore", "measure_corpus", "format_scores", "load_corpus"]
+__all__ = ["RuleScore", "measure_corpus", "format_scores", "load_corpus",
+           "default_corpus_path", "measurement_snapshot"]
 
 
 @dataclass
@@ -180,3 +181,72 @@ def format_scores(result: dict) -> str:
         lines.append("Not executed: %s (%s) -- %s"
                      % (blocked["attack_id"], blocked["name"], blocked["reason"]))
     return "\n".join(lines)
+
+
+# The corpus is captured locally rather than committed -- it is real telemetry
+# from a real machine, hostname and account name included -- so the path is
+# configurable and the console says plainly when there is nothing to measure.
+def default_corpus_path() -> Path:
+    import os
+    override = os.environ.get("SIEM_LAB_CORPUS")
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parent.parent / "corpus.json"
+
+
+def measurement_snapshot(corpus_path: str | Path | None = None,
+                         engine: RuleEngine | None = None,
+                         with_anomaly: bool = True) -> dict:
+    """What the console shows: the measured rates, or why there are none.
+
+    Returning an explanation rather than an empty table is deliberate. A console
+    that shows a blank measurement panel looks like a bug; one that says the
+    corpus has not been captured on this host looks like what it is.
+    """
+    path = Path(corpus_path) if corpus_path else default_corpus_path()
+    if not path.exists():
+        return {
+            "available": False,
+            "corpus_path": str(path),
+            "reason": ("no captured corpus on this host -- the measurement runs against "
+                       "telemetry captured locally, and that corpus is not committed"),
+            "how_to_capture": "python -m src.lab capture",
+            "rules": [],
+            "summary": {},
+        }
+
+    result = measure_corpus(load_corpus(path), engine)
+    detected = [row for row in result["rules"] if row["tp"] > 0]
+    noisy = sorted((row for row in result["rules"] if row["fp"] > 0),
+                   key=lambda row: -row["fp"])
+    result["available"] = True
+    result["corpus_path"] = str(path)
+    result["summary"] = {
+        "rules": len(result["rules"]),
+        "rules_that_detected_anything": len(detected),
+        "rules_with_false_positives": sum(1 for row in result["rules"] if row["fp"] > 0),
+        "headline": ("%d of %d rules detected anything at all in a corpus of %d windows."
+                     % (len(detected), len(result["rules"]), result["windows"])),
+    }
+    result["noisiest"] = [{"rule_id": r["rule_id"], "false_positives": r["fp"],
+                           "precision": r["precision"]} for r in noisy[:5]]
+
+    if with_anomaly:
+        try:
+            from .anomaly import evaluate
+            anomaly = evaluate(load_corpus(path))
+            clean = anomaly["results"][0]
+            result["anomaly"] = {
+                "trained_on_events": anomaly["trained_on_events"],
+                "features": anomaly["features"],
+                "benign_flagged": clean["mean_flagged_benign"],
+                "attack_flagged": clean["mean_flagged_attack"],
+                "separation": clean["separation"],
+                "survived": anomaly["survived"],
+                "attempts": anomaly["attempts"],
+                "attempts_note": ("%d of %d evasion attempts left at least half the separation intact."
+                                  % (anomaly["survived"], anomaly["attempts"])),
+            }
+        except (ValueError, ImportError) as exc:
+            result["anomaly"] = {"available": False, "reason": str(exc)}
+    return result
