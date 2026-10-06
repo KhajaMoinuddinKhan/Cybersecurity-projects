@@ -1,0 +1,476 @@
+"""The labelled corpus: real attack techniques, captured with real telemetry.
+
+Everywhere else in this project, a detection rule is judged by whether it looks
+sensible. This module is what makes it judged by a number instead.
+
+The techniques are Atomic Red Team's, taken from the project's own YAML and
+narrowed to an allowlist in this file. That narrowing is the important part: the
+T1082 atomics include several "WinPwn" tests that download and execute
+PowerShell from a URL, and those must never run on a machine anybody cares
+about. Nothing outside `ALLOWED_TECHNIQUES` can be executed by this module --
+not by a flag, not by an argument -- because the command text lives in this file
+rather than being read from the atomics tree at run time. The tree is the source
+of the text; this file is the decision about it.
+
+Ground truth comes from the run, not from the telemetry. A window is labelled
+with the technique that was executed during it, so a rule that fires in that
+window can be scored against something known to be true rather than against a
+guess about the event. A benign window is labelled the same way -- nothing was
+executed in it -- which is what makes a false positive measurable at all.
+
+The capture needs an elevated shell, because the Sysmon channel is not readable
+without one. `python -m src.lab capture` says so rather than failing obscurely.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .windows_collector import CHANNELS, SYSMON_CHANNEL, windows_event_to_payload
+
+__all__ = [
+    "Technique",
+    "ALLOWED_TECHNIQUES",
+    "BENIGN",
+    "CaptureError",
+    "read_since",
+    "read_all",
+    "run_technique",
+    "capture_corpus",
+]
+
+# A technique whose effect is to read something and print it. Every command here
+# was read out of the atomics tree, checked for network access, for anything that
+# writes to the machine, and for anything needing elevation, and only then
+# copied in. The `atomic` field names the test it came from so the provenance is
+# checkable rather than asserted.
+@dataclass(frozen=True)
+class Technique:
+    attack_id: str
+    name: str
+    atomic: str
+    executor: str
+    command: str
+    arguments: dict[str, str] = field(default_factory=dict)
+
+    def resolved(self) -> str:
+        """The command with Atomic's input arguments substituted."""
+        text = self.command
+        for key, value in self.arguments.items():
+            text = text.replace("#{%s}" % key, value)
+        return text
+
+    def as_dict(self) -> dict:
+        return {
+            "attack_id": self.attack_id,
+            "name": self.name,
+            "atomic": self.atomic,
+            "executor": self.executor,
+            "command": self.command,
+            "arguments": self.arguments,
+            "resolved": self.resolved(),
+        }
+
+
+ALLOWED_TECHNIQUES: tuple[Technique, ...] = (
+    Technique(
+        "T1082", "System Information Discovery",
+        "System Information Discovery", "command_prompt",
+        "systeminfo ; reg query HKLM\\SYSTEM\\CurrentControlSet\\Services\\Disk\\Enum",
+    ),
+    Technique(
+        "T1082", "Environment variables discovery",
+        "Environment variables discovery on windows", "command_prompt",
+        "set",
+    ),
+    Technique(
+        "T1082", "Machine GUID discovery",
+        "Windows MachineGUID Discovery", "command_prompt",
+        "REG QUERY HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography /v MachineGuid",
+    ),
+    Technique(
+        "T1082", "OS product name discovery",
+        "Discover OS Product Name via Registry", "command_prompt",
+        "reg query \"HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\" /v ProductName",
+    ),
+    Technique(
+        "T1057", "Process discovery with tasklist",
+        "Process Discovery - tasklist", "command_prompt",
+        "tasklist",
+    ),
+    Technique(
+        "T1057", "Process discovery with Get-Process",
+        "Process Discovery - Get-Process", "powershell",
+        "Get-Process | Select-Object -First 5 | Out-Null",
+    ),
+    Technique(
+        "T1016", "Network configuration discovery",
+        "System Network Configuration Discovery on Windows", "command_prompt",
+        "ipconfig /all ; netsh interface show interface ; arp -a ; net config",
+    ),
+    Technique(
+        "T1016", "Firewall rule discovery",
+        "List Windows Firewall Rules", "command_prompt",
+        "netsh advfirewall firewall show rule name=all",
+    ),
+    Technique(
+        "T1518", "Installed software discovery",
+        "Applications Installed", "powershell",
+        "Get-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* | "
+        "Select-Object -First 5 DisplayName | Out-Null",
+    ),
+    Technique(
+        "T1033", "Owner and user discovery",
+        "User Discovery - whoami", "command_prompt",
+        "whoami #{whoami_args}",
+        {"whoami_args": "/all"},
+    ),
+    # The encoded command is Atomic's own default for this test. It decodes to
+    # `iex 'Write-Host "Hello, from PowerShell!"'` -- deliberately obfuscated to
+    # be a realistic T1059.001 specimen, and benign in effect. It is the one
+    # technique here that a rule is written to catch, which is why the corpus
+    # would be worth much less without it.
+    Technique(
+        "T1059.001", "Encoded PowerShell command",
+        "PowerShell Command Execution", "command_prompt",
+        "powershell.exe -e #{obfuscated_code}",
+        {"obfuscated_code":
+         "JgAgACgAZwBjAG0AIAAoACcAaQBlAHsAMAB9ACcAIAAtAGYAIAAnAHgAJwApACkAIAAoACIAVwByACIA"
+         "KwAiAGkAdAAiACsAIgBlAC0ASAAiACsAIgBvAHMAdAAgACcASAAiACsAIgBlAGwAIgArACIAbABvACwA"
+         "IABmAHIAIgArACIAbwBtACAAUAAiACsAIgBvAHcAIgArACIAZQByAFMAIgArACIAaAAiACsAIgBlAGwA"
+         "bAAhACcAIgApAA=="},
+    ),
+)
+
+BENIGN = "benign"
+
+# Windows reuses process ids and the event log is not instantaneous, so a window
+# is closed a moment after the command returns rather than the instant it does.
+SETTLE_SECONDS = 3.0
+
+
+class CaptureError(RuntimeError):
+    """Raised when the capture cannot do its job, with the reason."""
+
+
+@dataclass(frozen=True)
+class Window:
+    """One labelled slice of telemetry."""
+
+    label: str                  # an ATT&CK id, or BENIGN
+    technique: str              # a human name, or BENIGN
+    started: float
+    ended: float
+    events: tuple[dict, ...]    # SIEM payloads, as windows_event_to_payload returns
+
+    def as_dict(self) -> dict:
+        return {
+            "label": self.label,
+            "technique": self.technique,
+            "started": self.started,
+            "ended": self.ended,
+            "events": list(self.events),
+        }
+
+
+def _powershell(script: str, timeout: int = 120) -> tuple[str, int]:
+    """Run a PowerShell one-shot and return its standard output.
+
+    The stdout is coerced to a string rather than trusted to be one. A killed or
+    unusually-terminated child can leave `subprocess` reporting `None` here, and
+    the resulting AttributeError reads as a bug in the caller -- which is exactly
+    where it was first chased, at the wrong end of the call.
+    """
+    process = subprocess.Popen(
+        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate()
+        raise CaptureError("PowerShell did not return within %d seconds" % timeout)
+    stdout = stdout if isinstance(stdout, str) else ""
+    if process.returncode and not stdout.strip():
+        raise CaptureError(((stderr or "").strip() or "PowerShell failed")[:400])
+    # The pid goes back with the output because the reader's own process is
+    # telemetry too, and the caller has to be able to drop it.
+    return stdout, process.pid
+
+
+def _highest_record_id(channel: str) -> int:
+    """The newest record id in a channel, so a window can start after it."""
+    script = (
+        "$e = Get-WinEvent -LogName '%s' -MaxEvents 1 -ErrorAction SilentlyContinue;"
+        "if ($e) { $e.RecordId } else { 0 }" % channel
+    )
+    text = _powershell(script)[0].strip()
+    try:
+        return int(text or 0)
+    except ValueError:
+        return 0
+
+
+def read_since(channel: str, after_record_id: int, limit: int = 4000) -> list[dict]:
+    """Every record newer than `after_record_id`, as SIEM payloads.
+
+    Reading by record id rather than by time is deliberate: a clock that moves,
+    or two events in the same millisecond, would make a time window ambiguous,
+    and the whole point of a labelled corpus is that the boundary is not.
+    """
+    script = (
+        "$ErrorActionPreference='SilentlyContinue';"
+        "$e = Get-WinEvent -LogName '%s' -MaxEvents %d -ErrorAction SilentlyContinue;"
+        "if ($e) { $e | ForEach-Object { [pscustomobject]@{"
+        " Id=$_.Id; Provider=$_.ProviderName; Level=$_.LevelDisplayName;"
+        " RecordId=$_.RecordId; TimeCreated=$_.TimeCreated.ToString('o');"
+        " User=$_.UserId; Message=$_.Message; Xml=$_.ToXml() } } | "
+        "ConvertTo-Json -Depth 6 -Compress }"
+    ) % (channel, limit)
+    text = _powershell(script).strip()
+    if not text:
+        return []
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise CaptureError("could not read %s: %s" % (channel, exc)) from exc
+    if isinstance(raw, dict):
+        raw = [raw]
+    payloads = []
+    for item in raw:
+        try:
+            record_id = int(item.get("RecordId") or 0)
+        except (TypeError, ValueError):
+            record_id = 0
+        if record_id <= after_record_id:
+            continue
+        payload = windows_event_to_payload(channel, item)
+        payload["record_id"] = record_id
+        payload["captured_channel"] = channel
+        payloads.append(payload)
+    payloads.sort(key=lambda event: event.get("record_id") or 0)
+    return payloads
+
+
+def read_all(channels, marks: dict[str, int], newest: int = 400) -> tuple[list[dict], list[str]]:
+    """New records across several channels, and the channels that could not be read.
+
+    Returns `(payloads, unreadable)`. The second value is the point of this
+    function's shape. A first version read every channel and returned whatever
+    came back, which meant that on an unelevated shell -- where Sysmon and
+    Security are denied -- it returned a corpus with the two most important
+    channels silently missing. The capture would have looked complete and been
+    measuring a fraction of the telemetry, which is the worst possible failure
+    for something whose entire purpose is to produce a number you can trust.
+
+    So each channel is read inside its own try/catch and a failure is recorded
+    rather than swallowed. The caller decides what to do about it; `capture_corpus`
+    refuses to write a corpus at all if a channel could not be read.
+
+    The record-id filter is applied here rather than in PowerShell. Passing a
+    hashtable lookup into `-FilterXPath` through string concatenation fails with
+    exit code 1 and no output on stderr -- a silent failure worth knowing about
+    -- and filtering in Python has no such edge.
+    """
+    channel_list = ",".join("'%s'" % c for c in channels)
+    script = (
+        "$ErrorActionPreference='SilentlyContinue';"
+        "$all=@(); $bad=@();"
+        "foreach ($ch in @(%s)) {"
+        "  try {"
+        "    $e = Get-WinEvent -LogName $ch -MaxEvents %d -ErrorAction Stop;"
+        "    if ($e) { $all += $e | ForEach-Object {"
+        "      $x = [xml]$_.ToXml();"
+        "      $pairs = @();"
+        "      foreach ($d in $x.Event.EventData.Data) {"
+        "        $pairs += ('<Data Name=\"' + $d.Name + '\">' + "
+        "[System.Security.SecurityElement]::Escape([string]$d.'#text') + '</Data>') };"
+        "      $mini = '<Event><System><EventID>' + $_.Id + '</EventID></System>' + "
+        "'<EventData>' + ($pairs -join '') + '</EventData></Event>';"
+        "      [pscustomobject]@{"
+        "        Channel=$ch; Id=$_.Id; Provider=$_.ProviderName; Level=$_.LevelDisplayName;"
+        "        RecordId=$_.RecordId; TimeCreated=$_.TimeCreated.ToString('o');"
+        "        User=$_.UserId; Xml=$mini;"
+        "        Message=$([string]$_.Message).Substring(0, [Math]::Min(1500, ([string]$_.Message).Length))"
+        "      } } }"
+        "  } catch { $bad += $ch }"
+        "};"
+        "[pscustomobject]@{ events=@($all); unreadable=@($bad) } | "
+        "ConvertTo-Json -Depth 5 -Compress"
+    ) % (channel_list, newest)
+    text, reader_pid = _powershell(script, timeout=300)
+    text = text.strip()
+    if not text:
+        raise CaptureError("the event log read returned nothing at all")
+    try:
+        envelope = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise CaptureError("could not read the event log: %s" % exc) from exc
+
+    raw = envelope.get("events") or []
+    if isinstance(raw, dict):
+        raw = [raw]
+    unreadable = envelope.get("unreadable") or []
+    if isinstance(unreadable, str):
+        unreadable = [unreadable]
+
+    payloads = []
+    self_events = 0
+    for item in raw:
+        channel = str(item.get("Channel") or "")
+        try:
+            record_id = int(item.get("RecordId") or 0)
+        except (TypeError, ValueError):
+            record_id = 0
+        if record_id <= marks.get(channel, 0):
+            continue                      # older than the window's start
+        # Drop the reading process's own footprint. Reading the log means
+        # starting a process, and that process is in the log it is reading --
+        # Sysmon records its creation before Get-WinEvent ever runs. Left in,
+        # every technique window would contain the apparatus used to measure it,
+        # and a rule firing on it would be scored as a false positive that the
+        # harness caused. The SIEM's own collector guards against the same thing
+        # with its own-pid memory; this is the equivalent.
+        fields = _event_fields(item)
+        if _is_reader_own(fields, reader_pid):
+            self_events += 1
+            continue
+        payload = windows_event_to_payload(channel, item)
+        payload["record_id"] = record_id
+        payload["captured_channel"] = channel
+        payloads.append(payload)
+    payloads.sort(key=lambda event: event.get("record_id") or 0)
+    return payloads, list(unreadable)
+
+# Sysmon names the process an event is about in the body rather than in the
+# record header, so "did we cause this" has to look at the structured fields.
+_OWN_PROCESS_FIELDS = ("ProcessId", "SourceProcessId", "ParentProcessId")
+
+
+def _event_fields(item: dict) -> dict:
+    """The EventData of one record, as strings, without going through the schema."""
+    import re as _re
+    pairs = _re.findall(r'<Data Name="([^"]*)">(.*?)</Data>',
+                        str(item.get("Xml") or ""), _re.S)
+    return {name: value for name, value in pairs}
+
+
+def _is_reader_own(fields: dict, reader_pid: int) -> bool:
+    """True when an event describes the process that is reading the log."""
+    needle = str(reader_pid)
+    for key in _OWN_PROCESS_FIELDS:
+        value = str(fields.get(key) or "").strip()
+        if value and value == needle:
+            return True
+    return False
+
+
+def _run(command: str, executor: str, attempts: int = 5) -> tuple[int, str]:
+    """Run one technique's command, retrying a refused spawn.
+
+    Spawning the child from an elevated parent fails intermittently on this host
+    with `PermissionError: WinError 5`, and not deterministically -- one capture
+    ran all eleven techniques and the next failed at the third. The commands are
+    ordinary read-only recon (`reg query`, `whoami /all`, `systeminfo`), which is
+    exactly the shape endpoint protection watches for, so a throttle that clears
+    on its own is the likeliest cause and a short backoff is the proportionate
+    answer. A refusal that survives five attempts is reported rather than
+    swallowed.
+
+    Absolute paths and an explicit working directory remove two other possible
+    causes: PATH resolution and a working directory an elevated child may not
+    inherit the rights to use.
+    """
+    system_root = os.environ.get("SystemRoot") or "C:\\Windows"
+    if executor == "powershell":
+        argv = [os.path.join(system_root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+                "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command]
+    else:
+        argv = [os.path.join(system_root, "System32", "cmd.exe"), "/C", command]
+
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            completed = subprocess.run(argv, capture_output=True, text=True,
+                                       timeout=180, cwd=system_root)
+            return completed.returncode, (completed.stdout or completed.stderr or "").strip()[:200]
+        except PermissionError as exc:          # the intermittent refusal
+            last_error = exc
+            time.sleep(1.5 * attempt)
+        except subprocess.SubprocessError as exc:
+            last_error = exc
+            time.sleep(1.0)
+    raise CaptureError(
+        "could not start the command after %d attempts: %s -- %s"
+        % (attempts, last_error, command[:80]))
+
+def run_technique(technique: Technique) -> Window:
+    """Execute one technique and capture the telemetry window it produced."""
+    started = time.time()
+    marks = {channel: _highest_record_id(channel) for channel in CHANNELS}
+    exit_code, output = _run(technique.resolved(), technique.executor)
+    time.sleep(SETTLE_SECONDS)
+    ended = time.time()
+
+    events, unreadable = read_all(CHANNELS, marks)
+    if unreadable:
+        raise CaptureError(
+            "these channels could not be read, so this window is incomplete: %s. "
+            "The capture needs an elevated shell for Sysmon and Security."
+            % ", ".join(unreadable))
+
+    window = Window(label=technique.attack_id,
+                    technique="%s (%s)" % (technique.name, technique.atomic),
+                    started=started, ended=ended, events=tuple(events))
+    return window
+
+
+def capture_benign(seconds: float = 12.0) -> Window:
+    """A window of ordinary activity, with nothing executed in it.
+
+    This is the half that makes a false positive measurable. A rule that fires
+    here fired on the machine going about its business.
+    """
+    started = time.time()
+    marks = {channel: _highest_record_id(channel) for channel in CHANNELS}
+    time.sleep(seconds)
+    ended = time.time()
+
+    events, unreadable = read_all(CHANNELS, marks)
+    if unreadable:
+        raise CaptureError(
+            "these channels could not be read, so this window is incomplete: %s. "
+            "The capture needs an elevated shell for Sysmon and Security."
+            % ", ".join(unreadable))
+    return Window(label=BENIGN, technique=BENIGN, started=started, ended=ended,
+                  events=tuple(events))
+
+
+def capture_corpus(techniques=ALLOWED_TECHNIQUES, benign_windows: int = 3,
+                   benign_seconds: float = 12.0, progress=print) -> dict:
+    """Run every allowed technique and some benign windows, in one corpus."""
+    windows: list[Window] = []
+    for index, technique in enumerate(techniques, 1):
+        progress("  [%2d/%2d] %-11s %s" % (index, len(techniques), technique.attack_id,
+                                           technique.name))
+        window = run_technique(technique)
+        progress("          -> %d event(s)" % len(window.events))
+        windows.append(window)
+    for index in range(benign_windows):
+        progress("  benign window %d of %d (%.0fs of ordinary activity)"
+                 % (index + 1, benign_windows, benign_seconds))
+        window = capture_benign(benign_seconds)
+        progress("          -> %d event(s)" % len(window.events))
+        windows.append(window)
+    return {
+        "captured_at": time.time(),
+        "settle_seconds": SETTLE_SECONDS,
+        "techniques": [t.as_dict() for t in techniques],
+        "windows": [w.as_dict() for w in windows],
+    }

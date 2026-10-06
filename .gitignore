@@ -28,3 +28,11 @@ captures/
 # last run's node ids and failure list. It is regenerated on every run and has no
 # business in the repository, but a *.pyc entry does not cover it.
 .pytest_cache/
+
+# Captured attack-lab corpora are real telemetry from a real machine: hostname,
+# account name and SID, and the addresses that machine actually connected to.
+# They are inputs to the measurement, not fixtures, and they belong on the
+# machine that produced them rather than in a public repository. Re-capture with
+# `python -m src.lab capture` (needs an elevated shell for the Sysmon channel).
+*attack-lab-corpus*.json
+PROJECTS/siem-dashboard/corpus*.json
