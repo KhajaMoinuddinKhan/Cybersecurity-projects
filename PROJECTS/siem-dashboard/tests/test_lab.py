@@ -81,16 +81,56 @@ def test_event_fields_reads_event_data_out_of_the_xml():
     assert fields["ProcessId"] == "99"
 
 
+def _envelope(events, unreadable):
+    import json as _json
+    return _json.dumps({"events": events, "unreadable": unreadable})
+
+
 def test_read_all_reports_a_channel_it_cannot_read():
     """A channel that does not exist must be reported, not silently dropped.
 
     The first version returned whatever came back, which on an unelevated shell
-    meant a corpus missing Sysmon while looking complete.
+    meant a corpus missing Sysmon while looking complete. The runner is injected
+    so this holds on any platform: the harness is Windows-only, but the promise
+    it makes about its own output is not.
     """
-    payloads, unreadable = read_all(("No-Such-Channel-Exists",), {"No-Such-Channel-Exists": 0},
-                                    newest=2)
+    payloads, unreadable = read_all(("Sysmon", "Security"), {"Sysmon": 0, "Security": 0},
+                                    newest=2,
+                                    runner=lambda script, timeout: (_envelope([], ["Security"]), 1))
     assert payloads == []
-    assert unreadable == ["No-Such-Channel-Exists"]
+    assert unreadable == ["Security"]
+
+
+def test_read_all_keeps_the_events_it_did_read():
+    """A readable channel's records come back, newest last, marks respected."""
+    record = {"Channel": "System", "Id": 1, "Level": "Information", "RecordId": 20,
+              "TimeCreated": "2026-10-07T12:00:00", "User": "u", "Message": "m",
+              "Xml": '<Event><EventData><Data Name="Image">C:\\a.exe</Data></EventData></Event>'}
+    older = dict(record, RecordId=5)
+    payloads, unreadable = read_all(("System",), {"System": 10}, newest=5,
+                                    runner=lambda script, timeout: (_envelope([older, record], []), 1))
+    assert unreadable == []
+    assert [p["record_id"] for p in payloads] == [20]      # the pre-mark record is dropped
+
+
+def test_read_all_drops_events_belonging_to_the_reader():
+    """The harness must not measure itself. A record whose ProcessId is the
+    reading process is the apparatus, not the behaviour."""
+    mine = {"Channel": "System", "Id": 1, "Level": "Information", "RecordId": 30,
+            "TimeCreated": "2026-10-07T12:00:00", "User": "u", "Message": "m",
+            "Xml": '<Event><EventData><Data Name="ProcessId">4242</Data></EventData></Event>'}
+    theirs = dict(mine, RecordId=31,
+                  Xml='<Event><EventData><Data Name="ProcessId">99</Data></EventData></Event>')
+    payloads, _ = read_all(("System",), {"System": 10}, newest=5,
+                           runner=lambda script, timeout: (_envelope([mine, theirs], []), 4242))
+    assert [p["record_id"] for p in payloads] == [31]
+
+
+def test_read_all_refuses_an_empty_read():
+    """Nothing at all is a failure, not an empty corpus."""
+    with pytest.raises(CaptureError):
+        read_all(("System",), {"System": 0}, newest=5,
+                 runner=lambda script, timeout: ("   ", 1))
 
 
 def test_read_all_returns_a_pair_even_when_empty():

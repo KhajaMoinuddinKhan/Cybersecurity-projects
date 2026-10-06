@@ -186,10 +186,17 @@ def _powershell(script: str, timeout: int = 120) -> tuple[str, int]:
     the resulting AttributeError reads as a bug in the caller -- which is exactly
     where it was first chased, at the wrong end of the call.
     """
-    process = subprocess.Popen(
-        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-    )
+    try:
+        process = subprocess.Popen(
+            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+             "-Command", script],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+    except FileNotFoundError as exc:
+        # This half of the project reads the Windows event log, so it needs
+        # Windows. Saying so beats a bare OSError from three frames down.
+        raise CaptureError(
+            "the event log can only be read on Windows: no PowerShell on this host") from exc
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -258,7 +265,8 @@ def read_since(channel: str, after_record_id: int, limit: int = 4000) -> list[di
     return payloads
 
 
-def read_all(channels, marks: dict[str, int], newest: int = 400) -> tuple[list[dict], list[str]]:
+def read_all(channels, marks: dict[str, int], newest: int = 400,
+             runner=None) -> tuple[list[dict], list[str]]:
     """New records across several channels, and the channels that could not be read.
 
     Returns `(payloads, unreadable)`. The second value is the point of this
@@ -278,6 +286,11 @@ def read_all(channels, marks: dict[str, int], newest: int = 400) -> tuple[list[d
     exit code 1 and no output on stderr -- a silent failure worth knowing about
     -- and filtering in Python has no such edge.
     """
+    if not channels:
+        # Nothing to read is not a reason to start a process, and starting one
+        # for an empty list is how this failed on a host that has no PowerShell.
+        return [], []
+
     channel_list = ",".join("'%s'" % c for c in channels)
     script = (
         "$ErrorActionPreference='SilentlyContinue';"
@@ -304,7 +317,7 @@ def read_all(channels, marks: dict[str, int], newest: int = 400) -> tuple[list[d
         "[pscustomobject]@{ events=@($all); unreadable=@($bad) } | "
         "ConvertTo-Json -Depth 5 -Compress"
     ) % (channel_list, newest)
-    text, reader_pid = _powershell(script, timeout=300)
+    text, reader_pid = (runner or _powershell)(script, timeout=300)
     text = text.strip()
     if not text:
         raise CaptureError("the event log read returned nothing at all")
