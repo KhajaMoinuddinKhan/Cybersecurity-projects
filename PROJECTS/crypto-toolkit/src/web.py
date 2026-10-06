@@ -49,7 +49,9 @@ MAX_BODY = 1 << 20
 
 def run_length_extension() -> dict:
     secret = os.urandom(24)
-    message = b"user=guest&role=guest"
+    # The session id is fresh, so the message a run reports back cannot be a
+    # canned one -- and the reader can see that it changed since last time.
+    message = b"user=guest&role=guest&session=" + os.urandom(4).hex().encode()
     appendage = b"&role=admin"
 
     known_mac = naive_mac(secret, message)
@@ -81,7 +83,7 @@ def run_gcm_nonce_reuse() -> dict:
     subkey_found = subkey == GCM(key).hash_subkey
 
     known_tag, known_aad, known_ciphertext = messages[0]
-    chosen = b"transfer 999999 to mallory"
+    chosen = b"transfer %d to mallory" % int.from_bytes(os.urandom(2), "big")
     chosen_ciphertext, chosen_tag = GCM(key).encrypt(nonce, chosen)
     forged = forge_tag(subkey, known_tag, known_aad, known_ciphertext, b"", chosen_ciphertext)
     accepted = forged == chosen_tag and GCM(key).decrypt(nonce, chosen_ciphertext, forged) == chosen
@@ -100,7 +102,9 @@ def run_gcm_nonce_reuse() -> dict:
 def run_padding_oracle() -> dict:
     key = os.urandom(16)
     iv = os.urandom(16)
-    plaintext = b"the token is 9f3a41c7 and it never expires"
+    # A readable sentence with a token nobody could have known: if the attack
+    # recovers this, it recovered it rather than recalled it.
+    plaintext = b"the token is " + os.urandom(8).hex().encode() + b" and it never expires"
     ciphertext = CBC(key).encrypt(iv, plaintext)
 
     queries = []
@@ -123,15 +127,15 @@ def run_padding_oracle() -> dict:
 def run_ecdsa_nonce_reuse() -> dict:
     key = generate_private_key(os.urandom(32))
     nonce = int.from_bytes(os.urandom(32), "big") % (P256_N - 1) + 1
-    digest1 = sha256(b"pay alice ten pounds")
-    digest2 = sha256(b"pay alice a hundred pounds")
+    digest1 = sha256(b"pay alice %d pounds" % int.from_bytes(os.urandom(2), "big"))
+    digest2 = sha256(b"pay alice %d pounds" % int.from_bytes(os.urandom(2), "big"))
     signature1 = sign(key, digest1, nonce)
     signature2 = sign(key, digest2, nonce)
 
     recovered = recover_private_key(digest1, signature1, digest2, signature2)
     key_found = recovered == key.secret
 
-    fresh = sha256(b"pay mallory everything")
+    fresh = sha256(b"pay mallory " + os.urandom(4).hex().encode())
     forged = sign(PrivateKey(recovered), fresh, int.from_bytes(os.urandom(32), "big") % (P256_N - 1) + 1)
     accepted = verify(key.public_key, fresh, forged)
     return {
