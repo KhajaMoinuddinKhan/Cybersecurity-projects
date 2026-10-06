@@ -197,3 +197,47 @@ def test_evaluate_reports_a_separation_and_an_evasion_verdict():
     text = format_report(result)
     assert "separation" in text
     assert "evasion attempts" in text
+
+
+def test_the_evasions_are_scored_on_the_technique_events_not_the_window():
+    """The window number is diluted by ordinary activity sharing the window.
+
+    Measured on the captured corpus, about ninety per cent of a window is
+    background, so an evasion that hides a handful of events barely moves the
+    window figure and "the detector survived" would only mean the dilution
+    absorbed the difference. The evasion has to be judged on the technique's own
+    events or it is not being judged at all.
+    """
+    benign = [_event(event_id=str(i % 3), message="ordinary",
+                     command=r"C:\Windows\System32\cmd.exe /C dir") for i in range(40)]
+    attack = [_event(event_id="1", message="a distinctive command line",
+                     command=r'C:\Windows\System32\cmd.exe /C "whoami /all ; ipconfig /all"',
+                     image=r"C:\Windows\System32\cmd.exe") for _ in range(8)]
+    corpus = {"windows": [
+        {"label": "benign", "events": benign},
+        {"label": "T1033", "events": attack},
+    ]}
+    result = evaluate(corpus)
+    assert result["evasions"], "the evasions must be measured"
+    for row in result["evasions"]:
+        assert row["events"] > 0
+        assert row["separation"] is not None
+        assert 0.0 <= row["technique_flagged"] <= 1.0
+    assert result["survived"] + (result["attempts"] - result["survived"]) == result["attempts"]
+
+
+def test_an_evasion_that_works_is_reported_as_having_worked():
+    """A detector that cannot see the technique must not be scored as surviving."""
+    benign = [_event(event_id=str(i % 3), message="ordinary",
+                     command=r"C:\Windows\System32\cmd.exe /C dir") for i in range(40)]
+    attack = [_event(event_id="1", message="m",
+                     command=r'C:\Windows\System32\cmd.exe /C "whoami /all"',
+                     image=r"C:\Windows\System32\cmd.exe") for _ in range(8)]
+    corpus = {"windows": [{"label": "benign", "events": benign},
+                          {"label": "T1033", "events": attack}]}
+    result = evaluate(corpus)
+    floor = result["evasion_floor"]
+    for row in result["evasions"]:
+        expected = (row["separation"] or -1) >= floor
+        assert (row["name"], expected) in [(r["name"], (r["separation"] or -1) >= floor)
+                                           for r in result["evasions"]]

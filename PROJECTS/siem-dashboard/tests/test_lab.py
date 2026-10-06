@@ -11,7 +11,7 @@ import re
 
 import pytest
 
-from src.lab import (ALLOWED_TECHNIQUES, BENIGN, CaptureError, Technique,
+from src.lab import (ALLOWED_TECHNIQUES, BENIGN, BENIGN_WORKLOAD, CaptureError, Technique,
                      _event_fields, _is_reader_own, read_all)
 
 
@@ -166,3 +166,43 @@ def test_read_all_returns_a_pair_even_when_empty():
 def test_the_benign_label_is_not_an_attack_id():
     assert BENIGN == "benign"
     assert all(t.attack_id != BENIGN for t in ALLOWED_TECHNIQUES)
+
+
+def test_the_benign_workload_is_ordinary_and_safe():
+    """The baseline has to contain process creation, and nothing harmful.
+
+    A benign window with nothing running in it is not a baseline, it is an
+    absence -- and a detector asked whether a command is unusual for this host
+    cannot answer from data in which the host ran no commands. So the workload
+    exists. It also has to be safe: this is ordinary activity, not a technique.
+    """
+    assert len(BENIGN_WORKLOAD) >= 5
+    network = re.compile(r"(downloadstring|invoke-webrequest|net\.webclient|\biex\b|"
+                         r"invoke-expression|https?://|curl |wget )", re.I)
+    mutates = re.compile(r"(\breg add\b|\breg delete\b|new-item|remove-item|out-file|"
+                         r"schtasks|netsh \w+ set|copy-item|move-item|stop-process)", re.I)
+    for executor, command in BENIGN_WORKLOAD:
+        assert executor in ("command_prompt", "powershell")
+        assert not network.search(command), (command, "reaches the network")
+        assert not mutates.search(command), (command, "changes the machine")
+
+
+def test_the_benign_workload_contains_an_overlap_on_purpose():
+    """One command in it is also a discovery technique.
+
+    `ipconfig` is T1016 and it is also what somebody types when the wifi looks
+    wrong. A baseline with no such command in it would make the detection problem
+    look easier than it is, so the overlap is deliberate and asserted.
+    """
+    commands = " ".join(command for _, command in BENIGN_WORKLOAD).lower()
+    assert "ipconfig" in commands
+
+
+def test_the_benign_workload_is_not_the_technique_list():
+    """No technique's command may appear in the baseline."""
+    baseline = " ".join(command for _, command in BENIGN_WORKLOAD).lower()
+    for technique in ALLOWED_TECHNIQUES:
+        command = technique.resolved().lower()
+        if technique.attack_id == "T1016":
+            continue                     # the deliberate overlap, asserted above
+        assert command not in baseline, (technique.attack_id, "is in the baseline")

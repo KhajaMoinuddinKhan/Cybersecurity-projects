@@ -485,6 +485,71 @@ window it is shown, benign ones included, and `sysmon-lsass-access` and
 context rather than an alert, so it does not fill the queue, but it also does not
 discriminate.
 
+The anomaly detector works, and getting there was the useful part.
+
+The first feature set described an event's *shape* -- its id, its channel, its
+message length, whether its image sat in System32 -- and it scored the technique's
+own events as **more normal** than background activity, a separation of minus
+0.067. That is not a tuning problem, it is the features being wrong:
+living-off-the-land discovery runs `cmd.exe` and `powershell.exe` out of System32,
+so a feature calling System32 benign called the technique benign too. It rewarded
+the attacker.
+
+The features were replaced with ones that read what the command line says, and the
+detector still could not see anything, for a reason that belongs to the model
+rather than the data. An isolation forest is trained on the benign events, and
+those contained no discovery verbs, so that feature was constant in training and
+**never chosen for a split**. The axis carrying the signal was invisible to the
+model by construction, however loud it was at scoring time. A detector built this
+way can only flag points that are extreme along axes it saw vary, and the axis
+that matters is one it never saw vary at all.
+
+Then the finding underneath both. The benign windows contained **no process
+creation whatsoever**: forty-five events, every one a network connection, a
+PowerShell script block or a Defender record, and not one with a command line,
+while every technique event had one. There was no baseline of ordinary commands,
+so the question the detector was being asked -- is this command unusual for this
+host? -- could not be answered from data in which the host never ran a command.
+
+The fix was in the capture. A benign window now runs a short ordinary workload:
+`dir`, `type`, `ping` to loopback, `Get-Date`, `Get-Service`, and one deliberate
+overlap. `ipconfig` is a discovery technique and it is also what somebody types
+when the wifi looks wrong, so it is in the baseline on purpose -- a baseline with
+no such command in it would make the detection problem look easier than it is.
+That overlap is visible in the results as `disc-network-configuration` scoring
+0.667 precision rather than 1.0, which is the rule meeting a real user.
+
+With a baseline to learn from, the detector separates: **84.6 per cent of the
+events the techniques produced are flagged, against 5.2 per cent of benign ones**,
+a separation of 0.794 where it had been negative. The window figure stays near
+zero, and that is honest rather than disappointing -- a window is a time range and
+about ninety per cent of it is ordinary activity, so the technique's handful of
+events is diluted by construction. The measurement reports both, and the
+event-level one is the number that means anything.
+
+The evasion test is judged on the same event-level measure, because judging it on
+the window figure would let the dilution absorb the difference and call that
+survival. **Nine of ten evasions leave the detector able to see the technique. One
+works**: feature mimicry against account discovery, where replacing `whoami /all`
+with values drawn from the benign distribution drops detection to zero. That is a
+real evasion, and it is the result the exercise was for.
+
+All of this is in the console, under **How well the rules actually do**. When
+there is no corpus on the machine the panel says so and names the command that
+would capture one, because an empty table reads as a fault rather than as an
+experiment nobody has run yet. The captured corpus is not committed: it is real
+telemetry from a real machine, hostname and account name included, and it belongs
+on the machine that produced it.
+
+## Limits
+
+Three rules fire on traffic they were not written for, and the measurement says
+which: `sysmon-network-connection-to-remote-port` matches a connection in every
+window it is shown, benign ones included, and `sysmon-lsass-access` and
+`sysmon-remote-thread-injection` match in half of them. The first is declared
+context rather than an alert, so it does not fill the queue, but it also does not
+discriminate.
+
 The anomaly detector does not work, and the reason is worth more than the result.
 
 The first feature set described an event's *shape* -- its id, its channel, its

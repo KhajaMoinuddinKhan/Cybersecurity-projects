@@ -472,15 +472,51 @@ def run_technique(technique: Technique) -> Window:
     return window
 
 
-def capture_benign(seconds: float = 12.0) -> Window:
-    """A window of ordinary activity, with nothing executed in it.
+# What ordinary activity looks like, so that a benign window contains some.
+#
+# The first benign windows captured nothing but a sleep, and the result was a
+# corpus in which forty-five benign events had no command line between them while
+# every technique event had one. A detector asked "is this command unusual for
+# this host" cannot answer from data in which the host never ran a command, and
+# the anomaly work stalled on that rather than on anything to do with the model.
+#
+# So a benign window now runs the sort of thing a person runs. Deliberately
+# dull, and deliberately including one realistic overlap: `ipconfig` is a
+# discovery technique and it is also something somebody types when the wifi
+# looks wrong. A baseline that contained no such command would make the
+# detection problem look easier than it is.
+BENIGN_WORKLOAD: tuple[tuple[str, str], ...] = (
+    ("command_prompt", "dir /b C:\\Windows"),
+    ("command_prompt", "echo ordinary activity"),
+    ("command_prompt", "type C:\\Windows\\win.ini"),
+    ("command_prompt", "findstr /i version C:\\Windows\\win.ini"),
+    ("command_prompt", "ping -n 1 127.0.0.1"),
+    ("powershell", "Get-Date"),
+    ("powershell", "Get-ChildItem C:\\Windows -Name | Select-Object -First 5"),
+    ("powershell", "Get-Service | Select-Object -First 5"),
+    ("command_prompt", "ipconfig"),
+)
+
+
+def capture_benign(seconds: float = 12.0, workload=None) -> Window:
+    """A window of ordinary activity.
 
     This is the half that makes a false positive measurable. A rule that fires
     here fired on the machine going about its business.
     """
     started = time.time()
     marks = {channel: _highest_record_id(channel) for channel in CHANNELS}
-    time.sleep(seconds)
+    if workload is None:
+        workload = BENIGN_WORKLOAD
+    # spread over the window rather than fired off at once, so the events land
+    # where ordinary activity would land instead of in a single burst
+    pause = max(0.0, seconds / max(1, len(workload)))
+    for executor, command in workload:
+        try:
+            _run(command, executor, attempts=2)
+        except CaptureError:
+            continue                    # an ordinary command failing is ordinary
+        time.sleep(pause)
     ended = time.time()
 
     events, unreadable = read_all(CHANNELS, marks)

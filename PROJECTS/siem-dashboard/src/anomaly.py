@@ -343,6 +343,33 @@ def _window_scores(corpus: dict, forest: IsolationForest, extractor: FeatureExtr
     return per_window
 
 
+def _visibility(events: list[dict], benign_vectors: list[list[float]],
+                forest: IsolationForest, extractor: FeatureExtractor,
+                threshold: float) -> dict:
+    """Separation measured on the technique's own events.
+
+    This is the number the evasion test has to use. The window figure is diluted
+    by however much ordinary activity shares the window -- measured here, about
+    ninety per cent of it -- so an evasion that hides a handful of events barely
+    moves it, and "the detector survived" would only mean the dilution absorbed
+    the difference. Scoring the technique's events directly asks the question the
+    evasion is actually about: can the detector still see them?
+    """
+    if not events:
+        return {"events": 0, "technique_flagged": None, "benign_flagged": None,
+                "separation": None}
+    benign_scores = forest.score_all(benign_vectors)
+    technique_scores = forest.score_all([extractor.vector(event) for event in events])
+    benign_rate = sum(1 for s in benign_scores if s > threshold) / len(benign_scores)
+    technique_rate = sum(1 for s in technique_scores if s > threshold) / len(technique_scores)
+    return {
+        "events": len(events),
+        "benign_flagged": round(benign_rate, 3),
+        "technique_flagged": round(technique_rate, 3),
+        "separation": round(technique_rate - benign_rate, 3),
+    }
+
+
 def evade_by_mimicry(events: list[dict], benign: list[dict], extractor: FeatureExtractor,
                      seed: int = 0xBAD) -> list[dict]:
     """Replace each event's features with values drawn from the benign set.
@@ -448,21 +475,7 @@ def evaluate(corpus: dict, threshold: float | None = None,
     # events the technique itself produced. When this one is at or below zero the
     # window number is noise, and no amount of threshold tuning will help.
     technique_events = _technique_events(corpus)
-    benign_scores = forest.score_all(benign_vectors)
-    if technique_events:
-        technique_vectors = [extractor.vector(event) for event in technique_events]
-        technique_scores = forest.score_all(technique_vectors)
-        benign_rate = sum(1 for s in benign_scores if s > threshold) / len(benign_scores)
-        technique_rate = sum(1 for s in technique_scores if s > threshold) / len(technique_scores)
-        visibility = {
-            "events": len(technique_events),
-            "benign_flagged": round(benign_rate, 3),
-            "technique_flagged": round(technique_rate, 3),
-            "separation": round(technique_rate - benign_rate, 3),
-        }
-    else:
-        visibility = {"events": 0, "technique_flagged": None, "benign_flagged": None,
-                      "separation": None}
+    visibility = _visibility(technique_events, benign_vectors, forest, extractor, threshold)
 
     # The same question, asked of the model that can see the words.
     benign_commands = [str((e.get("fields") or {}).get("CommandLine") or "") for e in benign]
@@ -499,18 +512,35 @@ def evaluate(corpus: dict, threshold: float | None = None,
         return summarise(name, _window_scores(copy, forest, extractor, threshold))
 
     results = [clean]
+    evasions: list[dict] = []
     for label in sorted(technique_labels):
         events = [e for w in corpus["windows"] if w["label"] == label for e in w["events"]]
         if not events:
             continue
-        results.append(rescore("mimicry (%s)" % label,
-                               evade_by_mimicry(events, benign, extractor), label))
-        results.append(rescore("dilution (%s)" % label,
-                               evade_by_dilution(events, benign), label))
+        for name, evaded in (
+            ("mimicry", evade_by_mimicry(events, benign, extractor)),
+            ("dilution", evade_by_dilution(events, benign)),
+        ):
+            results.append(rescore("%s (%s)" % (name, label), evaded, label))
+            # only the technique's own events, after the evasion
+            survived_events = [e for e in evaded
+                               if any(v in str((e.get("fields") or {}).get("CommandLine") or "").lower()
+                                      for v in _DISCOVERY_VERBS)]
+            if not survived_events:
+                survived_events = evaded[:max(1, len(events))]
+            row = _visibility(survived_events, benign_vectors, forest, extractor, threshold)
+            row["name"] = "%s (%s)" % (name, label)
+            evasions.append(row)
 
-    surviving = [r for r in results[1:] if r["separation"] >= clean["separation"] * 0.5]
+    # "survived" now means the detector could still see the technique's events
+    # after the evasion, which is what the evasion test is for. Half the clean
+    # separation is the bar; below that the evasion worked.
+    floor = (visibility.get("separation") or 0.0) * 0.5
+    surviving = [e for e in evasions if (e.get("separation") or -1) >= floor]
     return {
         "visibility": visibility,
+        "evasions": evasions,
+        "evasion_floor": round(floor, 3),
         "threshold": round(threshold, 4),
         "threshold_percentile": percentile,
         "calibrated": True,
