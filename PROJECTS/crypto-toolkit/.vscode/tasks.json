@@ -2,9 +2,9 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "crypto-toolkit: the four attacks",
+      "label": "crypto-toolkit: the web console",
       "type": "shell",
-      "command": "../../.venv/Scripts/python.exe -m src.cli attack all",
+      "command": "../../.venv/Scripts/python.exe -m src.cli serve",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -17,6 +17,20 @@
       "group": {
         "kind": "build",
         "isDefault": true
+      }
+    },
+    {
+      "label": "crypto-toolkit: the four attacks",
+      "type": "shell",
+      "command": "../../.venv/Scripts/python.exe -m src.cli attack all",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
       }
     },
     {
