@@ -434,16 +434,26 @@ deliberately strict. A rule that fires on *anything* would otherwise score
 perfectly, and flattering every rule in the set is exactly what measuring them is
 supposed to prevent.
 
-The first measurement is worth stating plainly, because it is not flattering. On
-a corpus of ten technique windows and two benign ones, **not one of the 23 rules
-detects any of the five discovery techniques that were run**. The rule set is
-built for execution, persistence, credential access and defence evasion, and the
-corpus contains none of those, so the honest reading is a coverage gap rather
-than a failure of the rules at what they were written for. The second finding is
-sharper: `sysmon-network-connection-to-remote-port` fires in **every window**,
-including both benign ones, so as written it carries no information at all.
-`sysmon-remote-thread-injection` fires in four. Those two are the ones worth
-tuning, and before this nobody could have known that from the rules alone.
+The first measurement was wrong, and the way it was wrong is worth recording.
+The scoring passed the raw event to the matcher, which expects the flattened
+mapping that `event_fields` builds -- structured EventData is exposed there both
+bare and namespaced as `data.<Key>`, and the rules use the namespaced form. So
+every `data.` lookup resolved to the empty string and no rule could match
+anything. Worse, the two rules that appeared to fire did so only because a `not`
+clause passed on the field that was missing: a rule whose condition is "a
+connection that is *not* loopback" matches every event when the destination is
+not there to read. The result was a rule set that detected nothing and a
+network rule that looked like it fired on everything, both of them artefacts.
+
+Corrected, and with the discovery rules added, the picture is different. Five
+rules now detect the discovery techniques they were written for, at full
+precision and with recall between one half and complete. Three rules carry false
+positives, and they are the three worth tuning: `sysmon-network-connection-to-remote-port`
+fires in every window it is shown, which its own comment already admitted and the
+measurement now confirms with a number, and `sysmon-lsass-access` and
+`sysmon-remote-thread-injection` fire in six windows each. None of those three is
+wrong to exist -- the network rule is explicitly context rather than an alert --
+but the measurement says which of them would fill a queue.
 
 `src/anomaly.py` is the other approach, for the techniques no rule covers. It is
 an isolation forest written out rather than imported — the algorithm is a page of
@@ -468,11 +478,17 @@ on the machine that produced it.
 
 ## Limits
 
-The rules have no coverage of discovery techniques, and the measurement says so
-with a number rather than an impression: the corpus contains five of them and no
-rule fires on any. One network rule is also far too broad to be useful as
-written, matching a connection in every window it was shown, benign ones
-included.
+Three rules fire on traffic they were not written for, and the measurement says
+which: `sysmon-network-connection-to-remote-port` matches a connection in every
+window it is shown, benign ones included, and `sysmon-lsass-access` and
+`sysmon-remote-thread-injection` match in half of them. The first is declared
+context rather than an alert, so it does not fill the queue, but it also does not
+discriminate.
+
+The anomaly detector is not deployable. On the captured corpus it separates
+attack windows from benign ones only weakly, and it flags a large share of the
+benign events as anomalous -- a detector that finds the signal and far too much
+else.
 
 Read this before treating a clean dashboard as a clean machine.
 

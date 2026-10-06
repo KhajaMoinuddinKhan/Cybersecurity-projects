@@ -31,10 +31,25 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .rules import RuleEngine, rule_matches
+from .rules import RuleEngine, event_fields, rule_matches
 
 __all__ = ["RuleScore", "measure_corpus", "format_scores", "load_corpus",
            "default_corpus_path", "measurement_snapshot"]
+
+
+def _technique_key(tag: str) -> str:
+    """The comparable form of an ATT&CK identifier.
+
+    Rules tag themselves the way Sigma does -- ``attack.t1057`` -- and a corpus
+    labels a window with the technique alone, ``T1057``. Comparing the two
+    literally scored every detection as a false positive, because no rule's tags
+    ever contained the label they were being measured against. The prefix and the
+    case are presentation, so they are stripped here.
+    """
+    text = str(tag or "").strip().lower()
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    return text.upper()
 
 
 @dataclass
@@ -105,24 +120,27 @@ def measure_corpus(corpus: dict, engine: RuleEngine | None = None) -> dict:
                            techniques=tuple(rule.techniques))
         for rule in engine.rules
     }
+    # a rule's techniques, in the same form the corpus labels windows with
+    covered = {rule.id: {_technique_key(t) for t in rule.techniques} for rule in engine.rules}
 
     # Which rules fired anywhere in each window, evaluated once per event.
     fired: dict[str, set[str]] = {}
     for index, window in enumerate(windows):
         seen: set[str] = set()
         for event in window["events"]:
-            fields = event.get("fields") or {}
-            probe = {
-                "channel": event.get("channel") or "",
-                "event_id": str(event.get("event_id") or ""),
-                "level": event.get("level") or "",
-                "message": event.get("message") or "",
-                "fields": fields,
-            }
+            # `rule_matches` takes the *flattened* mapping that `event_fields`
+            # builds, not the payload: structured EventData is exposed both bare
+            # and namespaced as `data.<Key>`, and the rules use the namespaced
+            # form. Passing the payload here made every `data.` lookup resolve to
+            # the empty string, so no rule could match anything -- and the two
+            # rules that appeared to fire did so only because a `not` clause
+            # passed on the field that was missing. The first measurement in this
+            # project was wrong for that reason and the numbers were replaced.
+            fields = event_fields(event)
             for rule in engine.rules:
                 if rule.id in seen:
                     continue
-                if rule_matches(probe, rule):
+                if rule_matches(fields, rule):
                     seen.add(rule.id)
         fired[str(index)] = seen
 
@@ -130,7 +148,7 @@ def measure_corpus(corpus: dict, engine: RuleEngine | None = None) -> dict:
         label = window["label"]
         for rule in engine.rules:
             score = scores[rule.id]
-            named = label in rule.techniques
+            named = _technique_key(label) in covered[rule.id]
             did_fire = rule.id in fired[str(index)]
             if named and did_fire:
                 score.true_positives += 1
@@ -144,7 +162,7 @@ def measure_corpus(corpus: dict, engine: RuleEngine | None = None) -> dict:
             else:
                 score.true_negatives += 1
 
-    techniques_in_corpus = sorted({label for label in labels if label != "benign"})
+    techniques_in_corpus = sorted({_technique_key(label) for label in labels if label != "benign"})
     return {
         "windows": len(windows),
         "benign_windows": sum(1 for label in labels if label == "benign"),
@@ -239,6 +257,8 @@ def measurement_snapshot(corpus_path: str | Path | None = None,
             result["anomaly"] = {
                 "trained_on_events": anomaly["trained_on_events"],
                 "features": anomaly["features"],
+                "threshold": anomaly["threshold"],
+                "threshold_percentile": anomaly.get("threshold_percentile"),
                 "benign_flagged": clean["mean_flagged_benign"],
                 "attack_flagged": clean["mean_flagged_attack"],
                 "separation": clean["separation"],

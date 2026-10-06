@@ -1,0 +1,155 @@
+# Detections for the discovery techniques.
+#
+# These exist because the rules were measured and the measurement said so. The
+# corpus in the attack lab runs five discovery techniques, and the rest of the
+# rule set detects none of them: it was written for execution, persistence,
+# credential access and defence evasion, and discovery is a phase nobody had
+# covered. A technique that is missing from the rule set is invisible, and the
+# only way to find that out is to run something and watch nothing happen.
+#
+# The command lines below are the ones that were actually captured, not the ones
+# the documentation says would be used. `whoami /all` arrived both with and
+# without a second space, `netsh` appeared twice for two different purposes, and
+# `reg query` came in through `cmd.exe /C` with the whole thing quoted -- so the
+# matches are on the command text rather than on an exact string.
+#
+# Discovery is not an intrusion on its own, and each of these is a step a
+# legitimate administrator also takes. They are Medium and they alert, because
+# their value is in sequence: `whoami` on its own is nothing, `whoami` three
+# minutes after a phishing attachment is a story.
+rules:
+  - id: disc-system-information
+    title: System information discovery
+    level: Medium
+    description: >-
+      A process asked the machine what it is. `systeminfo` and a registry read
+      of the cryptography keys are how an intruder works out the build, the
+      patch level and the domain before choosing what to do next.
+    logsource:
+      channel: Microsoft-Windows-Sysmon/Operational
+      event_id: "1"
+    detection:
+      selection:
+        event_id: "1"
+      keywords:
+        data.CommandLine|contains:
+          - "systeminfo"
+          - "REG QUERY HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography"
+          - "Get-ComputerInfo"
+      condition: selection and keywords
+    falsepositives:
+      - An administrator or an inventory agent checking a build.
+      - Software that reports its own host's specification.
+    tags:
+      - attack.discovery
+      - attack.t1082
+
+  - id: disc-process-listing
+    title: Process discovery
+    level: Medium
+    description: >-
+      The running processes were enumerated. `tasklist` and `Get-Process` are
+      the cheapest way to find out what security software is watching, and an
+      intruder who knows that picks a technique that does not trip it.
+    logsource:
+      channel: Microsoft-Windows-Sysmon/Operational
+      event_id: "1"
+    detection:
+      selection:
+        event_id: "1"
+      keywords:
+        data.CommandLine|contains:
+          - "tasklist"
+          - "Get-Process"
+          - "pslist"
+      condition: selection and keywords
+    falsepositives:
+      - Task Manager's command-line equivalent, and most monitoring agents.
+    tags:
+      - attack.discovery
+      - attack.t1057
+
+  - id: disc-network-configuration
+    title: System network configuration discovery
+    level: Medium
+    description: >-
+      The machine's network configuration was read: addresses, routes, the ARP
+      cache and the firewall rules. Together these are a map of where the host
+      sits and what it can reach, which is the reconnaissance a lateral movement
+      decision is made from.
+    logsource:
+      channel: Microsoft-Windows-Sysmon/Operational
+      event_id: "1"
+    detection:
+      selection:
+        event_id: "1"
+      keywords:
+        data.CommandLine|contains:
+          - "ipconfig"
+          - "netsh interface show"
+          - "netsh advfirewall firewall show"
+          - "arp -a"
+          - "net config"
+          - "Get-NetIPConfiguration"
+      condition: selection and keywords
+    falsepositives:
+      - Troubleshooting a network fault, which is what these tools are for.
+      - A VPN or DHCP client refreshing its state.
+    tags:
+      - attack.discovery
+      - attack.t1016
+
+  - id: disc-software-inventory
+    title: Software discovery through the uninstall keys
+    level: Medium
+    description: >-
+      The installed-software list was read out of the registry. It is how an
+      intruder finds out whether a vulnerable version of something is present,
+      and which of the machine's tools are worth abusing.
+    logsource:
+      channel: Microsoft-Windows-Sysmon/Operational
+      event_id: "1"
+    detection:
+      selection:
+        event_id: "1"
+        data.Image|endswith:
+          - "\\powershell.exe"
+          - "\\pwsh.exe"
+      keywords:
+        data.CommandLine|contains:
+          - "Uninstall"
+          - "Get-ItemProperty"
+          - "Win32_Product"
+      condition: selection and keywords
+    falsepositives:
+      - Patch management and software inventory agents, which do this by design.
+    tags:
+      - attack.discovery
+      - attack.t1518
+
+  - id: disc-account-discovery
+    title: Account discovery on the local host
+    level: Medium
+    description: >-
+      The identity of the account and the groups it belongs to were read.
+      `whoami /all` reports the privileges held, so it is the step before
+      deciding whether this host is worth escalating on.
+    logsource:
+      channel: Microsoft-Windows-Sysmon/Operational
+      event_id: "1"
+    detection:
+      selection:
+        event_id: "1"
+      keywords:
+        data.CommandLine|contains:
+          - "whoami"
+          - "Get-LocalUser"
+          - "net user"
+          - "query user"
+      condition: selection and keywords
+    falsepositives:
+      - A support script that records who is signed in.
+      - An administrator checking their own privileges.
+    tags:
+      - attack.discovery
+      - attack.t1033

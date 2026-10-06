@@ -63,12 +63,35 @@ def test_an_unsubstituted_argument_would_be_visible():
 def test_the_reader_filter_recognises_its_own_process():
     """The harness must not score itself. Reading the log starts a process, and
     that process is in the log it is reading."""
-    assert _is_reader_own({"ProcessId": "4242"}, 4242) is True
-    assert _is_reader_own({"SourceProcessId": "4242"}, 4242) is True
-    assert _is_reader_own({"ParentProcessId": "4242"}, 4242) is True
-    assert _is_reader_own({"ProcessId": "4243"}, 4242) is False
-    assert _is_reader_own({}, 4242) is False
-    assert _is_reader_own({"ProcessId": ""}, 4242) is False
+    assert _is_reader_own({"ProcessId": "4242"}, {4242}) is True
+    assert _is_reader_own({"SourceProcessId": "4242"}, {4242}) is True
+    assert _is_reader_own({"ParentProcessId": "4242"}, {4242}) is True
+    assert _is_reader_own({"ProcessId": "4243"}, {4242}) is False
+    assert _is_reader_own({}, {4242}) is False
+    assert _is_reader_own({"ProcessId": ""}, {4242}) is False
+    assert _is_reader_own({"ProcessId": "4242"}, set()) is False
+
+
+def test_the_filter_knows_every_reader_not_just_the_current_one():
+    """The reader that captured an event is rarely the one that produced it.
+
+    The marks query and the previous window's read both leave processes behind,
+    and a filter that only knew the current pid left all of them in the corpus.
+    """
+    assert _is_reader_own({"ProcessId": "11"}, {11, 22, 33}) is True
+    assert _is_reader_own({"ProcessId": "33"}, {11, 22, 33}) is True
+    assert _is_reader_own({"ProcessId": "44"}, {11, 22, 33}) is False
+
+
+def test_reader_pids_accumulate_and_can_be_reset():
+    """The memory is what makes the previous test possible."""
+    import src.lab as lab
+    lab.reset_reader_pids()
+    assert lab.reader_pids() == set()
+    lab._READER_PIDS.add(4242)
+    assert 4242 in lab.reader_pids()
+    lab.reset_reader_pids()
+    assert lab.reader_pids() == set()
 
 
 def test_event_fields_reads_event_data_out_of_the_xml():
@@ -122,7 +145,8 @@ def test_read_all_drops_events_belonging_to_the_reader():
     theirs = dict(mine, RecordId=31,
                   Xml='<Event><EventData><Data Name="ProcessId">99</Data></EventData></Event>')
     payloads, _ = read_all(("System",), {"System": 10}, newest=5,
-                           runner=lambda script, timeout: (_envelope([mine, theirs], []), 4242))
+                           runner=lambda script, timeout: (_envelope([mine, theirs], []), 4242),
+                           exclude_pids={4242})
     assert [p["record_id"] for p in payloads] == [31]
 
 

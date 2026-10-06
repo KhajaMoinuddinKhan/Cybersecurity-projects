@@ -45,10 +45,12 @@ def patched(monkeypatch):
     import src.measure as measure
 
     def install(rules, fires_on):
-        def fake_rule_matches(probe, rule):
-            # the argument is the SIEM probe, so the window tag lives under "fields"
-            window = (probe.get("fields") or {}).get("__window__")
-            return window in fires_on.get(rule.id, set())
+        def fake_rule_matches(fields, rule):
+            # the argument is the *flattened* mapping event_fields() builds, and
+            # EventData keys appear there bare as well as namespaced
+            # event_fields stringifies every value, so the window tag arrives as text
+            wanted = {str(item) for item in fires_on.get(rule.id, set())}
+            return fields.get("__window__") in wanted
         monkeypatch.setattr(measure, "rule_matches", fake_rule_matches)
         return _FakeEngine(rules, fires_on)
     return install
@@ -242,7 +244,7 @@ def test_the_endpoint_reports_over_a_real_corpus(tmp_path, monkeypatch):
     assert body["available"] is True
     assert body["windows"] == 2
     assert body["benign_windows"] == 1
-    assert len(body["rules"]) == 23
+    assert len(body["rules"]) == 28
     assert body["summary"]["headline"].endswith("windows.")
     # the detector is trained on the benign window, so it must have an answer
     assert "separation" in body.get("anomaly", {})

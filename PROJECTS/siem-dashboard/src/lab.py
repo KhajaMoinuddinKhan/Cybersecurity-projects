@@ -178,6 +178,25 @@ class Window:
         }
 
 
+# Every PowerShell the harness starts in order to *read* the log is itself in the
+# log it is reading, and Sysmon records its creation before the query runs. One
+# process is not enough to remember: the first version filtered each read against
+# its own pid, and every earlier reader -- the marks query, and the previous
+# window's read -- stayed in the corpus. Thirty of the first 313 captured events
+# were the harness talking to itself, which is a false positive the measurement
+# would have blamed on a rule.
+_READER_PIDS: set[int] = set()
+
+
+def reset_reader_pids() -> None:
+    """Forget the readers seen so far. Called at the start of a capture."""
+    _READER_PIDS.clear()
+
+
+def reader_pids() -> set[int]:
+    return set(_READER_PIDS)
+
+
 def _powershell(script: str, timeout: int = 120) -> tuple[str, int]:
     """Run a PowerShell one-shot and return its standard output.
 
@@ -207,7 +226,9 @@ def _powershell(script: str, timeout: int = 120) -> tuple[str, int]:
     if process.returncode and not stdout.strip():
         raise CaptureError(((stderr or "").strip() or "PowerShell failed")[:400])
     # The pid goes back with the output because the reader's own process is
-    # telemetry too, and the caller has to be able to drop it.
+    # telemetry too, and the caller has to be able to drop it -- and it is
+    # remembered, because a later read will be the one that captures it.
+    _READER_PIDS.add(process.pid)
     return stdout, process.pid
 
 
@@ -266,7 +287,7 @@ def read_since(channel: str, after_record_id: int, limit: int = 4000) -> list[di
 
 
 def read_all(channels, marks: dict[str, int], newest: int = 400,
-             runner=None) -> tuple[list[dict], list[str]]:
+             runner=None, exclude_pids=None) -> tuple[list[dict], list[str]]:
     """New records across several channels, and the channels that could not be read.
 
     Returns `(payloads, unreadable)`. The second value is the point of this
@@ -351,7 +372,8 @@ def read_all(channels, marks: dict[str, int], newest: int = 400,
         # harness caused. The SIEM's own collector guards against the same thing
         # with its own-pid memory; this is the equivalent.
         fields = _event_fields(item)
-        if _is_reader_own(fields, reader_pid):
+        exclude = _READER_PIDS if exclude_pids is None else set(exclude_pids) | {reader_pid}
+        if _is_reader_own(fields, exclude):
             self_events += 1
             continue
         payload = windows_event_to_payload(channel, item)
@@ -374,12 +396,18 @@ def _event_fields(item: dict) -> dict:
     return {name: value for name, value in pairs}
 
 
-def _is_reader_own(fields: dict, reader_pid: int) -> bool:
-    """True when an event describes the process that is reading the log."""
-    needle = str(reader_pid)
+def _is_reader_own(fields: dict, reader_pids) -> bool:
+    """True when an event describes a process the harness started to read the log.
+
+    Takes a collection rather than a single pid: the reader that captured this
+    event is rarely the reader that produced it.
+    """
+    needles = {str(pid) for pid in reader_pids}
+    if not needles:
+        return False
     for key in _OWN_PROCESS_FIELDS:
         value = str(fields.get(key) or "").strip()
-        if value and value == needle:
+        if value and value in needles:
             return True
     return False
 
@@ -468,6 +496,7 @@ def capture_benign(seconds: float = 12.0) -> Window:
 def capture_corpus(techniques=ALLOWED_TECHNIQUES, benign_windows: int = 3,
                    benign_seconds: float = 12.0, progress=print) -> dict:
     """Run every allowed technique and some benign windows, in one corpus."""
+    reset_reader_pids()
     windows: list[Window] = []
     for index, technique in enumerate(techniques, 1):
         progress("  [%2d/%2d] %-11s %s" % (index, len(techniques), technique.attack_id,

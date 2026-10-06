@@ -211,7 +211,30 @@ def _events(corpus: dict, labels: set[str]) -> list[dict]:
     return out
 
 
-def _window_scores(corpus: dict, forest: IsolationForest, extractor: FeatureExtractor) -> dict:
+def calibrate_threshold(forest: IsolationForest, benign_vectors: list[list[float]],
+                        percentile: float = 95.0) -> float:
+    """Where to put the line, taken from the benign data rather than assumed.
+
+    The first version used a fixed 0.5, which is the textbook centre of the
+    score's range and turned out to be meaningless here: on a corpus of a few
+    hundred events every score lands just above it, so the detector flagged
+    everything and separated nothing. That is not a property of the data, it is
+    a threshold nobody chose. Taking the percentile of the scores the forest
+    gives the *benign* events sets the false-positive rate by construction --
+    at the 95th percentile, one benign event in twenty is flagged -- and makes
+    the separation a statement about ranking rather than about a round number.
+    """
+    scores = sorted(forest.score_all(benign_vectors))
+    if not scores:
+        return 0.5
+    rank = max(0.0, min(100.0, percentile)) / 100.0 * (len(scores) - 1)
+    low, high = int(rank), min(int(rank) + 1, len(scores) - 1)
+    weight = rank - low
+    return scores[low] * (1 - weight) + scores[high] * weight
+
+
+def _window_scores(corpus: dict, forest: IsolationForest, extractor: FeatureExtractor,
+                   threshold: float = 0.5) -> dict:
     """The fraction of each window's events the forest calls anomalous."""
     per_window = {}
     for index, window in enumerate(corpus["windows"]):
@@ -220,7 +243,7 @@ def _window_scores(corpus: dict, forest: IsolationForest, extractor: FeatureExtr
             per_window[str(index)] = (window["label"], 0.0, 0)
             continue
         scores = forest.score_all(vectors)
-        flagged = sum(1 for s in scores if s > 0.5)
+        flagged = sum(1 for s in scores if s > threshold)
         per_window[str(index)] = (window["label"], flagged / len(scores), len(scores))
     return per_window
 
@@ -269,8 +292,14 @@ def evade_by_dilution(events: list[dict], benign: list[dict], factor: int = 10,
     return list(events) + flood
 
 
-def evaluate(corpus: dict, threshold: float = 0.5) -> dict:
-    """Train on benign windows, then score every window, clean and evaded."""
+def evaluate(corpus: dict, threshold: float | None = None,
+             percentile: float = 95.0) -> dict:
+    """Train on benign windows, then score every window, clean and evaded.
+
+    `threshold=None` calibrates it from the benign scores, which is what should
+    normally be used. A fixed number is accepted so the difference can be
+    measured rather than asserted.
+    """
     extractor = FeatureExtractor()
     benign = _events(corpus, {"benign"})
     technique_labels = {w["label"] for w in corpus["windows"] if w["label"] != "benign"}
@@ -278,7 +307,10 @@ def evaluate(corpus: dict, threshold: float = 0.5) -> dict:
     if not benign or not attacks:
         raise ValueError("the corpus needs both benign and technique windows")
 
-    forest = IsolationForest().fit([extractor.vector(event) for event in benign])
+    benign_vectors = [extractor.vector(event) for event in benign]
+    forest = IsolationForest().fit(benign_vectors)
+    if threshold is None:
+        threshold = calibrate_threshold(forest, benign_vectors, percentile)
 
     def summarise(name: str, windows: dict) -> dict:
         benign_scores, attack_scores = [], []
@@ -294,7 +326,7 @@ def evaluate(corpus: dict, threshold: float = 0.5) -> dict:
             "separation": round(mean(attack_scores) - mean(benign_scores), 3),
         }
 
-    clean = summarise("clean", _window_scores(corpus, forest, extractor))
+    clean = summarise("clean", _window_scores(corpus, forest, extractor, threshold))
 
     # The evasions are scored by putting the mimicked or diluted events back
     # into a copy of the corpus, so the same code path scores all three.
@@ -305,7 +337,7 @@ def evaluate(corpus: dict, threshold: float = 0.5) -> dict:
                 copy["windows"].append({**window, "events": replacement})
             else:
                 copy["windows"].append(window)
-        return summarise(name, _window_scores(copy, forest, extractor))
+        return summarise(name, _window_scores(copy, forest, extractor, threshold))
 
     results = [clean]
     for label in sorted(technique_labels):
@@ -319,7 +351,9 @@ def evaluate(corpus: dict, threshold: float = 0.5) -> dict:
 
     surviving = [r for r in results[1:] if r["separation"] >= clean["separation"] * 0.5]
     return {
-        "threshold": threshold,
+        "threshold": round(threshold, 4),
+        "threshold_percentile": percentile,
+        "calibrated": True,
         "features": list(FEATURES),
         "trained_on_events": len(benign),
         "results": results,
@@ -332,6 +366,8 @@ def format_report(result: dict) -> str:
     lines = [
         "An isolation forest trained on %d benign events, %d features." % (
             result["trained_on_events"], len(result["features"])),
+        "Threshold %.4f, taken from the %gth percentile of the benign scores." % (
+            result["threshold"], result.get("threshold_percentile", 95)),
         "",
         "%-30s %8s %9s %11s" % ("scenario", "benign", "attack", "separation"),
         "-" * 62,
