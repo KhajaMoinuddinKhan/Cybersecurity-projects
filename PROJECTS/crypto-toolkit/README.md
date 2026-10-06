@@ -74,15 +74,41 @@ attacks on this machine.
 
 ## The console
 
-There is a web console for the case where you want to watch rather than type.
-One command starts it, it binds to the loopback address, and the page that opens
-has the four attacks as buttons: press one and it generates its own key, nonce
-and messages, mounts the attack, and shows you what it recovered or forged and
-whether the genuine implementation accepted it. Alongside them are the
-primitives -- a hash, an HMAC, and a seal and open pair where you can flip a
-nibble of the tag and watch the decryption path refuse it.
+There is a web console for the case where you would rather watch than type. One
+command starts it, it binds to the loopback address, and the page that opens has
+the four attacks as buttons. Press one and it makes up its own key, nonce and
+messages, mounts the attack, and shows you what it recovered or forged and
+whether the genuine implementation accepted it.
 
-![The web console with all four attacks run](docs/screenshots/05-web-console.png)
+![The attacks view, with all four run](docs/screenshots/05-the-attacks-view.png)
+
+The panels are the argument. The length-extension card prints the forged MAC and
+the fact that the real MAC function accepted it, and directly underneath, the
+same forgery refused by HMAC -- which is the difference between a hash and a MAC
+in one line of output. The GCM card puts the subkey it recovered next to the
+subkey the key actually has, and they are the same sixteen bytes; below that it
+prints a tag it forged for a message it chose, and the real decryption path
+accepts it. The padding oracle reports the plaintext it recovered and how many
+yes-or-no questions it took to get there, which is a few thousand, and that
+number is the point -- a leak of one bit per query is still a leak. The ECDSA
+card prints the recovered private key and the real one, and they are the same
+number: no search and no lattice, just the algebra falling out of two signatures
+that shared a nonce.
+
+Press any of those buttons again and everything on the panel changes. The keys,
+the nonces and the demo messages are all generated at the moment you press it,
+so what you are looking at cannot be a recording of an earlier run.
+
+The primitives are on the same page, and they take whatever you type:
+
+![The primitives view](docs/screenshots/06-the-primitives-view.png)
+
+A hash, an HMAC, and a seal and open pair. The sealing path takes a key, a nonce
+and any associated data and hands back a ciphertext and a tag; the opening path
+verifies the tag before it decrypts anything; and the third button flips one
+nibble of the tag so you can watch it refuse. That refusal is the promise
+`GCM.decrypt` makes in the library, which is the only reason the button is worth
+having.
 
 It is a standard-library server and one self-contained page, and both of those
 are deliberate. The server is `http.server` because this project's rule is that
@@ -97,6 +123,7 @@ with no network.
 It is also not a service. It binds to `127.0.0.1` and nothing else by default,
 because it will encrypt whatever you paste into it with whatever key you paste
 in, and that is not a thing to put on a network.
+
 
 ## Why write a cipher out by hand
 
