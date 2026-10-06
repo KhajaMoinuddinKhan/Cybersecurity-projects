@@ -105,6 +105,7 @@
   <button role="tab" aria-selected="true" data-view="attacks">Attacks</button>
   <button role="tab" aria-selected="false" data-view="primitives">Primitives</button>
   <button role="tab" aria-selected="false" data-view="vectors">Published vectors</button>
+      <button role="tab" aria-selected="false" data-view="postquantum">Post-quantum</button>
 </nav>
 
 <main>
@@ -159,6 +160,38 @@
           <pre id="gcm-out">(nothing yet)</pre>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="view-postquantum" hidden>
+    <div class="card">
+      <h2>RSA against ML-KEM</h2>
+      <p>The comparison the project set out to make, measured here rather than quoted from
+        anywhere. The security column is taken from the standards -- NIST SP 800-57 Part 1
+        Rev 5 Table 2 for RSA, the security categories of FIPS 203 Section 8 for ML-KEM --
+        and a key size the cited table does not cover would be reported as unquoted rather
+        than guessed at.</p>
+      <div class="fields">
+        <div class="row"><button class="run" data-action="benchmark">Measure it</button></div>
+        <pre id="bench-out">(nothing yet)</pre>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>RSA-OAEP</h2>
+        <p>The PKCS #1 padding over this project's own RSA. A key is generated for each press,
+          the message is sealed and opened again, and then one bit of the ciphertext is flipped
+          to show the decoder refusing it rather than returning something wrong.</p>
+        <div class="fields">
+          <div><label for="rsa-msg">message (at most 190 bytes under a 2048-bit key)</label>
+            <input id="rsa-msg" value="the transfer is approved"></div>
+          <div class="row"><button class="run" data-action="rsa">Seal and open</button></div>
+          <pre id="rsa-out">(nothing yet)</pre>
+        </div>
+      </div>
+
       <div class="card">
         <h2>ML-KEM</h2>
         <p>FIPS 203. A key pair is generated, a shared secret is encapsulated to the public
@@ -208,6 +241,12 @@
       blurb: "Two signatures that share a nonce hand over the private key outright. No root " +
              "finding, no extra messages." }
   ];
+
+  function pad(value) {
+    var s = String(value);
+    while (s.length < 8) { s = " " + s; }
+    return s;
+  }
 
   function el(tag, cls, text) {
     var node = document.createElement(tag);
@@ -356,6 +395,52 @@
         ciphertext: state.ciphertext, tag: flipped, aad: state.aad
       }, "gcm-out");
     },
+    rsa: function () {
+      var out = document.getElementById("rsa-out");
+      out.textContent = "generating a key, sealing and opening...";
+      fetch("/api/rsa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: document.getElementById("rsa-msg").value })
+      })
+        .then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); })
+        .then(function (res) {
+          if (res.status !== 200) { out.textContent = "refused: " + (res.body.error || "bad request"); return; }
+          var p = res.body;
+          out.textContent = [
+            "a fresh " + (p.modulus_bytes * 8) + "-bit key was generated for this press",
+            "  " + p.message_bytes + " bytes of message became " + p.ciphertext_bytes + " bytes of ciphertext",
+            "  ciphertext  " + p.ciphertext.slice(0, 44) + "...  (" + (p.ciphertext.length / 2) + " bytes)",
+            "  message     " + JSON.stringify(p.message),
+            "  the message came back: " + p.message_recovered,
+            "  one bit flipped -> " + (p.tampered_ciphertext_refused
+              ? "refused by the decoder" : "NOT REFUSED")
+          ].join("\n");
+        })
+        .catch(function (err) { out.textContent = "the request failed: " + err; });
+    },
+    benchmark: function () {
+      var out = document.getElementById("bench-out");
+      out.textContent = "generating a key and timing a few operations...";
+      fetch("/api/benchmark").then(function (r) { return r.json(); }).then(function (p) {
+        var rows = p.rsa.concat(p.mlkem);
+        var head = ["scheme", "public", "private", "ciphertext", "keygen", "encaps", "decaps", "strength"];
+        var lines = [head.map(pad).join(" ")];
+        rows.forEach(function (row) {
+          var strength = (row.security_bits === null) ? "unquoted"
+            : (row.security_bits === 0 ? "not standard" : row.security_bits + " bits");
+          lines.push([
+            pad(row.name), pad(row.public_key_bytes), pad(row.private_key_bytes),
+            pad(row.ciphertext_bytes), pad(row.keygen_ms.toFixed(2) + "ms"),
+            pad(row.encapsulate_ms.toFixed(2) + "ms"), pad(row.decapsulate_ms.toFixed(2) + "ms"),
+            pad(strength)
+          ].join(" "));
+        });
+        out.textContent = lines.join("\n") + "\n\n" + p.notes.map(function (n) {
+          return "  " + n;
+        }).join("\n\n");
+      }).catch(function (err) { out.textContent = "the measurement failed: " + err; });
+    },
     mlkem: function () {
       var out = document.getElementById("mlkem-out");
       out.textContent = "generating a key pair, encapsulating and decapsulating...";
@@ -437,7 +522,7 @@
       document.querySelectorAll("nav button").forEach(function (other) {
         other.setAttribute("aria-selected", String(other === tab));
       });
-      ["attacks", "primitives", "vectors"].forEach(function (view) {
+      ["attacks", "primitives", "vectors", "postquantum"].forEach(function (view) {
         document.getElementById("view-" + view).hidden = (view !== tab.dataset.view);
       });
     });

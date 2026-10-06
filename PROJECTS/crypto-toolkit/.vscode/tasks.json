@@ -2,9 +2,9 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "crypto-toolkit: the web console",
+      "label": "crypto-toolkit: the post-quantum benchmark",
       "type": "shell",
-      "command": "../../.venv/Scripts/python.exe -m src.cli serve",
+      "command": "../../.venv/Scripts/python.exe -m src.cli benchmark --rsa-bits 2048 3072",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -17,6 +17,48 @@
       "group": {
         "kind": "build",
         "isDefault": true
+      }
+    },
+    {
+      "label": "crypto-toolkit: ML-KEM",
+      "type": "shell",
+      "command": "../../.venv/Scripts/python.exe -m src.cli mlkem --parameter-set 768",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "crypto-toolkit: RSA-OAEP",
+      "type": "shell",
+      "command": "../../.venv/Scripts/python.exe -m src.cli rsa \"the transfer is approved\"",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "crypto-toolkit: the web console",
+      "type": "shell",
+      "command": "../../.venv/Scripts/python.exe -m src.cli serve",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
       }
     },
     {

@@ -299,3 +299,73 @@ def test_the_mlkem_sizes_on_the_page_are_the_standards(server):
     assert payload["ciphertext_bytes"] == 1088
     assert payload["shared_secret_bytes"] == 32
     assert payload["security_category"] == 3
+
+def test_the_rsa_endpoint_seals_opens_and_refuses_a_tampered_ciphertext(server):
+    """The whole exchange on one press, with a key generated for that press.
+
+    Run it twice and the ciphertext must differ: a value that repeated would be
+    one that was not produced here.
+    """
+    status, body = call(server, "/api/rsa", "POST", {"message": "the transfer is approved"})
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["worked"] is True
+    assert payload["message_recovered"] is True
+    assert payload["tampered_ciphertext_refused"] is True
+    assert payload["modulus_bytes"] == 256
+    assert payload["ciphertext_bytes"] == 256
+    assert len(payload["ciphertext"]) == 512
+
+    status, body = call(server, "/api/rsa", "POST", {"message": "the transfer is approved"})
+    again = json.loads(body)
+    assert again["ciphertext"] != payload["ciphertext"]
+
+
+def test_the_rsa_endpoint_refuses_a_message_too_long_for_the_key(server):
+    """OAEP cannot hold an arbitrarily long message, and the caller is told
+    rather than handed a truncation."""
+    status, body = call(server, "/api/rsa", "POST", {"message": "x" * 400})
+    assert status == 400
+    assert "error" in json.loads(body)
+
+
+def test_the_rsa_endpoint_needs_a_message(server):
+    status, body = call(server, "/api/rsa", "POST", {})
+    assert status == 400
+
+
+def test_the_quick_benchmark_covers_both_families_and_quotes_the_standards(server):
+    """A page that printed security figures without saying where they came from
+    would be the easiest thing here to misread."""
+    status, body = call(server, "/api/benchmark")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["quick"] is True
+    names = [row["name"] for row in payload["rsa"] + payload["mlkem"]]
+    assert "RSA-2048" in names
+    for name in ("ML-KEM-512", "ML-KEM-768", "ML-KEM-1024"):
+        assert name in names
+    strengths = {row["name"]: row["security_bits"] for row in payload["rsa"] + payload["mlkem"]}
+    assert strengths["RSA-2048"] == 112
+    assert strengths["ML-KEM-768"] == 192
+    assert any("SP 800-57" in note or "FIPS 203" in note for note in payload["notes"])
+    assert any("quick measurement" in note for note in payload["notes"])
+
+
+def test_the_quick_benchmark_sizes_are_the_standards(server):
+    """Measured from real keys, so they must equal what the standards specify."""
+    status, body = call(server, "/api/benchmark")
+    rows = {row["name"]: row for row in json.loads(body)["mlkem"]}
+    assert rows["ML-KEM-512"]["public_key_bytes"] == 800
+    assert rows["ML-KEM-512"]["ciphertext_bytes"] == 768
+    assert rows["ML-KEM-768"]["public_key_bytes"] == 1184
+    assert rows["ML-KEM-1024"]["ciphertext_bytes"] == 1568
+    assert rows["ML-KEM-1024"]["private_key_bytes"] == 3168
+
+
+def test_the_postquantum_view_is_served_and_still_fetches_nothing():
+    """The page grew a tab, and the rule it holds to has to survive that."""
+    assert 'data-view="postquantum"' in PAGE
+    assert 'id="view-postquantum"' in PAGE
+    assert '"/api/rsa"' in PAGE or "'/api/rsa'" in PAGE
+    assert "/api/benchmark" in PAGE

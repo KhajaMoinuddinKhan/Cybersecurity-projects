@@ -113,6 +113,23 @@ nibble of the tag so you can watch it refuse. That refusal is the promise
 `GCM.decrypt` makes in the library, which is the only reason the button is worth
 having.
 
+The page has a fourth view for the post-quantum half. It runs the comparison
+live rather than showing recorded numbers, and prints the caveats underneath
+them, because a table of figures with no note on how they were produced is the
+easiest thing here to misread:
+
+![The post-quantum comparison](docs/screenshots/07-the-post-quantum-comparison.png)
+
+RSA-OAEP and ML-KEM sit below it. Both generate their keys on the press, so the
+ciphertext and the shared secret change every time -- which is the one property a
+reader cannot check for themselves if the page shows a stored result.
+
+![RSA-OAEP and ML-KEM](docs/screenshots/08-rsa-and-ml-kem.png)
+
+The comparison in the browser is a reduced measurement: one 2048-bit RSA key and
+three operations per scheme, so the page answers while you are still looking at
+it. The command line runs the full one, RSA-3072 included.
+
 It is a standard-library server and one self-contained page, and both of those
 are deliberate. The server is `http.server` because this project's rule is that
 nothing under `src/` imports a third-party package, and that rule is checked by

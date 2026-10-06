@@ -33,10 +33,15 @@ from .cbc import CBC, PaddingError, pkcs7_unpad
 from .ecdsa import P256_N, PrivateKey, generate_private_key, sign, verify
 from .gcm import GCM, InvalidTag
 from .hmac import hmac_sha256, hmac_sha256_hex
+from .benchmark import run as benchmark_run
 from .mlkem import MLKEM_768
 from .mlkem import decapsulate as mlkem_decapsulate
 from .mlkem import encapsulate_random as mlkem_encapsulate
 from .mlkem import generate_key_pair as mlkem_keygen
+from .rsa import DecryptionError
+from .rsa import decrypt as rsa_decrypt
+from .rsa import encrypt as rsa_encrypt
+from .rsa import generate_key_pair as rsa_keygen
 from .sha256 import sha256, sha256_hex
 
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "console.html"
@@ -198,6 +203,60 @@ def run_mlkem() -> dict:
     }
 
 
+def run_rsa(message: str) -> dict:
+    """Generate a key, seal a message, open it again, and refuse a tampered one.
+
+    The whole exchange happens here rather than being split across requests, so
+    the page never has to hold a private key. That also means the key is fresh
+    every time the button is pressed, which is the property a reader cannot
+    check for themselves if the page shows a stored result.
+    """
+    public, private = rsa_keygen(2048)
+    payload = message.encode("utf-8")
+    ciphertext = rsa_encrypt(public, payload)
+    recovered = rsa_decrypt(private, ciphertext)
+
+    tampered = bytearray(ciphertext)
+    tampered[-1] ^= 0x01
+    try:
+        rsa_decrypt(private, bytes(tampered))
+        refused = False
+    except DecryptionError:
+        refused = True
+
+    return {
+        "worked": recovered == payload and refused,
+        "modulus_bytes": public.size_bytes(),
+        "message_bytes": len(payload),
+        "ciphertext_bytes": len(ciphertext),
+        "message_recovered": recovered == payload,
+        "tampered_ciphertext_refused": refused,
+        "ciphertext": ciphertext.hex(),
+        "message": message,
+    }
+
+
+def run_quick_benchmark() -> dict:
+    """A reduced measurement, sized for a button press rather than a terminal.
+
+    RSA-3072 key generation takes seconds, and the page should answer while
+    somebody is still looking at it, so this measures one 2048-bit key and three
+    operations per scheme. The command line runs the full comparison. The result
+    says which one this is, because a page showing numbers without saying how
+    they were produced is the easiest thing here to misread.
+    """
+    result = benchmark_run(rsa_bits=(2048,), include_toy=False,
+                           keygen_iterations=1, mlkem_keygen_iterations=1,
+                           operation_iterations=3)
+    result["quick"] = True
+    result["notes"] = [
+        "This is the quick measurement: one 2048-bit RSA key and three operations "
+        "per scheme, so the page answers while you are still looking at it. "
+        "`python -m src.cli benchmark` runs the full comparison including RSA-3072.",
+    ] + result["notes"]
+    return result
+
+
 def published_vectors() -> dict:
     """Re-check the published GCM examples and the FIPS and RFC digests."""
 
@@ -261,6 +320,13 @@ def _hex(value, field):
         raise ValueError("%s is not valid hex: %s" % (field, exc)) from exc
 
 
+def api_rsa(payload: dict) -> dict:
+    message = payload.get("message")
+    if not isinstance(message, str):
+        raise ValueError("message must be a string")
+    return run_rsa(message)
+
+
 def api_hash(payload: dict) -> dict:
     data = payload.get("data", "")
     if not isinstance(data, str):
@@ -307,6 +373,7 @@ POST_ROUTES = {
     "/api/hmac": api_hmac,
     "/api/gcm/seal": api_seal,
     "/api/gcm/open": api_open,
+    "/api/rsa": api_rsa,
 }
 
 
@@ -353,6 +420,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/mlkem":
             self._json(200, run_mlkem())
+        if path == "/api/benchmark":
+            self._json(200, run_quick_benchmark())
         if path == "/api/vectors":
             self._json(200, published_vectors())
             return
