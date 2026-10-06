@@ -42,17 +42,42 @@ __all__ = [
     "format_report",
 ]
 
-# The observable properties of an event. Deliberately shallow: these are things
-# an attacker can change, which is what makes the evasion test meaningful.
+# The observable properties of an event.
+#
+# The first set of features described the event's *shape* -- its id, its channel,
+# its message length, whether its image sat in System32 -- and it did not work.
+# Measured on the corpus, the technique's own events scored as more normal than
+# background activity (separation -0.067): living-off-the-land discovery runs
+# cmd.exe and powershell.exe out of System32, so a feature that calls System32
+# benign calls the technique benign too. It rewarded the attacker.
+#
+# The signal is in what the command line *says*, so that is what these read.
+# They are still observable and still shallow -- an attacker can rename a binary
+# or pad a command, which is what keeps the evasion test meaningful -- but they
+# describe behaviour rather than provenance.
 FEATURES = (
     "event_id",
     "channel_index",
-    "level_index",
     "message_length",
-    "has_network_destination",
-    "image_is_system",
+    "command_length",
+    "command_token_count",
+    "discovery_verbs",
+    "shell_process",
     "hour_of_day",
 )
+
+# The words a discovery technique actually uses. Taken from the techniques in the
+# attack lab rather than from a list of everything that sounds suspicious: a
+# detector that fires on "whoami" appearing in a path is worse than no detector.
+_DISCOVERY_VERBS = (
+    "systeminfo", "tasklist", "get-process", "pslist",
+    "whoami", "get-localuser", "net user", "query user",
+    "ipconfig", "netsh interface show", "netsh advfirewall firewall show",
+    "arp -a", "net config", "get-netipconfiguration",
+    "reg query", "uninstall", "win32_product", "get-computerinfo",
+)
+
+_SHELLS = ("cmd.exe", "powershell.exe", "pwsh.exe", "wmic.exe", "wscript.exe", "cscript.exe")
 
 _CHANNEL_ORDER = (
     "Security",
@@ -88,8 +113,9 @@ class FeatureExtractor:
     def vector(self, event: dict) -> list[float]:
         fields = event.get("fields") or {}
         message = str(event.get("message") or "")
-        image = str(fields.get("Image") or "")
-        destination = fields.get("DestinationIp") or fields.get("DestinationHostname")
+        command = str(fields.get("CommandLine") or "")
+        image = str(fields.get("Image") or "").lower()
+        lowered = command.lower()
         try:
             event_id = float(event.get("event_id") or 0)
         except (TypeError, ValueError):
@@ -97,10 +123,11 @@ class FeatureExtractor:
         return [
             event_id,
             float(_index_of(str(event.get("channel") or ""), _CHANNEL_ORDER)),
-            float(_index_of(str(event.get("level") or ""), _LEVEL_ORDER)),
             float(min(len(message), 2000)),
-            1.0 if destination else 0.0,
-            1.0 if "\\Windows\\System32" in image else 0.0,
+            float(min(len(command), 4000)),
+            float(len(command.split())),
+            float(sum(1 for verb in _DISCOVERY_VERBS if verb in lowered)),
+            1.0 if any(image.endswith(shell) for shell in _SHELLS) else 0.0,
             float(_hour_of(event.get("timestamp"))),
         ]
 
@@ -191,6 +218,74 @@ class IsolationForest:
 
     def score_all(self, vectors: list[list[float]]) -> list[float]:
         return [self.score(vector) for vector in vectors]
+
+
+class CommandLanguageModel:
+    """Scores a command line by how unlikely its words are, given the benign ones.
+
+    An isolation forest cannot use a feature that is constant in its training
+    data, and the benign data has no discovery verbs in it -- so "contains
+    tasklist" is an axis the forest never splits on, and the technique's events
+    travel the same path as ordinary activity however loud that axis is. The
+    feature that carries the signal is invisible to the model by construction.
+
+    A language model has no such blind spot. It learns the vocabulary and the
+    transitions of the commands this host normally runs, and reports how
+    surprising a new one is. A command using a word nobody has used before is
+    surprising, which is the whole of the idea -- and it needs no labels, so it
+    is still unsupervised.
+
+    It is a bigram model with add-one smoothing, which is the simplest thing that
+    can be argued with. The score is the mean negative log probability per token:
+    low is familiar, high is not.
+    """
+
+    def __init__(self, smoothing: float = 1.0):
+        self.smoothing = smoothing
+        self.unigrams: dict[str, int] = {}
+        self.bigrams: dict[tuple[str, str], int] = {}
+        self.vocabulary: set[str] = set()
+        self.tokens_seen = 0
+
+    @staticmethod
+    def tokenise(command: str) -> list[str]:
+        import re
+        return re.findall(r"[A-Za-z0-9_.\\/:-]+", str(command or "").lower())
+
+    def fit(self, commands) -> "CommandLanguageModel":
+        for command in commands:
+            tokens = self.tokenise(command)
+            if not tokens:
+                continue
+            self.tokens_seen += len(tokens)
+            for token in tokens:
+                self.unigrams[token] = self.unigrams.get(token, 0) + 1
+                self.vocabulary.add(token)
+            for left, right in zip(tokens, tokens[1:]):
+                key = (left, right)
+                self.bigrams[key] = self.bigrams.get(key, 0) + 1
+        return self
+
+    def score(self, command: str) -> float:
+        """Mean negative log probability per token. Higher means stranger."""
+        tokens = self.tokenise(command)
+        if not tokens:
+            return 0.0
+        size = max(1, len(self.vocabulary))
+        total = 0.0
+        for index, token in enumerate(tokens):
+            if index == 0:
+                numerator = self.unigrams.get(token, 0) + self.smoothing
+                denominator = self.tokens_seen + self.smoothing * size
+            else:
+                previous = tokens[index - 1]
+                numerator = self.bigrams.get((previous, token), 0) + self.smoothing
+                denominator = self.unigrams.get(previous, 0) + self.smoothing * size
+            total += -math.log(numerator / denominator)
+        return total / len(tokens)
+
+    def score_all(self, commands) -> list[float]:
+        return [self.score(command) for command in commands]
 
 
 def _average_path_length(n: int) -> float:
@@ -292,6 +387,24 @@ def evade_by_dilution(events: list[dict], benign: list[dict], factor: int = 10,
     return list(events) + flood
 
 
+def _technique_events(corpus: dict) -> list[dict]:
+    """The events a discovery technique produced, as opposed to its window's noise.
+
+    Identified by the command line, because that is the only thing in the
+    telemetry that distinguishes "the machine was asked what it is" from "the
+    machine did something ordinary at the same moment".
+    """
+    found = []
+    for window in corpus["windows"]:
+        if window["label"] == "benign":
+            continue
+        for event in window["events"]:
+            command = str((event.get("fields") or {}).get("CommandLine") or "").lower()
+            if any(verb in command for verb in _DISCOVERY_VERBS):
+                found.append(event)
+    return found
+
+
 def evaluate(corpus: dict, threshold: float | None = None,
              percentile: float = 95.0) -> dict:
     """Train on benign windows, then score every window, clean and evaded.
@@ -328,6 +441,52 @@ def evaluate(corpus: dict, threshold: float | None = None,
 
     clean = summarise("clean", _window_scores(corpus, forest, extractor, threshold))
 
+    # The window number answers "would an analyst be told?", and it is diluted by
+    # however much ordinary activity shares the window -- measured on this corpus,
+    # between 88 and 100 per cent of it. This second number answers the prior
+    # question: can the detector see the technique at all? It scores only the
+    # events the technique itself produced. When this one is at or below zero the
+    # window number is noise, and no amount of threshold tuning will help.
+    technique_events = _technique_events(corpus)
+    benign_scores = forest.score_all(benign_vectors)
+    if technique_events:
+        technique_vectors = [extractor.vector(event) for event in technique_events]
+        technique_scores = forest.score_all(technique_vectors)
+        benign_rate = sum(1 for s in benign_scores if s > threshold) / len(benign_scores)
+        technique_rate = sum(1 for s in technique_scores if s > threshold) / len(technique_scores)
+        visibility = {
+            "events": len(technique_events),
+            "benign_flagged": round(benign_rate, 3),
+            "technique_flagged": round(technique_rate, 3),
+            "separation": round(technique_rate - benign_rate, 3),
+        }
+    else:
+        visibility = {"events": 0, "technique_flagged": None, "benign_flagged": None,
+                      "separation": None}
+
+    # The same question, asked of the model that can see the words.
+    benign_commands = [str((e.get("fields") or {}).get("CommandLine") or "") for e in benign]
+    benign_commands = [c for c in benign_commands if c.strip()]
+    technique_commands = [str((e.get("fields") or {}).get("CommandLine") or "") for e in technique_events]
+    if benign_commands and technique_commands:
+        language = CommandLanguageModel().fit(benign_commands)
+        familiar = language.score_all(benign_commands)
+        strange = language.score_all(technique_commands)
+        # the same 95th-percentile convention, so the two models are comparable
+        ordered = sorted(familiar)
+        cut = ordered[min(len(ordered) - 1, int(0.95 * (len(ordered) - 1)))]
+        visibility["language_model"] = {
+            "trained_on_commands": len(benign_commands),
+            "benign_flagged": round(sum(1 for s in familiar if s > cut) / len(familiar), 3),
+            "technique_flagged": round(sum(1 for s in strange if s > cut) / len(strange), 3),
+            "separation": round(
+                sum(1 for s in strange if s > cut) / len(strange)
+                - sum(1 for s in familiar if s > cut) / len(familiar), 3),
+            "threshold": round(cut, 3),
+            "mean_benign_score": round(sum(familiar) / len(familiar), 3),
+            "mean_technique_score": round(sum(strange) / len(strange), 3),
+        }
+
     # The evasions are scored by putting the mimicked or diluted events back
     # into a copy of the corpus, so the same code path scores all three.
     def rescore(name: str, replacement: list[dict], label: str) -> dict:
@@ -351,6 +510,7 @@ def evaluate(corpus: dict, threshold: float | None = None,
 
     surviving = [r for r in results[1:] if r["separation"] >= clean["separation"] * 0.5]
     return {
+        "visibility": visibility,
         "threshold": round(threshold, 4),
         "threshold_percentile": percentile,
         "calibrated": True,
@@ -376,6 +536,16 @@ def format_report(result: dict) -> str:
         lines.append("%-30s %8.3f %9.3f %11.3f" % (
             row["name"][:30], row["mean_flagged_benign"], row["mean_flagged_attack"],
             row["separation"]))
+    if result.get("visibility", {}).get("technique_flagged") is not None:
+        v = result["visibility"]
+        lines.append("")
+        lines.append("Of %d events the techniques themselves produced, %.1f%% were flagged "
+                     "against %.1f%% of benign events (separation %.3f)."
+                     % (v["events"], v["technique_flagged"] * 100, v["benign_flagged"] * 100,
+                        v["separation"] or 0.0))
+        if (v["separation"] or 0.0) <= 0.01:
+            lines.append("The detector cannot see the techniques. The window figures above "
+                         "are noise, and tuning the threshold will not change that.")
     lines.append("")
     lines.append("separation is the mean fraction of events flagged anomalous: attack minus benign.")
     lines.append("%d of %d evasion attempts left at least half the separation intact."

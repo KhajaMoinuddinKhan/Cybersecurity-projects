@@ -14,8 +14,11 @@ from src.anomaly import (FEATURES, FeatureExtractor, IsolationForest, _average_p
 
 
 def _event(event_id="1", channel="System", level="Information", message="m",
-           destination=None, image=r"C:\Windows\System32\svchost.exe", timestamp="2026-10-07T12:00:00"):
+           destination=None, image=r"C:\Windows\System32\svchost.exe",
+           timestamp="2026-10-07T12:00:00", command=""):
     fields = {"Image": image}
+    if command:
+        fields["CommandLine"] = command
     if destination:
         fields["DestinationIp"] = destination
     return {"event_id": event_id, "channel": channel, "level": level, "message": message,
@@ -29,17 +32,59 @@ def test_the_feature_vector_has_the_declared_width():
 
 def test_the_features_react_to_the_event():
     extractor = FeatureExtractor()
-    plain = extractor.vector(_event(destination=None))
-    networked = extractor.vector(_event(destination="203.0.113.9"))
-    assert plain[4] == 0.0 and networked[4] == 1.0
+    plain = extractor.vector(_event(message="m"))
     long_message = extractor.vector(_event(message="x" * 500))
-    assert long_message[3] > plain[3]
+    assert long_message[2] > plain[2]
 
 
-def test_a_non_system_image_is_distinguished():
+def test_a_shell_process_is_distinguished():
     extractor = FeatureExtractor()
-    assert extractor.vector(_event(image=r"C:\Windows\System32\svchost.exe"))[5] == 1.0
-    assert extractor.vector(_event(image=r"C:\Temp\evil.exe"))[5] == 0.0
+    assert extractor.vector(_event(image=r"C:\Windows\System32\cmd.exe"))[6] == 1.0
+    assert extractor.vector(_event(image=r"C:\Program Files\App\app.exe"))[6] == 0.0
+
+
+def test_the_command_features_read_what_the_command_says():
+    """The signal is in the words, so the features have to read them.
+
+    The first feature set described the event's shape and scored the technique's
+    own events as more normal than background activity: living-off-the-land
+    discovery runs cmd.exe out of System32, so a feature calling System32 benign
+    called the technique benign too.
+    """
+    extractor = FeatureExtractor()
+    ordinary = extractor.vector(_event(command=r"C:\Windows\System32\cmd.exe /C dir"))
+    discovery = extractor.vector(
+        _event(command=r'C:\Windows\System32\cmd.exe /C "whoami /all ; ipconfig /all"'))
+    assert discovery[5] > ordinary[5]          # discovery verbs
+    assert discovery[3] > ordinary[3]          # command length
+    assert discovery[4] >= ordinary[4]         # token count
+    assert ordinary[5] == 0.0
+
+
+def test_a_command_line_that_is_absent_does_not_raise():
+    vector = FeatureExtractor().vector({"fields": {}})
+    assert vector[3] == 0.0 and vector[4] == 0.0 and vector[5] == 0.0
+
+
+def test_the_language_model_scores_a_novel_word_as_surprising():
+    """The model the forest cannot be: it sees words the training data never had."""
+    from src.anomaly import CommandLanguageModel
+    model = CommandLanguageModel().fit([
+        r"C:\Windows\System32\cmd.exe /C dir",
+        r"C:\Windows\System32\cmd.exe /C echo hello",
+    ])
+    familiar = model.score(r"C:\Windows\System32\cmd.exe /C dir")
+    strange = model.score(r"C:\Windows\System32\cmd.exe /C whoami /all")
+    assert strange > familiar
+
+
+def test_the_language_model_is_empty_safe():
+    from src.anomaly import CommandLanguageModel
+    model = CommandLanguageModel()
+    # an unfitted model has one token in its vocabulary of one, so nothing is
+    # surprising yet -- what matters is that it answers instead of dividing by zero
+    assert model.score("anything at all") >= 0.0
+    assert model.score("") == 0.0
 
 
 def test_a_missing_event_id_does_not_raise():

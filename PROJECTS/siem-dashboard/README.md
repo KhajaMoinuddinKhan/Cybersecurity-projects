@@ -485,10 +485,40 @@ window it is shown, benign ones included, and `sysmon-lsass-access` and
 context rather than an alert, so it does not fill the queue, but it also does not
 discriminate.
 
-The anomaly detector is not deployable. On the captured corpus it separates
-attack windows from benign ones only weakly, and it flags a large share of the
-benign events as anomalous -- a detector that finds the signal and far too much
-else.
+The anomaly detector does not work, and the reason is worth more than the result.
+
+The first feature set described an event's *shape* -- its id, its channel, its
+message length, whether its image sat in System32 -- and it scored the technique's
+own events as more normal than background activity. That is not a tuning problem,
+it is the features being wrong: living-off-the-land discovery runs `cmd.exe` and
+`powershell.exe` out of System32, so a feature that calls System32 benign calls
+the technique benign too. It rewarded the attacker.
+
+The features were replaced with ones that read what the command line says, and
+the detector still could not see the techniques -- because of a property of the
+model rather than of the data. An isolation forest is trained on the benign
+events, and the benign events contain no discovery verbs, so that feature is
+constant in training and **never chosen for a split**. The axis that carries the
+signal is invisible to the model by construction, however loud it is at scoring
+time. A detector built this way can only flag points that are extreme along axes
+it saw vary, and the axis that matters is one it never saw vary at all.
+
+A command language model was added for exactly that reason: it learns the
+vocabulary and transitions of the commands this host normally runs and reports how
+surprising a new one is, so a word nobody has used before is visible to it. It
+could not be measured on this corpus either, and that is the finding underneath
+both failures.
+
+**The corpus's benign windows contain no process creation at all.** Forty-five
+benign events, every one of them a network connection, a PowerShell script block
+or a Defender record, and not one with a command line. The technique's events all
+have one. So there is no baseline of ordinary commands for either model to learn
+from, and the question the detector was asked -- is this command unusual for this
+host? -- cannot be answered from data in which the host never ran a command.
+
+The fix is in the capture rather than in the model: a benign window has to be
+captured during genuine ordinary activity that includes process creation, because
+a window in which nothing runs is not a baseline, it is an absence.
 
 Read this before treating a clean dashboard as a clean machine.
 
