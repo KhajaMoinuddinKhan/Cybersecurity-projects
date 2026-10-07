@@ -28,6 +28,7 @@ jobs:
           - PROJECTS/crypto-toolkit
           - PROJECTS/scoped-assessment
           - PROJECTS/posture-assessment
+          - PROJECTS/ad-attack-paths
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

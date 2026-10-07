@@ -1,0 +1,3 @@
+# Reading the collector's JSON needs nothing beyond the standard library.
+# The tests read real archives and assert on the parsed result, so there is no
+# parser dependency to pin.
