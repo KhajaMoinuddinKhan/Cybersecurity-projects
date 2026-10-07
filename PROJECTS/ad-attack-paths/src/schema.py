@@ -343,8 +343,12 @@ def _build_node(entry: dict, kind: str, source_file: str) -> Node | None:
                   right=str(ace.get("RightName") or ""),
                   inherited=bool(ace.get("IsInherited")))
               for ace in (entry.get("Aces") or []) if ace.get("PrincipalSID")],
-        members=[str(m.get("ObjectIdentifier") or "") for m in (entry.get("Members") or [])
-                 if m.get("ObjectIdentifier")],
+        # Members arrive as objects in one collector's output and as bare identifiers
+        # in another's. Everywhere else in this file both shapes are accepted; here the
+        # dict was assumed, and a collection with plain strings ended the analysis with
+        # an AttributeError before anything was reported.
+        members=[_identifier({"m": m}, "m") for m in (entry.get("Members") or [])
+                 if _identifier({"m": m}, "m")],
         sessions=[sid for sid in (_session_sid(s) for s in _collection(entry, "Sessions"))
                   if sid],
         privileged_sessions=[sid for sid in

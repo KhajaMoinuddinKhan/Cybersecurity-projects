@@ -162,6 +162,12 @@ def _add_access_control_edges(graph: AttackGraph, node: Node) -> None:
         if right is None:
             graph.unknown_rights.setdefault(node.sid, set()).add(ace.right)
             continue
+        # The holder has to be an object in the collection. An entry naming a principal
+        # that was not collected produced an edge to nothing, and a traversal would
+        # follow it to a node that does not exist.
+        if ace.principal_sid not in graph.data.nodes:
+            graph.unknown_references.setdefault(node.sid, set()).add(ace.principal_sid)
+            continue
         if right.traverses == "forward":
             source, target = ace.principal_sid, node.sid
         else:
@@ -178,21 +184,25 @@ def _add_membership_edges(graph: AttackGraph, node: Node) -> None:
     """
     if node.kind == "group":
         for member_sid in node.members:
+            if member_sid not in graph.data.nodes:
+                graph.unknown_references.setdefault(node.sid, set()).add(member_sid)
+                continue
             graph.add(Edge(source=member_sid, target=node.sid, kind="membership",
                            right="MemberOf",
                            capability=capability_of("MemberOf"),
                            note="the member holds every right the group holds"))
     if node.primary_group and node.kind in ("user", "computer"):
-        graph.add(Edge(source=node.sid, target=node.primary_group, kind="membership",
-                       right="MemberOf", capability=capability_of("MemberOf"),
-                       note="the primary group is a membership the collector records "
-                            "separately from the member list"))
-    # SID history is a membership in reverse: the token carries the SID, so whoever
-    # controls the object holding the history controls the principal.
-    for history_sid in node.sid_history:
-        graph.add(Edge(source=node.sid, target=history_sid, kind="membership",
-                       right="HasSIDHistory", capability=capability_of("HasSIDHistory"),
-                       note="the principal's token carries this SID"))
+        if node.primary_group not in graph.data.nodes:
+            graph.unknown_references.setdefault(node.sid, set()).add(node.primary_group)
+        else:
+            graph.add(Edge(source=node.sid, target=node.primary_group, kind="membership",
+                           right="MemberOf", capability=capability_of("MemberOf"),
+                           note="the primary group is a membership the collector records "
+                                "separately from the member list"))
+    # SID history is handled in _add_sid_history_edges, which checks that the identifier
+    # was collected. This function also added it, unconditionally, so a resolvable
+    # history entry produced two edges for one relationship and an unresolvable one
+    # produced an edge to nothing.
 
 
 def _add_session_edges(graph: AttackGraph, node: Node) -> None:
@@ -281,7 +291,10 @@ def _add_service_principal_edges(graph: AttackGraph, node: Node) -> None:
         if not isinstance(target, dict):
             continue
         computer_sid = str(target.get("ComputerSID") or "")
-        if not computer_sid or graph.data.get(computer_sid) is None:
+        if not computer_sid:
+            continue
+        if graph.data.get(computer_sid) is None:
+            graph.unknown_references.setdefault(node.sid, set()).add(computer_sid)
             continue
         service = str(target.get("Service") or "")
         right = right_for("SQLAdmin") if "SQL" in service.upper() else None
@@ -349,7 +362,7 @@ def _add_primary_group_edges(graph: AttackGraph, node: Node) -> None:
     if not node.primary_group:
         return
     if graph.data.get(node.primary_group) is None:
-        return
+        return          # already recorded by the membership builder
     graph.add(Edge(source=node.sid, target=node.primary_group, kind="membership",
                    right="MemberOf", capability="membership",
                    note="the primary group, which is membership recorded on the member "
@@ -435,6 +448,7 @@ def _add_policy_change_edges(graph: AttackGraph, node: Node) -> None:
                 continue
             for computer_sid in affected:
                 if graph.data.get(computer_sid) is None:
+                    graph.unknown_references.setdefault(member_sid, set()).add(computer_sid)
                     continue
                 graph.add(Edge(source=member_sid, target=computer_sid, kind="ace",
                                right=right_name, capability=capability_of(right_name) or "access",
@@ -464,7 +478,10 @@ def _add_certificate_authority_edges(graph: AttackGraph, node: Node) -> None:
             continue
         principal = str(ace.get("PrincipalSID") or "")
         right = right_for(str(ace.get("RightName") or ""))
-        if not principal or graph.data.get(principal) is None:
+        if not principal:
+            continue
+        if graph.data.get(principal) is None:
+            graph.unknown_references.setdefault(node.sid, set()).add(principal)
             continue
         if right is None:
             graph.unknown_rights.setdefault(node.sid, set()).add(
@@ -560,8 +577,11 @@ def _add_trust_edges(graph: AttackGraph, node: Node) -> None:
         target = next((other for other in graph.data.by_kind("domain")
                        if other.name.upper() == target_name), None)
         if target is None:
-            graph.unknown_rights.setdefault(node.sid, set()).add(
-                "trust to %s (domain not collected)" % target_name)
+            # A trust is a relationship, and the domain it names was not collected.
+            # Reporting it as a right the table does not know put it in the wrong
+            # section: there is nothing unrecognised about it.
+            graph.unknown_references.setdefault(node.sid, set()).add(
+                "%s (trusted domain not collected)" % target_name)
             continue
         direction = str(trust.get("TrustDirection") or "").strip()
         graph.add(Edge(source=node.sid, target=target.sid, kind="trust",

@@ -455,6 +455,87 @@ def test_every_edge_builder_runs_on_data_that_uses_it(forest, graph):
         "an identifier the collection does not contain must be recorded"
 
 
+def test_no_edge_points_at_an_object_that_was_not_collected(forest, graph):
+    """The invariant the whole graph rests on: every edge joins two objects that exist.
+
+    Three builders did not check. An access control entry naming a principal that was
+    not collected became an edge to nothing, a primary group that was not collected
+    became an edge to nothing, and SID history was added twice -- once checked and once
+    not -- so a resolvable entry produced two edges for one relationship and an
+    unresolvable one produced an edge to a node that does not exist. A traversal follows
+    those and arrives somewhere imaginary.
+    """
+    known = set(forest.nodes)
+    dangling = [(e.source, e.right, e.target) for e in graph.edges
+                if e.source not in known or e.target not in known]
+    assert not dangling, "edges to objects that do not exist: %s" % dangling[:5]
+
+
+def test_sid_history_is_one_edge_per_entry(forest, graph):
+    """It was added by the membership builder and by its own, so a resolvable entry
+    produced two edges for one relationship."""
+    victim = next(n for n in forest.nodes.values() if n.kind == "user")
+    other = next(n for n in forest.nodes.values()
+                 if n.kind == "user" and n.sid != victim.sid)
+    victim.sid_history = [other.sid]
+    try:
+        rebuilt = build_graph(forest)
+        made = [e for e in rebuilt.edges
+                if e.right == "HasSIDHistory" and e.source == victim.sid
+                and e.target == other.sid]
+        assert len(made) == 1, "one relationship, one edge -- got %d" % len(made)
+    finally:
+        victim.sid_history = []
+
+
+def test_a_collection_full_of_missing_references_still_analyses(tmp_path):
+    """The whole pipeline, on a collection where almost every reference points at
+    something that was never collected: a missing principal on an access control entry,
+    a missing delegation target, a missing SID history, a missing group, a missing
+    container, a trust into a domain that is not present, a right the table does not
+    know, and members written as bare identifiers rather than objects.
+
+    This is what found the undeclared attribute and the member shape. Reading the source
+    would not have: both faults are in code paths the shipped data never takes.
+    """
+    import json
+    collection = {
+        "users": [{"ObjectIdentifier": "S-1-5-21-1-1-1-1101",
+                   "Properties": {"name": "A@X.LOCAL", "domain": "X.LOCAL"},
+                   "Aces": [{"PrincipalSID": "S-1-5-21-1-1-1-9999", "RightName": "GenericAll"}],
+                   "AllowedToDelegate": ["S-1-5-21-1-1-1-8888"],
+                   "HasSIDHistory": ["S-1-5-21-1-1-1-7777"],
+                   "Members": ["S-1-5-21-1-1-1-6666"],
+                   "PrimaryGroupSID": "S-1-5-21-1-1-1-5555",
+                   "ContainedBy": {"ObjectIdentifier": "S-1-5-21-1-1-1-4444"},
+                   "UnknownRightXYZ": ["x"]}],
+        "groups": [{"ObjectIdentifier": "S-1-5-21-1-1-1-1201",
+                    "Properties": {"name": "G@X.LOCAL", "domain": "X.LOCAL", "admincount": True},
+                    "Members": ["S-1-5-21-1-1-1-1101"]}],
+        "computers": [{"ObjectIdentifier": "S-1-5-21-1-1-1-1301",
+                       "Properties": {"name": "C@X.LOCAL", "domain": "X.LOCAL"},
+                       "RegistrySessions": {"Results": [{"UserSID": "S-1-5-21-1-1-1-1101"}]}}],
+        "domains": [{"ObjectIdentifier": "S-1-5-21-1-1-1",
+                     "Properties": {"name": "X.LOCAL", "domain": "X.LOCAL"},
+                     "Trusts": [{"TargetDomainSid": "S-1-5-21-2-2-2", "TargetDomainName": "Y.LOCAL"}]}],
+    }
+    for kind, entries in collection.items():
+        json.dump({"meta": {"version": 6, "type": kind}, "data": entries},
+                  (tmp_path / ("X_%s.json" % kind)).open("w"))
+
+    data = load_collector(str(tmp_path))
+    built = build_graph(data)
+    assert built.edges, "the relationships that do resolve must still be built"
+    assert built.summary()["unknown_references"], "the missing ones must be recorded"
+
+    document = report_module.build(built, crown_jewels(data, built),
+                                   {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "note": "not asked for"})
+    markdown = report_module.to_markdown(document)
+    assert "does not contain" in markdown
+    assert report_module.to_html(document)
+
+
 def test_an_unresolved_reference_is_reported_and_not_fatal(forest, graph):
     """An unresolved reference is a fact about the collection. Treating it as absent
     would silently remove whatever it granted, and raising would end the analysis."""
