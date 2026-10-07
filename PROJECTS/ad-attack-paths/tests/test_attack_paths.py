@@ -334,6 +334,56 @@ def test_the_report_names_the_unmodelled_fields(forest, graph):
         victim.properties.pop("AllowedToDelegate", None)
 
 
+# --- nothing about this forest is written into the source -------------------
+
+def test_no_source_file_names_this_forest():
+    """The strongest statement the tests can make about hardcoded values.
+
+    The names checked are this forest's domains. A domain name is always a proper noun
+    and could not turn up in a sentence by accident -- which an earlier version of this
+    check discovered the hard way, matching "reach" inside "reachable" and "services"
+    inside a sentence about services.
+
+    The template names are deliberately *not* checked here, and the reason is worth
+    stating. The templates in this lab are named ESC1, ESC2, ESC3 and ESC4, and those
+    are also the published names of the technique classes, so the string "ESC1" in the
+    source is either a label for a derived condition or a name being matched -- and a
+    scan of literals cannot tell which. The behavioural test above settles it instead
+    and settles it better: every template name is replaced and the detector returns the
+    identical five escalations, so nothing is matching on a name.
+
+    If a domain name appeared in the source, the tool would be carrying an answer rather
+    than deriving one, and it would give that answer whatever it was pointed at.
+    """
+    import ast
+
+    domains = {d.upper() for d in load_forest(ARCHIVES).domains}
+    assert len(domains) == 3, "the forest must supply the domain names being checked"
+
+    offenders = []
+    for path in sorted((PROJECT / "src").rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                for name in domains:
+                    if name in node.value.upper():
+                        offenders.append((path.name, node.lineno, name))
+    assert not offenders, \
+        "a literal names a domain from this forest: %s" % offenders[:5]
+
+
+def test_no_source_file_hardcodes_a_count():
+    """A count baked into the source would be an answer about the data. The numbers in
+    the source are display limits and algorithm bounds, and they are named."""
+    import ast
+    import re
+    allowed = {"ROUTES_SHOWN", "REASON_CHARS", "STEP_CHARS", "OBJECTS_PER_FIELD"}
+    for path in sorted((PROJECT / "src").rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"^[A-Z_]+ = (\d+)$", source, re.MULTILINE):
+            assert match.group(0).split(" = ")[0] in allowed, \
+                "%s is a bare count with no explanation" % match.group(0)
+
+
 # --- the gaps that were closed ---------------------------------------------
 
 def test_delegation_is_an_edge_and_not_just_a_parsed_field(forest, graph):
