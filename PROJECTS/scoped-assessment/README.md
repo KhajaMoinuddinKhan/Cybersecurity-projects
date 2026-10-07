@@ -170,6 +170,18 @@ has something real to measure itself against. It binds to loopback and refuses t
 anywhere else — that refusal is a check, not a comment, because a deliberately
 vulnerable server a network can reach is a liability rather than a lab.
 
+## Running the target
+
+```
+python -m lab
+```
+
+The lab starts on loopback, prints the flaws it has planted and where each one is,
+and then serves them. It is a separate process from the assessment on purpose: the
+framework is meant to be pointed at a target running somewhere else, and running the
+two in one process would let a bug in one hide a bug in the other. `LAB_PORT` moves
+it off the default.
+
 ## An engagement file
 
 ```yaml
