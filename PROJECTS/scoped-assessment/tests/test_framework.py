@@ -118,9 +118,12 @@ def test_every_flaw_the_lab_declares_is_a_flaw_a_check_looks_for():
     """The lab documents its flaws; each one has to map to a check, or the lab is
     claiming a vulnerability nothing measures."""
     from src.assessment import CHECK_NAMES
+    # Three entries exist for the crawler rather than for the checks: one it must
+    # refuse to follow, and two it must be able to reach at all.
+    for_the_crawler = {"lab-state-changing-link", "lab-js-built-link", "lab-declared-path"}
     for flaw in FLAWS:
-        if flaw["id"] == "lab-state-changing-link":
-            continue          # that one is for the crawler, not the checks
+        if flaw["id"] in for_the_crawler:
+            continue
         name = flaw["id"][len("lab-"):]
         assert name in CHECK_NAMES, "no check covers %s" % flaw["id"]
 

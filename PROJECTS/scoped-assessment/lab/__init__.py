@@ -74,6 +74,11 @@ FLAWS = (
      "detail": "an unhandled error returns an absolute path from the server's disk"},
     {"id": "lab-state-changing-link", "path": "/logout", "imitates": None,
      "detail": "a link that would change state; the crawler must not follow it"},
+    {"id": "lab-js-built-link", "path": "/api/reports", "imitates": None,
+     "detail": "reached only from a path assembled inside a script, so a crawler "
+               "that reads only <a href> cannot see it"},
+    {"id": "lab-declared-path", "path": "/internal/status", "imitates": None,
+     "detail": "declared in robots.txt and linked from nowhere"},
 )
 
 DOCUMENT_ROOT = Path(__file__).resolve().parent / "root"
@@ -104,12 +109,19 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def _page(self, title, body):
-        """Every page links to the others, so a crawl has a graph to walk."""
+        """Every page links to the others, so a crawl has a graph to walk.
+
+        The reports path is deliberately reachable only from inside a script, so a
+        crawler that reads only `<a href>` cannot find it and one that reads the
+        script can.
+        """
         return ("<html><body><h1>%s</h1>%s"
                 "<nav><a href='/'>home</a> <a href='/search?q=hello'>search</a> "
                 "<a href='/uploads/'>uploads</a> <a href='/login'>sign in</a> "
                 "<a href='/redirect?to=/'>a redirect</a> "
-                "<a href='/logout'>sign out</a></nav></body></html>" % (title, body))
+                "<a href='/logout'>sign out</a></nav>"
+                "<script>var reports = \"/api/reports\";</script>"
+                "</body></html>" % (title, body))
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -194,6 +206,20 @@ class _Handler(BaseHTTPRequestHandler):
             # nothing, because a lab that actually logged you out would be testing
             # the crawler by breaking something.
             return self._send(200, self._page("Signed out", "<p>You are signed out.</p>"))
+
+        if route == "/api/reports":
+            # Not a flaw: this exists so the crawler's ability to see a path built
+            # inside a script can be tested rather than assumed.
+            return self._send(200, self._page(
+                "Reports", "<p>Only reachable if the crawl read the script.</p>"))
+
+        if route == "/internal/status":
+            # Not a flaw: declared in robots.txt and linked from nowhere.
+            return self._send(200, json.dumps({"status": "internal"}), "application/json")
+
+        if route == "/robots.txt":
+            return self._send(200, "User-agent: *\nDisallow: /internal/status\n"
+                                   "Disallow: /uploads/\n", "text/plain")
 
         if route == "/health":
             return self._send(200, json.dumps({"ok": True}), "application/json")

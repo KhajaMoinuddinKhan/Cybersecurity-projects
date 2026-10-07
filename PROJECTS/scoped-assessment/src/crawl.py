@@ -37,6 +37,14 @@ STATE_CHANGING = (
 )
 
 _LINK = re.compile(r"""<a\s[^>]*href\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+_SCRIPT_BLOCK = re.compile(r"<script\b[^>]*>(.*?)</script>", re.IGNORECASE | re.DOTALL)
+_SCRIPT_SRC = re.compile(r"""<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+# A URL in a script is usually a quoted string that starts with a slash or a
+# scheme. Not a JavaScript parser -- a parser would need a library, and the point
+# is to see the obvious ones rather than to be complete.
+_JS_URL = re.compile(r"""["']((?:https?:)?/[^"'\s\\<>]{1,120})["']""")
+# Paths a site declares rather than links: the two files a crawler is meant to read.
+_DECLARED = ("/robots.txt", "/sitemap.xml")
 _FORM = re.compile(r"<form\s[^>]*>(.*?)</form>", re.IGNORECASE | re.DOTALL)
 _FORM_ATTR = re.compile(r"""(\w+)\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
 _INPUT = re.compile(r"""<(?:input|select|textarea)\s[^>]*>""", re.IGNORECASE)
@@ -116,6 +124,39 @@ def _links(base: str, body: str):
             yield candidate
 
 
+def _script_links(base: str, body: str):
+    """Paths a page builds in JavaScript rather than writing as a link.
+
+    A regular expression is not a JavaScript parser and this does not pretend to be
+    one: it finds quoted strings that look like paths, which catches the common
+    shape and misses anything assembled from fragments. The report says the crawl
+    can only see what it can read, so the limit is stated rather than hidden.
+    """
+    for block in _SCRIPT_BLOCK.finditer(body or ""):
+        for match in _JS_URL.finditer(block.group(1)):
+            candidate = _normalise(base, match.group(1))
+            if candidate:
+                yield candidate
+    for match in _SCRIPT_SRC.finditer(body or ""):
+        candidate = _normalise(base, match.group(1))
+        if candidate:
+            yield candidate
+
+
+def _declared_paths(body: str):
+    """Paths named in robots.txt or a sitemap, which are declared rather than linked."""
+    for line in (body or "").splitlines():
+        line = line.strip()
+        if line.lower().startswith("disallow:") or line.lower().startswith("allow:"):
+            path = line.split(":", 1)[1].strip()
+            if path and path != "/":
+                yield path
+        for match in re.finditer(r"<loc>\s*(.*?)\s*</loc>", line, re.IGNORECASE):
+            # finditer, not find: a sitemap puts every loc on one line and reading
+            # only the first would visit one page of a site's whole index.
+            yield match.group(1).strip()
+
+
 def _forms(base: str, body: str):
     """Every form, with its action, method and fields.
 
@@ -156,6 +197,10 @@ def crawl(scope, host: str, port: int, start: str = "/", max_pages: int = 25,
     endpoints: dict = {}
     skipped: list = []
     queue = [(_normalise(root, start) or root + "/", 0)]
+    # The two files a site publishes to say what it has, read before the walk so
+    # that a path nobody linked to is still visited.
+    for declared in _DECLARED:
+        queue.append((root + declared, 0))
     read = 0
 
     def read_page(url):
@@ -203,6 +248,15 @@ def crawl(scope, host: str, port: int, start: str = "/", max_pages: int = 25,
             else:
                 endpoints.setdefault(url, Endpoint(url=url, path=parsed.path, source="link"))
 
+            # A robots.txt or sitemap names paths; those are queued rather than
+            # treated as pages to link from.
+            if parsed.path in _DECLARED:
+                for declared in _declared_paths(page.body):
+                    candidate = _normalise(root + "/", declared)
+                    if candidate and _same_target(root, candidate) and candidate not in seen:
+                        queue.append((candidate, 1))
+                continue
+
             if depth >= max_depth:
                 continue
 
@@ -211,7 +265,8 @@ def crawl(scope, host: str, port: int, start: str = "/", max_pages: int = 25,
                     url=action, path=urlparse(action).path, method=method,
                     parameters=names, form=True, source=url))
 
-            for candidate in _links(url, page.body):
+            candidates = list(_links(url, page.body)) + list(_script_links(url, page.body))
+            for candidate in candidates:
                 if not _same_target(root, candidate):
                     skipped.append({"url": candidate, "reason": "a different host"})
                     continue

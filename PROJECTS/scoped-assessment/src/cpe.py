@@ -22,7 +22,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-__all__ = ["CpeError", "Cpe", "parse_cpe", "compare_versions", "matches"]
+__all__ = ["CpeError", "Cpe", "parse_cpe", "compare_versions", "matches",
+           "affected_matches", "verdict"]
 
 # NVD uses these where a field is not stated. `*` means any, `-` means not
 # applicable, and both behave the same way for matching purposes.
@@ -201,6 +202,153 @@ def matches(configurations, target: Cpe) -> bool:
         if all(_node_matches(node, target) for node in nodes):
             return True
     return False
+
+
+# --- the newer structure ---------------------------------------------------
+#
+# NVD is migrating from CPE configurations to a CVE 5.0 `affected` structure, and a
+# tool that reads only the old one silently answers "not affected" for every CVE
+# published in the new form. That is the worst possible failure mode -- a quiet
+# false negative -- so both structures are read, and a CVE that carries neither is
+# reported as carrying no affected-product data rather than as not affecting
+# anything.
+
+def _normalise_product(text: str) -> str:
+    """NVD writes "Palo Alto Networks" in one structure and `paloaltonetworks` in
+    the other, so the two are compared after the same normalisation."""
+    return (str(text or "").strip().lower()
+            .replace(" ", "_").replace("-", "_").replace("/", "_"))
+
+
+def _same_product(one: str, two: str) -> bool:
+    """Two product or vendor names, compared the two ways NVD spells them.
+
+    The `affected` structure uses the vendor's own name with spaces, and a CPE uses
+    a single token with none: "Palo Alto Networks" against `paloaltonetworks`. A
+    comparison that only collapsed spaces would miss every product whose name has
+    more than one word, which is most of them.
+    """
+    one, two = _normalise_product(one), _normalise_product(two)
+    if one == two:
+        return True
+    strip = lambda text: text.replace("_", "")
+    return strip(one) == strip(two) and bool(strip(one))
+
+
+def affected_matches(affected, target: Cpe) -> bool | None:
+    """Does the CVE 5.0 `affected` block cover the target?
+
+    Returns True, False, or None when the block carries no usable data -- `n/a`
+    for the vendor, the product and the version, which NVD publishes for older
+    CVEs and which cannot be matched to anything. None is not False: one is "this
+    does not affect you" and the other is "nobody has said", and a report that
+    treats them the same is guessing.
+    """
+    if not affected:
+        return None
+    usable = False
+    for block in affected:
+        for entry in block.get("affectedData") or []:
+            vendor = _normalise_product(entry.get("vendor"))
+            product = _normalise_product(entry.get("product"))
+            if vendor in ("n_a", "na", "unknown", "") or product in ("n_a", "na", "unknown", ""):
+                continue
+            # The block carries real product names, so a product it does not name
+            # is a product it says is not affected. That is a verdict, and it is
+            # different from a block that names nothing at all.
+            usable = True
+            if not (_same_product(target.vendor, vendor)
+                    and _same_product(target.product, product)):
+                continue
+            if _version_entry_covers(entry, target.version):
+                return True
+    return False if usable else None
+
+
+def _version_entry_covers(entry: dict, version: str) -> bool:
+    """Does one product's version list put `version` in the affected set?
+
+    Each entry is a starting point with a status and an optional exclusive upper
+    bound, and `changes` lists the points at which the status flips. The last
+    entry whose start is at or below the version decides, which is how NVD
+    describes a range that was patched and then reopened.
+    """
+    default = str(entry.get("defaultStatus") or "unknown").lower()
+    chosen = None
+    for candidate in entry.get("versions") or []:
+        start = str(candidate.get("version") or "")
+        if start.lower() in ("n/a", "all", ""):
+            if start.lower() == "all":
+                chosen = candidate
+            continue
+        if compare_versions(version, start) < 0:
+            continue
+        # A candidate with an upper bound describes a range and wins over a bare
+        # point version; among ranges the latest start wins.
+        bounded = bool(candidate.get("lessThan") or candidate.get("lessThanOrEqual"))
+        chosen_bounded = bool(chosen and (chosen.get("lessThan") or chosen.get("lessThanOrEqual")))
+        if chosen is None:
+            chosen = candidate
+        elif bounded and not chosen_bounded:
+            chosen = candidate
+        elif bounded == chosen_bounded and compare_versions(
+                start, str(chosen.get("version") or "")) >= 0:
+            chosen = candidate
+    if chosen is None:
+        return default == "affected"
+
+    # An entry with no upper bound names that version, it does not open a range.
+    # NVD writes {"version": "2020.1", "status": "affected"} to mean 2020.1 is
+    # affected, not that everything from 2020.1 onward is -- and reading it the
+    # second way reported the patched release as vulnerable. The differential test
+    # against NVD's own answers is what caught it.
+    upper = chosen.get("lessThan")
+    upper_inclusive = chosen.get("lessThanOrEqual")
+    if not upper and not upper_inclusive:
+        if compare_versions(version, str(chosen.get("version") or "")) != 0:
+            return False
+        status = str(chosen.get("status") or default).lower()
+        for change in chosen.get("changes") or []:
+            at = change.get("at")
+            if at and compare_versions(version, str(at)) >= 0:
+                status = str(change.get("status") or status).lower()
+        return status == "affected"
+
+    status = str(chosen.get("status") or default).lower()
+    if upper and compare_versions(version, str(upper)) >= 0:
+        status = "unaffected"
+    if upper_inclusive and compare_versions(version, str(upper_inclusive)) > 0:
+        status = "unaffected"
+    for change in chosen.get("changes") or []:
+        at = change.get("at")
+        if at and compare_versions(version, str(at)) >= 0:
+            status = str(change.get("status") or status).lower()
+    return status == "affected"
+
+
+def verdict(configurations, affected, target: Cpe) -> dict:
+    """The whole answer for one CVE against one target, and where it came from.
+
+    A caller gets the decision and the structure that produced it, because a tool
+    that says "not affected" has to be able to say which data it read to conclude
+    that, and a CVE carrying neither structure is a different answer from a CVE
+    that carries data saying no.
+    """
+    from_configurations = matches(configurations, target) if configurations else None
+    from_affected = affected_matches(affected, target) if affected else None
+
+    if from_configurations is True or from_affected is True:
+        affected_flag, source = True, ("configurations" if from_configurations
+                                       else "affected")
+    elif from_configurations is False or from_affected is False:
+        affected_flag = False
+        source = ("configurations" if from_configurations is False else "affected")
+        if from_configurations is False and from_affected is True:
+            affected_flag, source = True, "affected"
+    else:
+        affected_flag, source = None, "none"
+    return {"affected": affected_flag, "source": source,
+            "configurations": from_configurations, "affected_block": from_affected}
 
 
 def _node_matches(node: dict, target: Cpe) -> bool:

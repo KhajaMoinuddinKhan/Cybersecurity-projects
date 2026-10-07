@@ -22,41 +22,53 @@ that matters is the evidence and the write-up.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Callable
 
 from .scan import Evidence, Finding, fetch
 from .scope import Scope
 
-__all__ = ["assess_http", "CHECK_NAMES", "CONFIRMABLE"]
+__all__ = ["assess_http", "CHECK_NAMES", "CONFIRMABLE", "CHECKS", "Check"]
 
-# The checks, and which of them can be confirmed by a second observation. The
-# absence of a header cannot be: there is nothing further to look at, and calling
-# an absence "confirmed" would be claiming more than the method allows.
-CHECK_NAMES = (
-    "version-disclosure",
-    "missing-security-headers",
-    "insecure-cookie",
-    "directory-listing",
-    "vcs-exposed",
-    "dotfile-exposed",
-    "dangerous-method",
-    "open-redirect",
-    "error-disclosure",
-    "reflected-input",
-    "path-traversal",
-)
 
-CONFIRMABLE = (
-    "insecure-cookie",
-    "directory-listing",
-    "vcs-exposed",
-    "dotfile-exposed",
-    "dangerous-method",
-    "open-redirect",
-    "error-disclosure",
-    "reflected-input",
-    "path-traversal",
-)
+@dataclass(frozen=True)
+class Check:
+    """One check, as a value rather than as a line in a function.
+
+    Coverage used to be a sequence of calls inside `assess_http`, which meant
+    adding a check was editing the thing that runs them and the list of names was
+    maintained by hand beside it. It is a table now: the names, the confirmation
+    flags and the report all derive from this, so a check cannot be registered
+    without running and cannot run without being registered.
+
+    `confirmable` records whether a second observation can turn an observation into
+    a confirmation. It is False for the checks that report an absence, because
+    there is no second observation of nothing and calling one confirmed would claim
+    more than the method allows.
+    """
+
+    id: str
+    title: str
+    run: Callable
+    confirmable: bool = True
+    needs_headers: bool = False
+
+
+# The registry. Order is the order the checks run and the order the report lists
+# them in, so a reader sees the shape of the assessment rather than a random order.
+CHECKS: tuple = ()
+
+
+def _register(*checks) -> None:
+    global CHECKS
+    CHECKS = tuple(checks)
+
+
+# Populated at the end of the module, once the check functions exist. Declared
+# here so the names are importable before then.
+CHECK_NAMES: tuple = ()
+CONFIRMABLE: tuple = ()
 
 # The header set a browser uses to constrain what a page may do. Missing ones are
 # reported together, because one absence is a gap and four is a posture.
@@ -97,23 +109,19 @@ def assess_http(scope: Scope, host: str, port: int, scheme: str = "http",
         return findings
     headers = landing.get("headers") or {}
 
-    findings.extend(_version_disclosure(host, port, headers))
-    findings.extend(_security_headers(host, port, headers))
-    findings.extend(_cookie_flags(scope, host, port, scheme, at))
-    findings.extend(_directory_listing(scope, host, port, scheme, at))
-    findings.extend(_vcs_exposed(scope, host, port, scheme, at))
-    findings.extend(_dotfile_exposed(scope, host, port, scheme, at))
-    findings.extend(_dangerous_method(scope, host, port, scheme, at))
-    findings.extend(_open_redirect(scope, host, port, scheme, at))
-    findings.extend(_error_disclosure(scope, host, port, scheme, at))
-    findings.extend(_reflected_input(scope, host, port, scheme, at))
-    findings.extend(_path_traversal(scope, host, port, scheme, at))
+    for check in CHECKS:
+        findings.extend(check.run(scope, host, port, scheme, at))
     return findings
 
 
 # --- the checks ------------------------------------------------------------
 
-def _version_disclosure(host, port, headers):
+def _version_disclosure(scope, host, port, scheme, at):
+    headers = (fetch(scope, host, port, "/", scheme=scheme, at=at).get("headers") or {})
+    return _version_disclosure_from(host, port, headers)
+
+
+def _version_disclosure_from(host, port, headers):
     server = headers.get("server", "")
     powered = headers.get("x-powered-by", "")
     if not (server or powered):
@@ -143,7 +151,12 @@ def _version_disclosure(host, port, headers):
     )]
 
 
-def _security_headers(host, port, headers):
+def _security_headers(scope, host, port, scheme, at):
+    headers = (fetch(scope, host, port, "/", scheme=scheme, at=at).get("headers") or {})
+    return _security_headers_from(host, port, headers)
+
+
+def _security_headers_from(host, port, headers):
     missing = [(name, why) for name, why in SECURITY_HEADERS if name not in headers]
     if not missing:
         return []
@@ -535,3 +548,32 @@ def _path_traversal(scope, host, port, scheme, at):
                               "escaped it."),
             )]
     return []
+
+
+# The registry, filled once every check above exists. The names, the confirmation
+# flags and the tests all read from here, so the three cannot drift apart.
+_register(
+    Check("version-disclosure", "Does the service name its own version?",
+          _version_disclosure, confirmable=False),
+    Check("missing-security-headers", "Does the response carry the headers that "
+          "constrain a browser?", _security_headers, confirmable=False),
+    Check("insecure-cookie", "Is a session cookie set without its protective "
+          "attributes?", _cookie_flags),
+    Check("directory-listing", "Does a folder list its contents?", _directory_listing),
+    Check("vcs-exposed", "Is the version-control directory served as files?",
+          _vcs_exposed),
+    Check("dotfile-exposed", "Is a dotfile served as an ordinary file?",
+          _dotfile_exposed),
+    Check("dangerous-method", "Does the server answer a method it has no reason to?",
+          _dangerous_method),
+    Check("open-redirect", "Does a redirect go wherever it is told?", _open_redirect),
+    Check("error-disclosure", "Does an error page disclose the path it failed at?",
+          _error_disclosure),
+    Check("reflected-input", "Is a parameter reflected without being escaped?",
+          _reflected_input),
+    Check("path-traversal", "Does the file endpoint stay inside its root?",
+          _path_traversal),
+)
+
+CHECK_NAMES = tuple(check.id for check in CHECKS)
+CONFIRMABLE = tuple(check.id for check in CHECKS if check.confirmable)

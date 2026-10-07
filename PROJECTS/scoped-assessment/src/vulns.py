@@ -39,6 +39,12 @@ class CveRecord:
     computed_score: float | None
     computed_severity: str
     url: str
+    # Whether the version falls inside the CVE's affected range, and which of
+    # NVD's two structures said so. None means neither structure carried usable
+    # data, which is not the same answer as "not affected".
+    affected: bool | None = None
+    match_source: str = ""
+    match_detail: str = ""
 
     @property
     def agrees(self) -> bool:
@@ -50,6 +56,8 @@ class CveRecord:
         return {
             "cve": self.cve_id, "summary": self.summary, "vector": self.vector,
             "published_score": self.published_score, "published_severity": self.published_severity,
+            "affected": self.affected, "match_source": self.match_source,
+            "match_detail": self.match_detail,
             "computed_score": self.computed_score, "computed_severity": self.computed_severity,
             "agrees": self.agrees, "url": self.url,
         }
@@ -128,13 +136,55 @@ class NvdClient:
         raw = self._cache[key]
         return self._record(raw) if raw else None
 
-    def for_product(self, product: str, version: str = "", limit: int = 20) -> list[CveRecord]:
-        """CVEs NVD returns for a product and version.
+    def for_cpe(self, cpe_text: str, limit: int = 40) -> list[CveRecord]:
+        """CVEs whose affected range covers a specific CPE.
 
-        A keyword search, so it is a starting point rather than proof: the report
-        says a CVE was returned for this product, not that the target is certainly
-        affected by it. Anything stronger would need the version comparison this
-        framework does not attempt.
+        This is the version-aware lookup, and it is the difference between a lead
+        and a finding. NVD's `cpeName` filter returns a CVE when the CPE appears
+        anywhere in its data -- including as a platform the CVE does not affect --
+        so each result is then evaluated against the CVE's own `configurations` and
+        `affected` blocks. A CVE the filter returned but whose ranges do not cover
+        this version is reported with `affected` False rather than dropped, because
+        the difference between "we checked and it is not in range" and "we never
+        looked" is the thing a reader most needs to be able to see.
+        """
+        from .cpe import parse_cpe, verdict as cpe_verdict
+
+        target = parse_cpe(cpe_text)
+        key = "cpe:%s" % cpe_text.lower()
+        if key not in self._cache:
+            data = self._get("%s?cpeName=%s&resultsPerPage=%d"
+                             % (NVD_ENDPOINT, urllib.parse.quote(cpe_text), limit))
+            self._cache[key] = data.get("vulnerabilities") or []
+            self._save()
+
+        records = []
+        for raw in self._cache[key]:
+            record = self._record(raw)
+            cve = raw.get("cve") or {}
+            decision = cpe_verdict(cve.get("configurations"), cve.get("affected"), target)
+            record.affected = decision["affected"]
+            record.match_source = decision["source"]
+            record.match_detail = ("the %s structure puts %s inside an affected range"
+                                   % (decision["source"], target.version)
+                                   if decision["affected"] is True else
+                                   "the %s structure does not put %s inside an affected "
+                                   "range" % (decision["source"], target.version)
+                                   if decision["affected"] is False else
+                                   "NVD publishes no affected-product data for this CVE, "
+                                   "so nothing can be concluded from it either way")
+            records.append(record)
+        # Affected first, then by score: the reader wants what applies to them.
+        records.sort(key=lambda r: (r.affected is not True, -(r.computed_score or 0.0)))
+        return records
+
+    def for_product(self, product: str, version: str = "", limit: int = 20) -> list[CveRecord]:
+        """CVEs NVD returns for a keyword.
+
+        A keyword search, so it is a starting point rather than proof, and the
+        records it returns carry no verdict: `affected` stays None because nothing
+        in this query compared a version. Use `for_cpe` when the target's CPE is
+        known, which is whenever fingerprinting has run.
         """
         keyword = ("%s %s" % (product, version)).strip()
         key = "kw:%s" % keyword.lower()

@@ -30,7 +30,20 @@ rest -- are recorded and skipped, because a crawler that follows every link it f
 will eventually follow a `?action=delete`, and an assessment that deleted a record
 has caused the incident it was hired to find.
 
-Eleven checks then ask the target questions it can answer badly:
+It also reads the paths a site publishes rather than links: `robots.txt` and
+`sitemap.xml` are fetched first and the paths they name are visited, because a site
+that declares a path is telling you it has one. And it reads inside `<script>`
+blocks for quoted strings that look like paths, since a route assembled in
+JavaScript is invisible to a link follower. That last one has a limit worth stating
+plainly: this is a regular expression, not a JavaScript parser, so it finds a
+literal `/api/reports` and does not find a path built by joining fragments. The
+report claims what was seen, not what was there.
+
+The checks are a table rather than a sequence of calls, so adding one is adding a
+row: the names, the confirmation flags, the report and the tests all derive from the
+registry, which means a check cannot be registered without running and cannot run
+without being registered. Eleven of them ask the target questions it can answer
+badly:
 
 - **Version disclosure** — the service names its own version, which is what lets
   somebody choose which vulnerabilities to try without sending a probing request.
@@ -87,6 +100,51 @@ Exploitation stops at demonstration. The traversal reads the one file the lab pl
 outside its document root and nothing else: no shell, no payload, no attempt to go
 further. The framework is for assessing a system you own, and the part that matters is
 the evidence and the write-up.
+
+## Affected, or merely mentioned
+
+Asking a feed for "CVEs mentioning Apache 2.4" returns everything anybody ever wrote
+about Apache 2.4. Asking whether a *specific version* falls inside a CVE's affected
+range returns a statement about the system in front of you. The first is a search
+result; the second is a finding.
+
+NVD publishes two structures that answer the second question and is migrating from
+one to the other: older CVEs carry `configurations`, a tree of CPE match criteria
+with version ranges, and newer ones carry `affected`, a CVE 5.0 block of vendors,
+products and version lists. Both are read. A tool that reads only the old one
+answers "not affected" for every CVE published in the new form, which is a quiet
+false negative -- the worst failure mode available to something whose job is to tell
+you what is wrong, because it looks exactly like good news.
+
+Three answers are kept distinct, and the report shows which it is:
+
+- **affected** -- the version falls inside a range NVD publishes;
+- **not affected** -- NVD publishes ranges for this product and the version is outside
+  them, which is a real answer and worth having;
+- **nothing published** -- the CVE carries `n/a` for the vendor, the product and the
+  version, so nothing can be concluded from it either way. "Nobody has said" and
+  "this does not affect you" are different answers, and a report that treats them the
+  same is guessing.
+
+The matching is implemented here rather than delegated, so the tool can explain its
+own verdict, and it is checked against NVD's own answers across two vector sets:
+twenty-seven real `configurations` blocks and seven real `affected` blocks for two
+CVEs with genuine version ranges.
+
+That differential testing found a semantic error worth naming. NVD writes
+`{"version": "2020.1", "status": "affected"}` with no upper bound, which means *that
+version is affected* -- not *everything from that version onward is*. Reading it the
+second way reported the patched release as vulnerable, which is the kind of mistake
+that sends somebody to patch a system that was never at risk and leaves them
+trusting the tool less afterwards.
+
+One more thing the vectors made visible: NVD's own `cpeName` filter returns a CVE
+whenever the CPE appears *anywhere* in its data, including as a platform the CVE does
+not affect. CVE-2009-3766 is a mutt vulnerability whose configuration lists OpenSSL
+as an unaffected platform, and the filter hands it back for an OpenSSL CPE. The two
+keys disagree on nineteen of twenty-four decidable records, and the test asserts they
+still disagree -- a run where they agree would mean the vectors had stopped testing
+anything.
 
 ## CVSS, computed rather than copied
 
@@ -177,9 +235,13 @@ itself a zero-day finder.
 
 Eleven checks are eleven checks. They are the ones the lab is built to answer, and the
 framework is a demonstration of scope enforcement and reporting rather than a
-substitute for a real scanner's coverage. The crawl is a link follower with a regular
-expression behind it, so a link built by JavaScript is invisible to it and the report
-does not claim to have found what it cannot see.
+substitute for a real scanner's coverage. Adding a check is adding a row to the
+registry, which is what makes the number a starting point rather than a ceiling.
+
+The crawl is a link follower with a regular expression behind it. It sees a literal
+path inside a script and not one assembled from fragments, and it cannot execute
+anything, so a route that only exists after a page runs is one it will not find. The
+report claims what was seen.
 
 No authentication, session handling or rate limiting is attempted, so an assessment of
 a system that dislikes being scanned should be run with that in mind.
