@@ -282,11 +282,22 @@ def to_markdown(document: dict) -> str:
                 field, detail["meaning"],
                 ", ".join("`%s`" % o for o in detail["objects"][:OBJECTS_PER_FIELD])))
         lines.append("")
-    lines.append("Sessions are collected per machine and none were present in this "
-                 "data, so no route here depends on one. Where they exist they are "
-                 "walked in reverse -- compromising the machine yields whoever is "
-                 "logged into it -- which is the direction that makes a session worth "
-                 "finding.")
+    # Derived, not asserted. This sentence said "none were present in this data" for
+    # every collection, and then the session edges started being built and it became a
+    # false statement about the data it was describing.
+    sessions = graph["by_kind"].get("session", 0)
+    if sessions:
+        lines.append("Sessions are walked in reverse -- compromising the machine yields "
+                     "whoever is logged into it, which is the direction that makes a "
+                     "session worth finding. **%d session relationship%s** %s present in "
+                     "this data, and every one of them is a route."
+                     % (sessions, "" if sessions == 1 else "s", "is" if sessions == 1 else "are"))
+    else:
+        lines.append("Sessions are collected per machine and none were present in this "
+                     "data, so no route here depends on one. Where they exist they are "
+                     "walked in reverse -- compromising the machine yields whoever is "
+                     "logged into it -- which is the direction that makes a session "
+                     "worth finding.")
     lines.append("")
     return "\n".join(lines)
 
@@ -415,5 +426,27 @@ def to_html(document: dict) -> str:
         parts.append("<p>Rights this does not know, reported rather than dropped: %s.</p>"
                      % escape(", ".join(sorted(
                          {r for rights in context["unresolved"].values() for r in rights}))))
+
+    # The markdown report carries these and this one did not, which made the two
+    # formats say different things about the same analysis.
+    unmodelled = graph.get("unmodelled") or {}
+    if unmodelled:
+        parts.append("<p>Fields the collector populated that this does not turn into a "
+                     "route, named so that nothing is dropped in silence:</p><ul>")
+        for field, detail in sorted(unmodelled.items()):
+            parts.append("<li><code>%s</code> -- %s. On: %s.</li>"
+                         % (escape(field), escape(detail["meaning"]),
+                            escape(", ".join(detail["objects"][:OBJECTS_PER_FIELD]))))
+        parts.append("</ul>")
+    sessions = graph["by_kind"].get("session", 0)
+    if sessions:
+        parts.append("<p>Sessions are walked in reverse -- compromising the machine yields "
+                     "whoever is logged into it. <strong>%d session relationship%s</strong> "
+                     "%s present in this data, and every one of them is a route.</p>"
+                     % (sessions, "" if sessions == 1 else "s",
+                        "is" if sessions == 1 else "are"))
+    else:
+        parts.append("<p>Sessions are collected per machine and none were present in this "
+                     "data, so no route here depends on one.</p>")
     parts.append("</body></html>")
     return "\n".join(parts)

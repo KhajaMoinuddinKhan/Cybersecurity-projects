@@ -430,6 +430,39 @@ def test_the_report_carries_the_combinations_and_the_managers(forest, graph):
     assert "Who can change an authority" in markdown
 
 
+def test_the_two_formats_agree_about_the_data(forest, graph):
+    """The html report carried less than the markdown one, so the same analysis read
+    differently depending on which file somebody opened."""
+    jewels = crown_jewels(forest, graph)
+    document = report_module.build(graph, jewels, {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "note": "not asked for"})
+    markdown = report_module.to_markdown(document)
+    page = report_module.to_html(document)
+    sessions = document["graph"]["by_kind"].get("session", 0)
+    if sessions:
+        assert "session relationship" in markdown
+        assert "session relationship" in page
+    else:
+        assert "none were present" in markdown
+        assert "none were present" in page
+    assert ("nothing is dropped in silence" in markdown) == \
+           ("nothing is dropped in silence" in page)
+
+
+def test_the_session_sentence_is_derived_and_not_asserted(forest, graph):
+    """It said "none were present in this data" for every collection, and then session
+    edges started being built and it became a false statement about the data."""
+    jewels = crown_jewels(forest, graph)
+    document = report_module.build(graph, jewels, {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "note": "not asked for"})
+    sessions = document["graph"]["by_kind"].get("session", 0)
+    assert sessions, "this data contains sessions, which is what made the sentence false"
+    markdown = report_module.to_markdown(document)
+    assert "none were present" not in markdown, \
+        "the report must not claim there are no sessions when there are"
+    assert "%d session relationship" % sessions in markdown
+
+
 def test_a_truncated_reason_says_it_was_truncated(forest, graph):
     """A report that quietly drops seven routes reads exactly like one that had none."""
     from src.report import _clip
