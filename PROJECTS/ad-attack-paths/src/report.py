@@ -65,7 +65,7 @@ def _escalations_markdown(document: dict) -> list:
              "| Template | Condition | Severity | Who can enroll | Why |",
              "| --- | --- | --- | --- | --- |"]
     for row in rows:
-        enrollees = row.get("enrollees") or []
+        enrollees = row.get("enrollee_names") or row.get("enrollees") or []
         who = ", ".join("`%s`" % e for e in enrollees[:3]) if enrollees else \
             "nobody outside the administrators"
         lines.append("| %s | %s | %s | %s | %s |" % (
@@ -296,7 +296,8 @@ def to_html(document: dict) -> str:
         parts.append("<table><tr><th>Template</th><th>Condition</th><th>Severity</th>"
                      "<th>Who can enroll</th><th>Why</th></tr>")
         for row in rows:
-            who = ", ".join(row.get("enrollees") or []) or "nobody outside the administrators"
+            who = ", ".join(row.get("enrollee_names") or row.get("enrollees") or []) \
+                or "nobody outside the administrators"
             parts.append("<tr><td>%s</td><td>%s</td><td class=\"sev-%s\">%s</td><td>%s</td>"
                          "<td>%s</td></tr>"
                          % (escape(row["template"]), escape(", ".join(row["conditions"])),

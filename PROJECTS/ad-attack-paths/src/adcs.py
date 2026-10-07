@@ -64,6 +64,9 @@ class Escalation:
     # who can obtain a certificate from it -- the difference between a template that
     # permits an escalation and one somebody can actually use
     enrollees: list = field(default_factory=list)
+    # The same principals by name. A report that prints SIDs makes the reader look each
+    # one up, which is the work the report exists to save them.
+    enrollee_names: list = field(default_factory=list)
     note: str = ""
 
     @property
@@ -101,6 +104,7 @@ class Escalation:
         return {"template": self.template, "template_sid": self.template_sid,
                 "authority": self.authority, "conditions": list(self.conditions),
                 "principals": list(self.principals), "enrollees": list(self.enrollees),
+                "enrollee_names": list(self.enrollee_names),
                 "severity": self.severity, "exploitable": self.exploitable,
                 "note": self.note}
 
@@ -211,6 +215,9 @@ def certificate_escalations(data, graph, privileged=frozenset()) -> list:
     for template in data.by_kind("certtemplate"):
         if template.sid not in enabled_by:
             continue          # a template nobody has enabled cannot issue anything
-        found.extend(assess_template(template, enabled_by[template.sid], privileged))
+        for escalation in assess_template(template, enabled_by[template.sid], privileged):
+            escalation.enrollee_names = [graph.name_of(sid) for sid in escalation.enrollees]
+            escalation.principals = [graph.name_of(sid) for sid in escalation.principals]
+            found.append(escalation)
     found.sort(key=lambda e: (e.severity, e.template))
     return found
