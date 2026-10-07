@@ -26,6 +26,7 @@ jobs:
           - PROJECTS/cloud-asset-inventory
           - PROJECTS/tls-fingerprint-console
           - PROJECTS/crypto-toolkit
+          - PROJECTS/scoped-assessment
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

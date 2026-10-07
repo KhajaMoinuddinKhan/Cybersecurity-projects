@@ -1,0 +1,3 @@
+# Only the engagement file needs a parser. Everything else is the standard library,
+# including the HTTP client, the TLS handshake and the report.
+PyYAML>=6.0

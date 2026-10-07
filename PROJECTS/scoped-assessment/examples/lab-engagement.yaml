@@ -1,0 +1,18 @@
+# An engagement file. Everything this framework does is decided here.
+#
+# The defaults refuse. A host that is not named is not permitted, a port that is
+# not listed is not permitted, and an action that is not allowed is not permitted.
+engagement: Loopback lab assessment
+
+targets:
+  - host: 127.0.0.1
+    ports: [8099]
+
+allowed_actions:
+  - connect
+
+# Omit the window entirely to leave the engagement unlimited in time. Set it and
+# the engine refuses anything outside it, to the second.
+window:
+  start: 2020-01-01T00:00:00+00:00
+  end: 2030-01-01T00:00:00+00:00

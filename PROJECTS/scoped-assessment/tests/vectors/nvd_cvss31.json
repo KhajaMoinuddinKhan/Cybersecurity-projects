@@ -1,0 +1,119 @@
+{
+ "note": "CVSS v3.1 base vectors and the base scores NVD publishes for them, taken from the NVD 2.0 API and committed so the implementation can be checked against the published scores in CI rather than only where the network is. The vectors are NVD's; nothing here was written by this project. Chosen to span every severity band and both halves of the Scope branch, which is where the base equation is easiest to get wrong.",
+ "source": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+ "fetched": "2026-10-07",
+ "records": [
+  {
+   "cve": "CVE-1999-0524",
+   "vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N",
+   "base_score": 4.0,
+   "base_severity": "MEDIUM",
+   "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0"
+  },
+  {
+   "cve": "CVE-2018-15473",
+   "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+   "base_score": 5.3,
+   "base_severity": "MEDIUM",
+   "source": "nvd@nist.gov"
+  },
+  {
+   "cve": "CVE-1999-0035",
+   "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N",
+   "base_score": 5.4,
+   "base_severity": "MEDIUM",
+   "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0"
+  },
+  {
+   "cve": "CVE-2020-1472",
+   "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N",
+   "base_score": 5.5,
+   "base_severity": "MEDIUM",
+   "source": "secure@microsoft.com"
+  },
+  {
+   "cve": "CVE-1999-0517",
+   "vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L",
+   "base_score": 5.9,
+   "base_severity": "MEDIUM",
+   "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0"
+  },
+  {
+   "cve": "CVE-2018-15473",
+   "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
+   "base_score": 5.9,
+   "base_severity": "MEDIUM",
+   "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0"
+  },
+  {
+   "cve": "CVE-1999-0039",
+   "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L",
+   "base_score": 7.3,
+   "base_severity": "HIGH",
+   "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0"
+  },
+  {
+   "cve": "CVE-1999-0236",
+   "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+   "base_score": 7.5,
+   "base_severity": "HIGH",
+   "source": "nvd@nist.gov"
+  },
+  {
+   "cve": "CVE-1999-0022",
+   "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+   "base_score": 7.8,
+   "base_severity": "HIGH",
+   "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0"
+  },
+  {
+   "cve": "CVE-1999-0084",
+   "vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+   "base_score": 8.4,
+   "base_severity": "HIGH",
+   "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0"
+  },
+  {
+   "cve": "CVE-2019-11043",
+   "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:N",
+   "base_score": 8.7,
+   "base_severity": "HIGH",
+   "source": "security@php.net"
+  },
+  {
+   "cve": "CVE-2017-0144",
+   "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+   "base_score": 8.8,
+   "base_severity": "HIGH",
+   "source": "nvd@nist.gov"
+  },
+  {
+   "cve": "CVE-1999-0511",
+   "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:H",
+   "base_score": 9.1,
+   "base_severity": "CRITICAL",
+   "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0"
+  },
+  {
+   "cve": "CVE-2021-34473",
+   "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+   "base_score": 9.1,
+   "base_severity": "CRITICAL",
+   "source": "secure@microsoft.com"
+  },
+  {
+   "cve": "CVE-1999-0066",
+   "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+   "base_score": 9.8,
+   "base_severity": "CRITICAL",
+   "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0"
+  },
+  {
+   "cve": "CVE-2021-44228",
+   "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+   "base_score": 10.0,
+   "base_severity": "CRITICAL",
+   "source": "nvd@nist.gov"
+  }
+ ]
+}
