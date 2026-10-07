@@ -62,10 +62,14 @@ def _escalations_markdown(document: dict) -> list:
              "authentication purpose, is a route to any principal's identity. The "
              "conditions below are read from the template's own attributes, not from "
              "its name.", "",
-             "| Template | Condition | Severity | Why |", "| --- | --- | --- | --- |"]
+             "| Template | Condition | Severity | Who can enroll | Why |",
+             "| --- | --- | --- | --- | --- |"]
     for row in rows:
-        lines.append("| %s | %s | %s | %s |" % (
-            row["template"], ", ".join(row["conditions"]), row["severity"], row["note"]))
+        enrollees = row.get("enrollees") or []
+        who = ", ".join("`%s`" % e for e in enrollees[:3]) if enrollees else \
+            "nobody outside the administrators"
+        lines.append("| %s | %s | %s | %s | %s |" % (
+            row["template"], ", ".join(row["conditions"]), row["severity"], who, row["note"]))
     return lines + [""]
 
 
@@ -290,12 +294,14 @@ def to_html(document: dict) -> str:
                      "purpose, is a route to any principal's identity. These conditions "
                      "are read from the template's own attributes, not its name.</p>")
         parts.append("<table><tr><th>Template</th><th>Condition</th><th>Severity</th>"
-                     "<th>Why</th></tr>")
+                     "<th>Who can enroll</th><th>Why</th></tr>")
         for row in rows:
-            parts.append("<tr><td>%s</td><td>%s</td><td class=\"sev-%s\">%s</td><td>%s</td></tr>"
+            who = ", ".join(row.get("enrollees") or []) or "nobody outside the administrators"
+            parts.append("<tr><td>%s</td><td>%s</td><td class=\"sev-%s\">%s</td><td>%s</td>"
+                         "<td>%s</td></tr>"
                          % (escape(row["template"]), escape(", ".join(row["conditions"])),
                             escape(row["severity"].lower()), escape(row["severity"]),
-                            escape(row["note"])))
+                            escape(who), escape(row["note"])))
         parts.append("</table>")
 
     parts.append("<h2>The routes</h2>")

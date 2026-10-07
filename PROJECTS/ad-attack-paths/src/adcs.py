@@ -43,6 +43,13 @@ AUTHENTICATION_EKUS = frozenset({CLIENT_AUTHENTICATION, SMART_CARD_LOGON, ANY_PU
 WRITE_RIGHTS = frozenset({"GenericAll", "GenericWrite", "WriteDacl", "WriteOwner",
                           "WriteProperty", "AllExtendedRights", "Owns"})
 
+# Rights that let a principal obtain a certificate from a template. Enrollment is the
+# one that matters: a template that permits an escalation nobody can enroll in is a
+# configuration waiting to happen, and a template that permits one *and* grants
+# enrollment to a wide group is a live route.
+ENROLLMENT_RIGHTS = frozenset({"Enroll", "AutoEnroll", "GenericAll",
+                               "AllExtendedRights", "Owns"})
+
 
 @dataclass
 class Escalation:
@@ -52,26 +59,49 @@ class Escalation:
     template: str
     authority: str
     conditions: list = field(default_factory=list)
+    # who can change the template (ESC4)
     principals: list = field(default_factory=list)
+    # who can obtain a certificate from it -- the difference between a template that
+    # permits an escalation and one somebody can actually use
+    enrollees: list = field(default_factory=list)
     note: str = ""
 
     @property
     def severity(self) -> str:
+        """Graded by what can actually be done, not by the condition's name.
+
+        A template that permits an escalation nobody can enroll in is a misconfiguration
+        waiting for one permission change; one that any authenticated principal can
+        enroll in is a live route. Reporting both as Critical would put the two
+        together, and the second is the one that matters.
+        """
         if "ESC1" in self.conditions:
-            return "Critical"
+            return "Critical" if self.exploitable else "High"
         if "ESC4" in self.conditions or "ESC2" in self.conditions:
-            return "High"
-        return "Medium"
+            return "High" if self.exploitable else "Medium"
+        return "Medium" if self.exploitable else "Low"
 
     def describe(self) -> str:
         return "%s (%s)" % (self.template, ", ".join(self.conditions))
+
+    @property
+    def exploitable(self) -> bool:
+        """Whether somebody can actually obtain a certificate from this template.
+
+        A template whose conditions are met but which only its administrators can
+        enroll in is a misconfiguration with no way in. One that any authenticated
+        principal can enroll in is a live route, and the difference is worth stating
+        rather than leaving to the reader to work out from the permissions.
+        """
+        return bool(self.enrollees)
 
     def as_dict(self) -> dict:
         """An explicit serialiser. `__dict__` would omit severity, which is a property
         and therefore not an instance attribute, and the report would key-error on it."""
         return {"template": self.template, "template_sid": self.template_sid,
                 "authority": self.authority, "conditions": list(self.conditions),
-                "principals": list(self.principals), "severity": self.severity,
+                "principals": list(self.principals), "enrollees": list(self.enrollees),
+                "severity": self.severity, "exploitable": self.exploitable,
                 "note": self.note}
 
 
@@ -139,6 +169,8 @@ def assess_template(template, authorities=(), privileged=frozenset()) -> list:
         conditions=conditions,
         principals=sorted(writers or {ace.principal_sid for ace in template.aces
                                       if ace.right in WRITE_RIGHTS}),
+        enrollees=sorted({ace.principal_sid for ace in template.aces
+                          if ace.right in ENROLLMENT_RIGHTS}),
         note="; ".join(note[c] for c in conditions),
     )]
 

@@ -377,6 +377,37 @@ def test_a_template_only_administrators_can_write_is_not_a_finding(forest, graph
                 "%s is already privileged" % graph.name_of(principal)
 
 
+def test_a_permitted_escalation_says_who_can_actually_use_it(forest, graph):
+    """A template that permits an escalation nobody can enroll in is a misconfiguration
+    waiting for one permission change; one a wide group can enroll in is a live route.
+    Reporting the condition without the enrollment leaves the reader to work out from
+    the permissions whether it is real, which is the work the tool is for."""
+    privileged = {j.sid for j in crown_jewels(forest, graph)}
+    found = certificate_escalations(forest, graph, privileged)
+    live = [e for e in found if e.exploitable]
+    assert live, "the data contains templates a group can enroll in"
+    for finding in live:
+        assert finding.enrollees
+        for principal in finding.enrollees:
+            assert forest.get(principal) is not None, \
+                "an enrollee must be an object in the directory"
+
+
+def test_severity_follows_whether_the_template_can_be_used(forest, graph):
+    """Grading by the condition's name would call two very different templates the same
+    thing."""
+    privileged = {j.sid for j in crown_jewels(forest, graph)}
+    found = certificate_escalations(forest, graph, privileged)
+    esc1 = [e for e in found if "ESC1" in e.conditions]
+    assert esc1, "the data contains an ESC1 template"
+    for finding in esc1:
+        assert finding.severity == ("Critical" if finding.exploitable else "High")
+    # and a template nobody can enroll in cannot be Critical
+    for finding in found:
+        if not finding.exploitable:
+            assert finding.severity != "Critical"
+
+
 def test_a_template_nobody_has_enabled_is_not_reported(forest, graph):
     """A template that is not enabled on an authority cannot issue anything."""
     found = certificate_escalations(forest, graph)
