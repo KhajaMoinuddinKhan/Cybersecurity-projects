@@ -115,8 +115,16 @@ def build_graph(data: CollectorData) -> AttackGraph:
         _add_access_control_edges(graph, node)
         _add_membership_edges(graph, node)
         _add_session_edges(graph, node)
+        _add_local_membership_edges(graph, node)
+        _add_privilege_edges(graph, node)
+        _add_service_principal_edges(graph, node)
         _add_trust_edges(graph, node)
         _add_containment_edges(graph, node)
+
+    # Policy links are resolved after everything else, because a policy reaches every
+    # object underneath the container it is linked to and the containment tree has to
+    # be complete before that can be walked.
+    _add_policy_edges(graph)
 
     # A right that appears in the data and not in the table is recorded rather than
     # dropped. Treating an unknown right as harmless is the same mistake as treating
@@ -167,14 +175,161 @@ def _add_membership_edges(graph: AttackGraph, node: Node) -> None:
 
 
 def _add_session_edges(graph: AttackGraph, node: Node) -> None:
-    """A session runs machine-to-user: compromising the machine yields the user."""
+    """A session runs machine-to-user: compromising the machine yields the user.
+
+    Three collections carry sessions and the first is the one that is usually empty.
+    The registry and privileged collections hold the real ones in this data, and
+    reading only the first missed every session in the forest.
+    """
     if node.kind != "computer":
         return
-    for user_sid in node.sessions:
-        graph.add(Edge(source=node.sid, target=user_sid, kind="session",
-                       right="HasSession", capability=capability_of("HasSession"),
-                       note="compromising this machine yields the credentials of "
-                            "whoever is logged into it"))
+    for label, sessions in (("a session", node.sessions),
+                            ("a session recorded in the registry", node.registry_sessions),
+                            ("a privileged session", node.privileged_sessions)):
+        for user_sid in sessions:
+            graph.add(Edge(source=node.sid, target=user_sid, kind="session",
+                           right="HasSession", capability=capability_of("HasSession"),
+                           note="compromising this machine yields the credentials of "
+                                "whoever is logged into it (%s)" % label))
+
+
+def _add_local_membership_edges(graph: AttackGraph, node: Node) -> None:
+    """Membership of a machine's local administrators group.
+
+    The group is identified by its well-known relative identifier rather than by its
+    name, for the same reason as everywhere else: the name is a label. 544 is the
+    local administrators group on every Windows machine, whatever it is called in the
+    language the machine runs.
+    """
+    if node.kind != "computer":
+        return
+    for group in node.local_groups:
+        group_id = str(group.get("ObjectIdentifier") or "")
+        if not group_id.endswith("-544"):
+            continue
+        for member in group.get("Results") or []:
+            member_sid = str(member.get("ObjectIdentifier") or "") \
+                if isinstance(member, dict) else str(member)
+            if not member_sid:
+                continue
+            graph.add(Edge(source=member_sid, target=node.sid, kind="ace",
+                           right="LocalAdminTo", capability="access",
+                           note="a member of the machine's local administrators group, "
+                                "which is local administrator on that machine"))
+
+
+def _add_privilege_edges(graph: AttackGraph, node: Node) -> None:
+    """A right held on a machine, which is escalation on that machine."""
+    if node.kind != "computer":
+        return
+    for entry in node.user_rights:
+        privilege = str(entry.get("Privilege") or "")
+        right = right_for(privilege)
+        if right is None:
+            if privilege:
+                graph.unknown_rights.setdefault(node.sid, set()).add(privilege)
+            continue
+        for holder in entry.get("Results") or []:
+            holder_sid = str(holder.get("ObjectIdentifier") or "") \
+                if isinstance(holder, dict) else str(holder)
+            if not holder_sid:
+                continue
+            graph.add(Edge(source=holder_sid, target=node.sid, kind="ace",
+                           right=right.name, capability=right.capability,
+                           note=right.note))
+
+
+def _add_service_principal_edges(graph: AttackGraph, node: Node) -> None:
+    """A service principal name, and where it is hosted.
+
+    An account with an SPN can have a service ticket requested for it by any
+    authenticated principal, and that ticket is encrypted with the account's password
+    -- so the account is attackable offline. The host the service runs on is the
+    machine the ticket grants access to.
+    """
+    if node.kind != "user":
+        return
+    names = node.properties.get("serviceprincipalnames") or []
+    if names and node.enabled:
+        graph.add(Edge(source=node.sid, target=node.sid, kind="ace",
+                       right="Kerberoastable", capability="credential",
+                       note="holds %d service principal name(s), so any authenticated "
+                            "principal can request a ticket encrypted with its password"
+                            % len(names)))
+    for target in node.spn_targets:
+        if not isinstance(target, dict):
+            continue
+        computer_sid = str(target.get("ComputerSID") or "")
+        if not computer_sid or graph.data.get(computer_sid) is None:
+            continue
+        service = str(target.get("Service") or "")
+        right = right_for("SQLAdmin") if "SQL" in service.upper() else None
+        graph.add(Edge(source=node.sid, target=computer_sid, kind="ace",
+                       right=(right.name if right else "SPNHost"),
+                       capability=(right.capability if right else "access"),
+                       note="the account's service principal name is hosted on this "
+                            "machine as %s, so the service ticket grants access to it"
+                            % (service or "an unnamed service")))
+
+
+def _add_policy_edges(graph: AttackGraph) -> None:
+    """A policy reaches every object underneath the container it is linked to.
+
+    This is the one case where containment *is* an attack edge, and it is worth being
+    precise about why. Holding an object says nothing about who may modify it, so
+    containment is never walked. But a policy linked to a container is applied to the
+    computers and users inside it, so whoever can edit the policy changes the
+    configuration of every one of them -- which is control of them. The edge is from
+    the policy, not from the container, and the descendants are resolved transitively
+    because a policy applies to a whole subtree.
+
+    The targets are limited to accounts and machines, and that limit is the point. A
+    policy configures computers and users; it does not grant control of a *group
+    object*. Applying the edge to every descendant produced a path from the default
+    domain policy to the domain administrators group, which is not something anybody
+    can walk -- the same category error as walking containment itself, and it read
+    just as convincingly.
+    """
+    policies = {}
+    for node in graph.data.nodes.values():
+        if node.kind == "gpo":
+            policies[node.sid.lower()] = node
+
+    for node in graph.data.nodes.values():
+        if node.kind not in ("domain", "ou", "container", "site"):
+            continue
+        for link in node.links:
+            if not isinstance(link, dict):
+                continue
+            guid = str(link.get("GUID") or "").strip("{}").lower()
+            policy = policies.get(guid)
+            if policy is None:
+                continue
+            for descendant in _descendants(graph, node.sid):
+                target_node = graph.data.get(descendant)
+                if target_node is None or target_node.kind not in ("user", "computer"):
+                    continue      # a policy configures accounts and machines, not groups
+                graph.add(Edge(source=policy.sid, target=descendant, kind="ace",
+                               right="GPOAppliesTo", capability="control",
+                               note="the policy is linked to %s, so it applies to this "
+                                    "object and editing it changes this object"
+                                    % graph.name_of(node.sid)))
+
+
+def _descendants(graph: AttackGraph, root: str) -> set:
+    """Everything under a container, transitively."""
+    found, frontier = set(), [root]
+    children = {}
+    for node in graph.data.nodes.values():
+        if node.contained_by:
+            children.setdefault(node.contained_by, []).append(node.sid)
+    while frontier:
+        current = frontier.pop()
+        for child in children.get(current, []):
+            if child not in found:
+                found.add(child)
+                frontier.append(child)
+    return found
 
 
 def _add_trust_edges(graph: AttackGraph, node: Node) -> None:

@@ -94,9 +94,16 @@ class Node:
     contained_by: str = ""
     child_objects: list = field(default_factory=list)
     links: list = field(default_factory=list)
+    # Local group membership per machine, and the rights held on it. Both are
+    # collected per machine and often refused, so an empty list is a fact about the
+    # collection rather than about the machine.
     local_groups: list = field(default_factory=list)
     user_rights: list = field(default_factory=list)
     is_dc: bool = False
+    # which policy applies to this container, and which container a policy is linked to
+    links: list = field(default_factory=list)
+    # where this account's service principal name is hosted
+    spn_targets: list = field(default_factory=list)
     primary_group: str = ""
     sid_history: list = field(default_factory=list)
     spn_targets: list = field(default_factory=list)
@@ -337,8 +344,8 @@ def _build_node(entry: dict, kind: str, source_file: str) -> Node | None:
         contained_by=_identifier(entry, "ContainedBy"),
         child_objects=[_identifier({"x": c}, "x") for c in (entry.get("ChildObjects") or [])],
         links=list(entry.get("Links") or []),
-        local_groups=list(entry.get("LocalGroups") or []),
-        user_rights=list(entry.get("UserRights") or []),
+        local_groups=[g for g in (entry.get("LocalGroups") or []) if isinstance(g, dict)],
+        user_rights=[r for r in (entry.get("UserRights") or []) if isinstance(r, dict)],
         is_dc=bool(entry.get("IsDC")),
         primary_group=str(entry.get("PrimaryGroupSID") or ""),
         sid_history=[str(s) for s in (entry.get("HasSIDHistory") or [])],

@@ -120,11 +120,36 @@ archive reports the trust as an unresolved reference and misses everything beyon
 `--cut-deep-only` computes the smallest change using only the routes that need an
 intermediate object.
 
+## The fields that were parsed and never used
+
+An audit of which collector fields actually produce edges found four that were read and
+then thrown away, and three of them carried real paths:
+
+- **`RegistrySessions`** holds the sessions in this data. The `Sessions` field is empty
+  throughout the forest, and reading only that missed every session in it. The registry
+  and privileged collections are read now, and the first route this found was a
+  workstation whose session belongs to a privileged account.
+- **`LocalGroups`** gives membership of a machine's local administrators group,
+  identified by RID 544 rather than by name for the same reason as everywhere else.
+- **`SPNTargets`** is where an account's service principal name is hosted, which is a
+  credential route: any authenticated principal can request a service ticket encrypted
+  with that account's password.
+- **GPO `Links`** are policy abuse. A policy linked to a container applies to the
+  computers and users inside it, so editing the policy configures them. This is the one
+  case where containment *is* an attack edge, and it is from the policy rather than from
+  the container.
+
+That last one nearly went in wrong. Applying the edge to every descendant produced a
+path from the default domain policy to the domain administrators group, which is not
+something anybody can walk: a policy configures computers and users, and does not grant
+control of a group object. It read exactly as convincingly as the real paths beside it.
+
 ## Limits
 
 The tool reads what the collector collected. Sessions, local group membership and
-registry data are collected per machine and are absent from this data, so no route here
-depends on one; where they exist they are walked.
+registry data are collected per machine and are often refused -- this data has
+`ErrorAccessDenied` on the privileged session collection for four of the five machines,
+so the routes here understate what is present rather than overstate it.
 
 Certificate services rights are modelled -- `Enroll`, `ManageCA`, `ManageCertificates`
 -- but the escalation techniques built on them are not enumerated. A certificate

@@ -172,6 +172,38 @@ RIGHTS = (
     Right("ReadCA", "access",
           note="read the certificate authority's configuration"),
 
+    # --- local machine membership ---------------------------------------------
+    Right("LocalAdminTo", "access",
+          note="a member of the machine's local administrators group, which is local "
+               "administrator on that machine by definition"),
+    Right("SeRemoteInteractiveLogonRight", "access",
+          note="may log on interactively over the network"),
+    Right("SeBackupPrivilege", "control",
+          note="may read any file regardless of its permissions, which is reading the "
+               "registry hives and therefore every local secret"),
+    Right("SeDebugPrivilege", "control",
+          note="may debug any process, which is reading another process's memory and "
+               "therefore its credentials"),
+    Right("SeImpersonatePrivilege", "control",
+          note="may impersonate a token, which is escalation to SYSTEM on that machine"),
+    Right("SeTakeOwnershipPrivilege", "control",
+          note="may take ownership of any object, which is the permission to grant "
+               "yourself anything"),
+    Right("SeTcbPrivilege", "control",
+          note="acts as part of the operating system, which is full local control"),
+    Right("SeLoadDriverPrivilege", "control",
+          note="may load a kernel driver, which is running code in the kernel"),
+    Right("Kerberoastable", "credential",
+          note="holds a service principal name, so any authenticated principal can "
+               "request a service ticket encrypted with its password and attack it "
+               "offline"),
+    Right("ASREPRoastable", "credential",
+          note="does not require pre-authentication, so anyone can request a ticket "
+               "encrypted with its password and attack it offline"),
+    Right("GPOAppliesTo", "control",
+          note="the policy applies to this object, so whoever can edit the policy "
+               "controls the object"),
+
     # --- container and policy ------------------------------------------------
     Right("Contains", "membership",
           note="the container holds the object, which is not a right but is how a "

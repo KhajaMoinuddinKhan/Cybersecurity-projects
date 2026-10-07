@@ -206,6 +206,89 @@ def test_the_graph_reaches_every_object_the_data_holds(forest, graph):
     assert len(graph.data.nodes) == len(forest.nodes)
 
 
+# --- the fields that were parsed and never used ----------------------------
+
+def test_registry_sessions_are_read_and_become_edges(graph):
+    """The first version read only `Sessions`, which is empty throughout this data,
+    and missed every session in the forest. The registry collection holds the real
+    ones."""
+    sessions = [e for e in graph.edges if e.right == "HasSession"]
+    assert sessions, "the data contains sessions and they must produce edges"
+    for edge in sessions:
+        assert graph.data.get(edge.source).kind == "computer"
+        assert graph.data.get(edge.target) is not None
+
+
+def test_a_session_runs_from_the_machine_to_the_user_not_the_other_way(graph):
+    for edge in (e for e in graph.edges if e.right == "HasSession"):
+        assert edge.source != edge.target
+
+
+def test_local_administrator_membership_is_identified_by_relative_identifier(graph):
+    """544 is the local administrators group on every Windows machine, whatever it is
+    called. Matching on the name would miss a localised machine."""
+    local = [e for e in graph.edges if e.right == "LocalAdminTo"]
+    assert local, "the data contains local group membership"
+    for edge in local:
+        assert graph.data.get(edge.target).kind == "computer"
+
+
+def test_a_privileged_session_is_recorded_separately_from_an_ordinary_one(forest):
+    """They are different collections and one of them is the interesting one."""
+    for computer in forest.by_kind("computer"):
+        assert isinstance(computer.privileged_sessions, list)
+        assert isinstance(computer.registry_sessions, list)
+
+
+def test_a_policy_reaches_the_accounts_and_machines_it_applies_to(graph):
+    """A policy configures computers and users. It does not grant control of a group
+    object, and applying the edge to every descendant produced a path from the default
+    domain policy to the domain administrators group that nobody could walk."""
+    applies = [e for e in graph.edges if e.right == "GPOAppliesTo"]
+    assert applies, "the data contains policy links"
+    for edge in applies:
+        assert graph.data.get(edge.source).kind == "gpo"
+        assert graph.data.get(edge.target).kind in ("user", "computer"), \
+            "%s is not something a policy configures" % graph.name_of(edge.target)
+
+
+def test_a_policy_link_resolves_by_identifier(forest, graph):
+    """The links carry a GUID and the policies are keyed by one. A mismatch would
+    silently produce no edges at all."""
+    linked = {str(link.get("GUID") or "").strip("{}").lower()
+              for node in forest.nodes.values() for link in node.links}
+    policies = {node.sid.lower() for node in forest.by_kind("gpo")}
+    assert linked & policies, "at least one link must resolve to a collected policy"
+
+
+def test_a_service_principal_name_is_a_credential_route(graph):
+    """Any authenticated principal can request a service ticket for an account with an
+    SPN, and that ticket is encrypted with the account's password."""
+    assert any(e.right == "Kerberoastable" for e in graph.edges)
+
+
+def test_a_privilege_held_on_a_machine_is_an_edge(graph):
+    """A right like SeDebugPrivilege is escalation on that machine, and the data says
+    who holds it where it was collected."""
+    privileges = {right.name for right in RIGHTS}
+    for edge in graph.edges:
+        if edge.kind == "ace" and edge.right in ("SeDebugPrivilege", "SeBackupPrivilege",
+                                                 "SeImpersonatePrivilege"):
+            assert graph.data.get(edge.target).kind == "computer"
+
+
+def test_every_newly_parsed_field_is_used_or_reported(graph):
+    """The audit that found these gaps: a field the parser reads and the graph ignores
+    is data the tool collected and then threw away."""
+    import re
+    source = (PROJECT / "src" / "graph.py").read_text(encoding="utf-8")
+    for field in ("sessions", "privileged_sessions", "registry_sessions", "local_groups",
+                  "user_rights", "spn_targets", "links", "sid_history", "primary_group",
+                  "members", "aces", "trusts", "contained_by"):
+        assert re.search(r"\b%s\b" % field, source), \
+            "%s is parsed and never used" % field
+
+
 # --- the crown jewels -----------------------------------------------------
 
 def test_the_seed_set_is_derived_and_not_a_list_of_names(forest):
