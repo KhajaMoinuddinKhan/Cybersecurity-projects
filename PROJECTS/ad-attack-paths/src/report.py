@@ -355,6 +355,13 @@ def to_html(document: dict) -> str:
                  % (graph["nodes"], graph["edges"], graph["traversable"],
                     crown["total"], crown["seeded"], crown["derived"]))
 
+    parts.append("<h2>The forest</h2>")
+    parts.append("<ul>%s</ul>" % "".join("<li><code>%s</code></li>" % escape(d)
+                                         for d in document["forest"]))
+    parts.append("<p>Objects by type: %s.</p>"
+                 % escape(", ".join("%s %d" % (kind, count)
+                                    for kind, count in sorted(document["counts"].items()))))
+
     parts.append("<h2>Crown jewels</h2>")
     parts.append("<h3>Privileged on their own evidence (%d)</h3>" % crown["seeded"])
     parts.append("<table><tr><th>Type</th><th>Object</th><th>Why</th></tr>")
@@ -394,8 +401,40 @@ def to_html(document: dict) -> str:
         parts.append("</table>")
 
     if crown["derived"] > ROUTES_SHOWN:
-        parts.append("<p>Showing the %d shortest of %d routes. The remainder are in the "
-                     "crown jewel table above, which is not truncated.</p>"
+        parts.append("<p>Showing the %d shortest of %d. The remainder are in the crown "
+                     "jewel table above, which is not truncated.</p>"
+                     % (ROUTES_SHOWN, crown["derived"]))
+        chains = document.get("certificate_chains") or []
+        if chains:
+            parts.append("<h3>Combinations</h3><p>Each template above is judged on its "
+                         "own attributes, and the judgement is right. These are the pairs "
+                         "that are stronger than either half, because the first is how "
+                         "you get the credential the second accepts.</p><ul>")
+            for chain in chains:
+                parts.append("<li><strong>%s</strong> (%s) -- %s<br>Templates: %s</li>"
+                             % (escape(", ".join(chain["conditions"])),
+                                escape(chain["severity"]), escape(chain["note"]),
+                                escape(", ".join(chain["templates"]))))
+            parts.append("</ul>")
+        managers = document.get("authority_managers") or []
+        if managers:
+            parts.append("<h3>Who can change an authority</h3><p>The right to manage an "
+                         "authority is the right to enable a template that is not "
+                         "enabled, so it combines with every condition above. Only "
+                         "holders without administrative rights are listed.</p>"
+                         "<table><tr><th>Principal</th><th>Right</th>"
+                         "<th>Authority</th></tr>")
+            for manager in managers:
+                parts.append("<tr><td><code>%s</code></td><td><code>%s</code></td>"
+                             "<td><code>%s</code> (%s)</td></tr>"
+                             % (escape(manager["principal"]), escape(manager["right"]),
+                                escape(manager["authority"]),
+                                escape(manager.get("authority_kind", ""))))
+            parts.append("</table>")
+
+    if crown["derived"] > ROUTES_SHOWN:
+        parts.append("<p>Showing the %d shortest of %d. The remainder are in the crown "
+                     "jewel table above, which is not truncated.</p>"
                      % (ROUTES_SHOWN, crown["derived"]))
     parts.append("<h2>The routes</h2>")
     for jewel in crown["derived_list"][:ROUTES_SHOWN]:

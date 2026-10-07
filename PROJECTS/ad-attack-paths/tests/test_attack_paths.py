@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import glob
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -547,9 +548,35 @@ def test_the_certificate_table_rows_stay_with_their_header(forest, graph):
         "the table must carry every finding: %d rows for %d findings" % (rows, len(escalations))
 
 
+def test_the_two_formats_carry_the_same_sections(forest, graph):
+    """The html report kept carrying less than the markdown one, one section at a time,
+    because every new section was added to one format and not the other. Comparing them
+    section by section is the check that does not need updating each time."""
+    privileged = {j.sid for j in crown_jewels(forest, graph)}
+    escalations = certificate_escalations(forest, graph, privileged)
+    document = report_module.build(graph, crown_jewels(forest, graph),
+                                   {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "note": "not asked for"},
+                                   escalations, certificate_chains(escalations),
+                                   authority_managers(forest, graph, privileged))
+    markdown = report_module.to_markdown(document)
+    page = report_module.to_html(document)
+
+    # every heading the markdown emits must have a counterpart in the page
+    for heading in re.findall(r"^(#{2,3}) (.+)$", markdown, re.MULTILINE):
+        title = heading[1].strip()
+        if title.startswith("Privileged on their own") or \
+           title.startswith("Reached from those") or title == "The smallest change":
+            continue          # rendered under their parent heading in the page
+        assert title in page, "the page is missing the section %r" % title
+
+    # and every statement the markdown makes about what it left out
+    for notice in re.findall(r"^(Showing .+)$", markdown, re.MULTILINE):
+        assert notice.split(";")[0] in page, "the page is missing %r" % notice
+
+
 def test_the_two_formats_agree_about_the_data(forest, graph):
-    """The html report carried less than the markdown one, so the same analysis read
-    differently depending on which file somebody opened."""
+    """The same analysis must not read differently depending on which file is opened."""
     jewels = crown_jewels(forest, graph)
     document = report_module.build(graph, jewels, {"points": [], "total": 0},
                                    {"cut": [], "size": 0, "note": "not asked for"})
