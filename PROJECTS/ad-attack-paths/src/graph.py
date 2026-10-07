@@ -503,6 +503,33 @@ def _add_certificate_authority_edges(graph: AttackGraph, node: Node) -> None:
                             "edit it can issue certificates from it"))
 
 
+def unfiltered_trusts(data) -> list:
+    """Trusts that will accept an identifier from the other side.
+
+    SID filtering is the mechanism that stops a principal carrying an identifier from
+    another domain being accepted there. With it on, a trust permits authentication and
+    grants nothing, which is why it is not walked. With it off, a principal holding a
+    SID from the other domain *is* that identifier there -- so the trust is not the
+    route, the SID history is, and the trust is what lets it through.
+
+    Four trusts in this data have it off, and the tool said nothing about any of them.
+    """
+    found = []
+    for node in data.by_kind("domain"):
+        for trust in node.trusts:
+            if trust.get("SidFilteringEnabled") is False:
+                found.append({
+                    "domain": node.name,
+                    "trusted": str(trust.get("TargetDomainName") or "?"),
+                    "trust_type": str(trust.get("TrustType") or "?"),
+                    "direction": str(trust.get("TrustDirection") or "?"),
+                    "note": "SID filtering is off, so an identifier from %s is accepted "
+                            "here: a principal carrying one holds whatever it was "
+                            "granted on the other side" % (trust.get("TargetDomainName") or "?"),
+                })
+    return found
+
+
 def _add_policy_edges(graph: AttackGraph) -> None:
     """A policy reaches every object underneath the container it is linked to.
 

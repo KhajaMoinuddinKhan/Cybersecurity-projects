@@ -39,6 +39,20 @@ CERTIFICATE_REQUEST_AGENT = "1.3.6.1.4.1.311.20.2.1"
 # An authentication purpose: a certificate carrying one of these is a logon.
 AUTHENTICATION_EKUS = frozenset({CLIENT_AUTHENTICATION, SMART_CARD_LOGON, ANY_PURPOSE})
 
+# The policy flag that lets a requester put any name in the subject alternative name
+# of a certificate, whatever the template says. A certificate authority carrying it
+# will issue a logon as anybody from a template that was never meant to.
+SAN_FLAG = "EDITF_ATTRIBUTESUBJECTALTNAME2"
+
+# The policy flag that makes the authority use the request's subject rather than the
+# template's, which is the same outcome by a different route.
+SUBJECT_FLAG = "EDITF_SUBJECTALTNAMECHECKONREQUEST"
+
+# Rights over a certificate authority or another public key object that let its holder
+# change it, which is the authority itself.
+PKI_WRITE_RIGHTS = frozenset({"GenericAll", "GenericWrite", "WriteDacl", "WriteOwner",
+                              "WriteProperty", "Owns", "ManageCA", "ManageCertificates"})
+
 # Rights over a template that let its holder change it.
 WRITE_RIGHTS = frozenset({"GenericAll", "GenericWrite", "WriteDacl", "WriteOwner",
                           "WriteProperty", "AllExtendedRights", "Owns"})
@@ -78,9 +92,17 @@ class Escalation:
         enroll in is a live route. Reporting both as Critical would put the two
         together, and the second is the one that matters.
         """
-        if "ESC1" in self.conditions:
-            return "Critical" if self.exploitable else "High"
+        if "ESC1" in self.conditions or "ESC6" in self.conditions:
+            return "Critical" if self.exploitable or "ESC6" in self.conditions else "High"
+        # ESC5 and ESC7 are the authority itself being changeable by somebody who
+        # should not be able to change it, which reaches every certificate it issues.
+        # The first version graded them Low, which put a workstation that can rewrite
+        # the authority's permissions below a template nobody can enroll in.
+        if "ESC5" in self.conditions or "ESC7" in self.conditions:
+            return "Critical" if self.principals else "Low"
         if "ESC4" in self.conditions or "ESC2" in self.conditions:
+            return "High" if self.exploitable else "Medium"
+        if "ESC15" in self.conditions:
             return "High" if self.exploitable else "Medium"
         return "Medium" if self.exploitable else "Low"
 
@@ -138,6 +160,106 @@ def _authenticates(properties: dict) -> bool:
     return bool(_ekus(properties) & AUTHENTICATION_EKUS)
 
 
+def _schema_one_supplies_subject(properties: dict) -> bool:
+    """Whether a version-one template lets the requester choose the subject.
+
+    Version-one templates predate the name flags, so the subject is taken from the
+    request rather than from the template, and the request can carry a subject
+    alternative name that the authority copies into the certificate. A version-two
+    template with the same intent is ESC1 and is caught there; this is the same outcome
+    reached by the older schema, which the name flags do not describe at all.
+    """
+    try:
+        version = int(properties.get("schemaversion"))
+    except (TypeError, ValueError):
+        return False
+    if version != 1:
+        return False
+    return properties.get("enrolleesuppliessubject") is True
+
+
+def assess_authority(authority, privileged=frozenset()) -> list:
+    """The conditions that belong to the authority rather than to a template.
+
+    ESC5 is a public key object a principal without administrative rights can write to,
+    which is the authority's permissions being changeable by somebody who should not be
+    able to change them. ESC6 is a policy flag that makes every template able to carry a
+    chosen name, whether or not the template permits it. ESC7 is the authority being
+    manageable by such a principal, which reaches the same place through its
+    configuration.
+    """
+    found = []
+    properties = authority.properties or {}
+    flags = str(properties.get("flags") or "").upper()
+    for flag, condition, note in (
+            (SAN_FLAG, "ESC6",
+             "the authority is flagged to accept a subject alternative name from the "
+             "request, so every template it issues can carry a name the template does "
+             "not permit"),
+            (SUBJECT_FLAG, "ESC6",
+             "the authority is flagged to take the subject from the request rather than "
+             "the template, so a certificate can name anybody")):
+        if flag in flags:
+            found.append(Escalation(template_sid=authority.sid, template=authority.name,
+                                    authority=authority.name, conditions=[condition],
+                                    note=note))
+
+    holders = {}
+    for ace in authority.aces:
+        if ace.right not in PKI_WRITE_RIGHTS or ace.principal_sid in privileged:
+            continue
+        holders.setdefault(ace.right, set()).add(ace.principal_sid)
+    if holders:
+        writers = sorted({sid for group in holders.values() for sid in group})
+        found.append(Escalation(
+            template_sid=authority.sid, template=authority.name,
+            authority=authority.name, conditions=["ESC5", "ESC7"],
+            principals=writers,
+            note="a principal without administrative rights can change this authority's "
+                 "permissions or its configuration (%s), and managing an authority is "
+                 "enabling a template that is not enabled"
+                 % ", ".join(sorted(holders))))
+    return found
+
+
+def assess_certificate_binding(data) -> dict:
+    """Whether a certificate for one identity can be accepted as another.
+
+    Two registry settings decide it, and they are the difference between a stolen
+    certificate being useless and being a logon. Neither is populated in this data, and
+    that is reported as unknown rather than as safe -- an uncollected setting is not a
+    setting that is off, which is the same mistake as treating an unread rule as clear.
+    """
+    def reading(entry):
+        """The value, or None when the collector did not read it.
+
+        The registry entries are objects carrying a value, a Collected flag and a
+        failure reason. The first version of this checked only whether a value was
+        present, and every entry has one -- so three machines that were refused access
+        were reported as read, with a value of zero, which is the most dangerous
+        possible answer: it says weak binding is switched off when nobody knows.
+        """
+        if not isinstance(entry, dict):
+            return entry
+        if entry.get("Collected") is False:
+            return None
+        return entry.get("Value")
+
+    seen = {"collected": [], "missing": []}
+    for node in data.by_kind("computer"):
+        registry = node.dc_registry or {}
+        if not registry:
+            continue
+        mapping = reading(registry.get("CertificateMappingMethods"))
+        binding = reading(registry.get("StrongCertificateBindingEnforcement"))
+        if mapping is None and binding is None:
+            seen["missing"].append(node.name)
+        else:
+            seen["collected"].append({"computer": node.name, "mapping": mapping,
+                                      "binding": binding})
+    return seen
+
+
 def assess_template(template, authorities=(), privileged=frozenset()) -> list:
     """The conditions a single template satisfies. Derived, never matched on its name."""
     properties = template.properties or {}
@@ -153,6 +275,8 @@ def assess_template(template, authorities=(), privileged=frozenset()) -> list:
         conditions.append("ESC3")      # may request certificates for others
     if writers:
         conditions.append("ESC4")      # a principal without rights can edit it
+    if _schema_one_supplies_subject(properties):
+        conditions.append("ESC15")     # a version-one template takes the request's name
 
     if not conditions:
         return []
@@ -165,6 +289,9 @@ def assess_template(template, authorities=(), privileged=frozenset()) -> list:
                 "holder can request certificates on behalf of others",
         "ESC4": "a principal without administrative rights can write to this template, "
                 "so it can be changed into any of the other conditions",
+        "ESC15": "a version-one template takes the subject from the request, so the "
+                 "request can name anybody -- the name flags do not describe this, "
+                 "because the schema predates them",
     }
     return [Escalation(
         template_sid=template.sid,
@@ -271,13 +398,19 @@ def certificate_escalations(data, graph, privileged=frozenset()) -> list:
                 enabled_by.setdefault(edge.target, []).append(node.name)
 
     found = []
+    for authority in data.by_kind("enterpriseca"):
+        found.extend(assess_authority(authority, privileged))
     for template in data.by_kind("certtemplate"):
         if template.sid not in enabled_by:
             continue          # a template nobody has enabled cannot issue anything
-        for escalation in assess_template(template, enabled_by[template.sid], privileged):
-            escalation.enrollee_names = [graph.name_of(sid) for sid in escalation.enrollees]
-            escalation.principals = [graph.name_of(sid) for sid in escalation.principals]
-            found.append(escalation)
+        found.extend(assess_template(template, enabled_by[template.sid], privileged))
+
+    # Every finding, whichever assessment produced it, has its identifiers resolved to
+    # names on the way out. The authority findings skipped this and printed a SID where
+    # the template findings printed a name.
+    for escalation in found:
+        escalation.enrollee_names = [graph.name_of(sid) for sid in escalation.enrollees]
+        escalation.principals = [graph.name_of(sid) for sid in escalation.principals]
     found.sort(key=lambda e: (e.severity, e.template))
     return found
 

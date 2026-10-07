@@ -19,7 +19,7 @@ __all__ = ["build", "to_markdown", "to_html"]
 
 
 def build(graph, jewels, choke, cut, escalations=(), chains=(), managers=(),
-          generated_at=None) -> dict:
+          binding=None, trusts=(), generated_at=None) -> dict:
     seeded = [jewel for jewel in jewels if not jewel.derived]
     derived = [jewel for jewel in jewels if jewel.derived]
     return {
@@ -40,6 +40,8 @@ def build(graph, jewels, choke, cut, escalations=(), chains=(), managers=(),
         "certificate_escalations": [e.as_dict() for e in escalations],
         "certificate_chains": [c.as_dict() for c in chains],
         "authority_managers": list(managers),
+        "certificate_binding": dict(binding or {}),
+        "unfiltered_trusts": list(trusts),
         "context": _context(graph),
     }
 
@@ -89,6 +91,53 @@ def _clip(text: str, width: int) -> str:
     return text[:width - 1].rstrip() + "\u2026"
 
 
+def _trusts_markdown(document: dict) -> list:
+    """Trusts that will accept an identifier from the other side."""
+    trusts = document.get("unfiltered_trusts") or []
+    if not trusts:
+        return []
+    lines = ["## Trusts that accept an identifier from the other side", "",
+             "A trust permits authentication across it and grants nothing, which is why "
+             "one is not walked as a route. SID filtering is what stops a principal "
+             "carrying an identifier from the other domain being accepted there. Where "
+             "it is off, the identifier is accepted, and the principal holds whatever "
+             "that identifier was granted on the other side.", "",
+             "| Domain | Trusts | Type | Direction |", "| --- | --- | --- | --- |"]
+    for trust in trusts:
+        lines.append("| `%s` | `%s` | %s | %s |" % (trust["domain"], trust["trusted"],
+                                                    trust["trust_type"], trust["direction"]))
+    lines.append("")
+    return lines
+
+
+def _binding_markdown(document: dict) -> list:
+    """Whether a certificate can be accepted as another identity.
+
+    Its own section rather than part of the certificate one: these settings are about
+    what the authority and the machines will accept, which matters whether or not any
+    template permits an escalation. The first version nested it inside the certificate
+    section, which returns nothing when there are no escalations -- so a collection with
+    unread settings and no vulnerable templates said nothing at all about either.
+    """
+    binding = document.get("certificate_binding") or {}
+    if not binding:
+        return []
+    lines = ["## Certificate binding", "",
+             "Two registry settings decide whether a certificate issued for one identity "
+             "is accepted when presented for another. They are the difference between a "
+             "stolen certificate being useless and being a logon.", ""]
+    for entry in binding.get("collected") or []:
+        lines.append("- `%s`: mapping methods `%s`, strong binding `%s`."
+                     % (entry["computer"], entry["mapping"], entry["binding"]))
+    missing = binding.get("missing") or []
+    if missing:
+        lines.append("- **Not read on %d machine(s): %s.** An uncollected setting is not "
+                     "a setting that is off, so nothing is claimed about these."
+                     % (len(missing), ", ".join("`%s`" % m for m in missing[:6])))
+    lines.append("")
+    return lines
+
+
 def _escalations_markdown(document: dict) -> list:
     """The certificate section, or nothing at all when there is nothing to say."""
     rows = document.get("certificate_escalations") or []
@@ -103,7 +152,11 @@ def _escalations_markdown(document: dict) -> list:
              "| Template | Condition | Severity | Who can enroll | Why |",
              "| --- | --- | --- | --- | --- |"]
     for row in rows:
-        enrollees = row.get("enrollee_names") or row.get("enrollees") or []
+        # A finding about who can change something names its holders; a finding about a
+        # template names who can enroll in it. They are different questions and the
+        # column said "nobody" for the first, which is the opposite of the truth.
+        enrollees = (row.get("enrollee_names") or row.get("enrollees")
+                     or row.get("principals") or [])
         who = ", ".join("`%s`" % e for e in enrollees[:3]) if enrollees else \
             "nobody outside the administrators"
         lines.append("| %s | %s | %s | %s | %s |" % (
@@ -199,7 +252,13 @@ def to_markdown(document: dict) -> str:
                                                          jewel["hops"], jewel["reaches"]))
         lines.append("")
 
+    binding = document.get("certificate_binding") or {}
+    if binding:
+        lines.append("### Whether a certificate can be accepted as another identity")
+        lines.append("")
     lines.extend(_escalations_markdown(document))
+    lines.extend(_trusts_markdown(document))
+    lines.extend(_binding_markdown(document))
 
     lines.append("## The routes")
     lines.append("")
@@ -447,6 +506,44 @@ def to_html(document: dict) -> str:
         parts.append("<p>Showing the %d shortest of %d. The remainder are in the crown "
                      "jewel table above, which is not truncated.</p>"
                      % (ROUTES_SHOWN, crown["derived"]))
+    trusts = document.get("unfiltered_trusts") or []
+    if trusts:
+        parts.append("<h2>Trusts that accept an identifier from the other side</h2>"
+                     "<p>A trust permits authentication across it and grants nothing, "
+                     "which is why one is not walked as a route. SID filtering is what "
+                     "stops a principal carrying an identifier from the other domain "
+                     "being accepted there. Where it is off, the identifier is accepted, "
+                     "and the principal holds whatever that identifier was granted on "
+                     "the other side.</p>"
+                     "<table><tr><th>Domain</th><th>Trusts</th><th>Type</th>"
+                     "<th>Direction</th></tr>")
+        for trust in trusts:
+            parts.append("<tr><td><code>%s</code></td><td><code>%s</code></td><td>%s</td>"
+                         "<td>%s</td></tr>"
+                         % (escape(trust["domain"]), escape(trust["trusted"]),
+                            escape(trust["trust_type"]), escape(trust["direction"])))
+        parts.append("</table>")
+
+    binding = document.get("certificate_binding") or {}
+    if binding:
+        parts.append("<h2>Certificate binding</h2><p>Two registry settings decide whether "
+                     "a certificate issued for one identity is accepted when presented "
+                     "for another. They are the difference between a stolen certificate "
+                     "being useless and being a logon.</p><ul>")
+        for entry in binding.get("collected") or []:
+            parts.append("<li><code>%s</code>: mapping methods <code>%s</code>, strong "
+                         "binding <code>%s</code>.</li>"
+                         % (escape(entry["computer"]), escape(str(entry["mapping"])),
+                            escape(str(entry["binding"]))))
+        missing = binding.get("missing") or []
+        if missing:
+            parts.append("<li><strong>Not read on %d machine(s): %s.</strong> An "
+                         "uncollected setting is not a setting that is off, so nothing "
+                         "is claimed about these.</li>"
+                         % (len(missing),
+                            escape(", ".join(missing[:6]))))
+        parts.append("</ul>")
+
     parts.append("<h2>The routes</h2>")
     for jewel in crown["derived_list"][:ROUTES_SHOWN]:
         parts.append("<h3>%s <span class='k'>%d hop(s)</span></h3>"

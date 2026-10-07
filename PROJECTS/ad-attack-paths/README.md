@@ -159,6 +159,23 @@ authentication across it and does not grant control of anything in the other dom
 so treating it as a route invents paths. What actually crosses a trust is SID history
 or a compromised trust key, and that is the field above rather than the trust itself.
 
+## What crosses a trust
+
+A trust on its own permits authentication and grants nothing, so it is recorded and
+never walked. What crosses one is an identifier carried from the other side, and SID
+filtering is the mechanism that stops it being accepted. Where filtering is off, a
+principal holding a SID from the other domain *is* that identifier there, and holds
+whatever it was granted. Every trust in this data has filtering off, and that is
+reported as its own section rather than left implicit in a decision not to walk it.
+
+## Certificate binding
+
+Two registry settings decide whether a certificate issued for one identity is accepted
+when presented for another, which is the difference between a stolen certificate being
+useless and being a logon. They are read, and where the collection was refused them the
+report says so rather than reporting a value: an uncollected setting is not a setting
+that is off, and saying otherwise is the most dangerous answer available.
+
 ## Limits
 
 The tool reads what the collector collected. Sessions, local group membership and

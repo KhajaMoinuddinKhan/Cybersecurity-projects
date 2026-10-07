@@ -111,24 +111,33 @@ def test_every_flaw_the_lab_declares_is_a_flaw_a_check_looks_for():
     seen to fire, and a check that cannot fail is worse than no check.
 
     Three entries are for the crawler rather than for the checks -- one it must refuse
-    to follow, and two it must be able to reach at all -- and they are named here rather
-    than inferred, so that adding a fourth is a decision somebody makes.
+    to follow, and two it must be able to reach at all. They are identified by their
+    detail rather than listed by name: a flaw whose own description says it is about the
+    crawler is one, and a flaw that maps to no check and does not say so is a failure.
     """
     from src.assessment import CHECK_NAMES
-    for_the_crawler = {"lab-state-changing-link", "lab-js-built-link", "lab-declared-path"}
 
-    covered = {flaw["id"][len("lab-"):] for flaw in FLAWS
-               if flaw["id"] not in for_the_crawler}
+    def for_the_crawler(flaw):
+        detail = (flaw.get("detail") or "").lower()
+        return "crawler" in detail
+
+    unnamed = [f["id"] for f in FLAWS
+               if f["id"][len("lab-"):] not in CHECK_NAMES and not for_the_crawler(f)]
+    assert not unnamed, "these flaws map to no check and do not say they are the " \
+                        "crawler's: %s" % unnamed
+
+    covered = {flaw["id"][len("lab-"):] for flaw in FLAWS if not for_the_crawler(flaw)}
     unmeasured = covered - set(CHECK_NAMES)
     assert not unmeasured, "the lab declares flaws no check looks for: %s" % unmeasured
 
     unexercised = set(CHECK_NAMES) - covered
     assert not unexercised, "these checks have no flaw to fire on: %s" % unexercised
 
-    # and the crawler entries must be real paths the crawler is tested against
-    crawler_paths = {flaw["path"] for flaw in FLAWS if flaw["id"] in for_the_crawler}
-    assert len(crawler_paths) == len(for_the_crawler), \
-        "every crawler entry must name a distinct path"
+    # and the crawler entries must be real paths, distinct from one another
+    crawler = [f for f in FLAWS if for_the_crawler(f)]
+    assert crawler, "the lab must declare the crawler entries"
+    paths = {f["path"] for f in crawler}
+    assert len(paths) == len(crawler), "every crawler entry must name a distinct path"
 
 
 def test_the_traversal_finding_carries_the_bytes_that_prove_it(tmp_path, lab):

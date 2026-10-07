@@ -21,9 +21,10 @@ from pathlib import Path
 
 from . import report as report_module
 from .chokepoints import attacker_map, chokepoints, minimum_node_cut
-from .graph import build_graph
+from .graph import build_graph, unfiltered_trusts
 from .schema import CollectorError, load_collector, load_forest
-from .adcs import authority_managers, certificate_chains, certificate_escalations
+from .adcs import (assess_certificate_binding, authority_managers,
+                   certificate_chains, certificate_escalations)
 from .tier0 import Tier0Error, crown_jewels
 
 __all__ = ["main", "run_analysis"]
@@ -63,8 +64,11 @@ def run_analysis(paths, out_dir="attack-paths", include_derived=True,
     escalations = certificate_escalations(data, graph, privileged)
     chains = certificate_chains(escalations)
     managers = authority_managers(data, graph, privileged)
+    binding = assess_certificate_binding(data)
+    trusts = unfiltered_trusts(data)
 
     document = report_module.build(graph, jewels, choke, cut, escalations, chains, managers,
+                                   binding, trusts,
                                    generated_at=datetime.now(timezone.utc))
     document["cut_sources"] = len(sources)
     (out / "report.md").write_text(report_module.to_markdown(document), encoding="utf-8")

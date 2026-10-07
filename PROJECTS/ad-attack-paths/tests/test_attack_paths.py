@@ -19,10 +19,10 @@ from pathlib import Path
 
 import pytest
 
-from src.adcs import (assess_template, authority_managers, certificate_chains,
-                      certificate_escalations)
+from src.adcs import (assess_authority, assess_certificate_binding, assess_template,
+                      authority_managers, certificate_chains, certificate_escalations)
 from src.chokepoints import attacker_map, chokepoints, minimum_node_cut, removal_impact
-from src.graph import build_graph
+from src.graph import build_graph, unfiltered_trusts
 from src import report as report_module
 from src.paths import all_shortest_paths, enumerate_paths, entry_points, shortest_path
 from src.rights import CAPABILITIES, RIGHTS, capability_of, is_traversable, right_for
@@ -864,10 +864,110 @@ def test_severity_follows_whether_the_template_can_be_used(forest, graph):
     assert esc1, "the data contains an ESC1 template"
     for finding in esc1:
         assert finding.severity == ("Critical" if finding.exploitable else "High")
-    # and a template nobody can enroll in cannot be Critical
+    # and a template nobody can enroll in cannot be Critical. Authority findings are
+    # exempt: ESC5 and ESC7 are about who can change the authority rather than who can
+    # enroll in a template, so they have no enrollees and are Critical for a different
+    # reason.
     for finding in found:
-        if not finding.exploitable:
+        if not finding.exploitable and not ({"ESC5", "ESC7"} & set(finding.conditions)):
             assert finding.severity != "Critical"
+
+
+def test_a_version_one_template_that_takes_the_request_subject_is_reported(forest, graph):
+    """ESC15: a version-one template predates the name flags, so the subject comes from
+    the request and the name flags do not describe it at all. The data has several
+    enabled on an authority, and none of them was being reported."""
+    privileged = {j.sid for j in crown_jewels(forest, graph)}
+    found = certificate_escalations(forest, graph, privileged)
+    esc15 = [e for e in found if "ESC15" in e.conditions]
+    assert esc15, "the data has version-one templates that take the request subject"
+    for finding in esc15:
+        template = next(n for n in forest.by_kind("certtemplate") if n.name == finding.template)
+        assert template.properties.get("schemaversion") == 1
+        assert template.properties.get("enrolleesuppliessubject") is True
+        assert finding.severity in ("High", "Critical")
+
+
+def test_an_authority_a_plain_principal_can_change_is_reported(forest, graph):
+    """ESC5 and ESC7: the authority's own permissions and configuration. This is the
+    authority itself rather than a template, and grading it Low put a workstation that
+    can rewrite the authority below a template nobody can enroll in."""
+    privileged = {j.sid for j in crown_jewels(forest, graph)}
+    found = certificate_escalations(forest, graph, privileged)
+    authority = [e for e in found if "ESC5" in e.conditions or "ESC7" in e.conditions]
+    assert authority, "the data has an authority a plain principal can change"
+    for finding in authority:
+        assert finding.principals, "it must name who can change it"
+        assert finding.severity in ("High", "Critical"), \
+            "an authority a plain principal can rewrite is not a low finding"
+        for principal in finding.principals:
+            assert forest.get(principal) is None or principal not in privileged, \
+                "%s is already privileged" % principal
+
+
+def test_a_certificate_binding_that_was_not_read_is_not_reported_as_off(forest):
+    """The settings are objects carrying a value, a Collected flag and a failure reason.
+    Checking only whether a value is present reported three machines that were refused
+    access as read, with a value of zero -- which says weak binding is switched off when
+    nobody knows, the most dangerous possible answer."""
+    binding = assess_certificate_binding(forest)
+    assert binding["missing"], "this collection was refused the registry read"
+    assert not binding["collected"], "nothing here was actually read"
+    for computer in binding["missing"]:
+        assert computer, "a machine that was refused must be named"
+
+
+def test_the_report_says_nothing_is_claimed_about_an_unread_setting(forest, graph):
+    binding = assess_certificate_binding(forest)
+    document = report_module.build(graph, crown_jewels(forest, graph),
+                                   {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "note": "not asked for"},
+                                   binding=binding)
+    markdown = report_module.to_markdown(document)
+    assert "not a setting that is off" in markdown
+    assert "not a setting that is off" in report_module.to_html(document)
+
+
+def test_a_trust_that_accepts_a_foreign_identifier_is_reported(forest):
+    """A trust on its own permits authentication and grants nothing, which is why it is
+    not walked. SID filtering is what stops a principal carrying an identifier from the
+    other domain being accepted there -- and every trust in this data has it off, which
+    the tool said nothing about."""
+    trusts = unfiltered_trusts(forest)
+    assert trusts, "every trust in this data has SID filtering off"
+    for trust in trusts:
+        assert trust["domain"] and trust["trusted"]
+        assert trust["note"]
+        assert trust["trust_type"] and trust["direction"]
+    # and the domain on the other side is named, not left as an identifier
+    domains = {d.upper() for d in forest.domains}
+    for trust in trusts:
+        assert trust["trusted"].upper() in domains or "." in trust["trusted"]
+
+
+def test_a_trust_with_filtering_on_is_not_reported(forest):
+    """The check must be about the flag, not about trusts existing."""
+    victim = next(n for n in forest.by_kind("domain") if n.trusts)
+    original = [dict(t) for t in victim.trusts]
+    victim.trusts = [dict(t, SidFilteringEnabled=True) for t in original]
+    try:
+        assert not [t for t in unfiltered_trusts(forest) if t["domain"] == victim.name]
+    finally:
+        victim.trusts = original
+
+
+def test_the_report_carries_the_trusts_and_the_binding(forest, graph):
+    document = report_module.build(graph, crown_jewels(forest, graph),
+                                   {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "note": "not asked for"},
+                                   trusts=unfiltered_trusts(forest),
+                                   binding=assess_certificate_binding(forest))
+    markdown = report_module.to_markdown(document)
+    page = report_module.to_html(document)
+    assert "accept an identifier from the other side" in markdown
+    assert "accept an identifier from the other side" in page
+    assert "not a setting that is off" in markdown
+    assert "not a setting that is off" in page
 
 
 def test_a_template_nobody_has_enabled_is_not_reported(forest, graph):

@@ -357,7 +357,7 @@ def _build_node(entry: dict, kind: str, source_file: str) -> Node | None:
         registry_sessions=[sid for sid in
                            (_session_sid(s) for s in _collection(entry, "RegistrySessions"))
                            if sid],
-        trusts=list(entry.get("Trusts") or []),
+        trusts=[t for t in (entry.get("Trusts") or []) if isinstance(t, dict)],
         contained_by=_identifier(entry, "ContainedBy"),
         child_objects=[_identifier({"x": c}, "x") for c in (entry.get("ChildObjects") or [])],
         links=list(entry.get("Links") or []),

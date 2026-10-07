@@ -78,7 +78,8 @@ FLAWS = (
      "detail": "reached only from a path assembled inside a script, so a crawler "
                "that reads only <a href> cannot see it"},
     {"id": "lab-declared-path", "path": "/internal/status", "imitates": None,
-     "detail": "declared in robots.txt and linked from nowhere"},
+     "detail": "declared in robots.txt and linked from nowhere, so only a crawler that "
+               "reads the declarations can reach it"},
 )
 
 DOCUMENT_ROOT = Path(__file__).resolve().parent / "root"
