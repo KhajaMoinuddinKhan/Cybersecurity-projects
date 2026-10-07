@@ -1,24 +1,29 @@
 
-import sys, json, tempfile, os
+import sys, os, tempfile
 sys.path.insert(0, r"C:\Users\Khan's\Documents\Cybersecurity-projects\PROJECTS\scoped-assessment")
 from lab import LabServer
 from src.cli import run_engagement
-from src.scope import load_scope
 
-with LabServer(port=8099) as lab:
-    print("the lab is listening on", lab.base_url)
+with LabServer(port=0) as lab:
     out = tempfile.mkdtemp()
-    doc = run_engagement(r"C:\Users\Khan's\Documents\Cybersecurity-projects\PROJECTS\scoped-assessment\examples\lab-engagement.yaml",
-                         out, lookup_cves=False)
-    print("\n%s: %d finding(s)" % (doc["engagement"], doc["total"]))
+    eng = os.path.join(out, "engagement.json")
+    open(eng, "w").write('{"engagement":"Loopback lab assessment",'
+                         '"targets":[{"host":"127.0.0.1","ports":[%d]}],'
+                         '"allowed_actions":["connect"]}' % lab.port)
+    doc = run_engagement(eng, out, rate=50.0, workers=4)
+    print("%s: %d finding(s), %d confirmed" % (doc["engagement"], doc["total"], doc["confirmed"]))
     for f in doc["findings"]:
-        print("   %-10s %-52s %s:%d" % (f["severity"], f["title"][:52], f["host"], f["port"]))
-    print("refusals:", doc["refusal_count"])
-    print("\nservices observed:")
-    for s in doc["services"]:
-        print("   %s:%d open=%s service=%s" % (s["host"], s["port"], s["open"], s["name"]))
+        print("   %-8s %-7s %s" % (f["severity"], "CONFIRMED" if f["confirmed"] else "observed",
+                                   f["title"][:58]))
+    print("\ncrawl: %d pages, %d endpoints, %d links not followed"
+          % (doc["crawl"]["pages_read"], len(doc["crawl"]["endpoints"]),
+             doc["crawl"]["not_followed"]))
+    print("endpoints:", [e["path"] for e in doc["crawl"]["endpoints"]])
+    print("not followed:", [(s["url"], s["reason"]) for s in doc["crawl"]["skipped"]])
+    print("throttle:", doc["throttle"])
     md = open(os.path.join(out,"report.md"), encoding="utf-8").read()
-    print("\nreport.md is %d bytes; report.html is %d bytes"
+    print("\nreport.md %d bytes, report.html %d bytes"
           % (len(md), len(open(os.path.join(out,"report.html"), encoding="utf-8").read())))
-    print("\n--- the first 1500 characters of the report ---")
-    print(md[:1500])
+    print("\n=== summary + crawl sections ===")
+    i = md.find("## Summary"); j = md.find("## Services observed")
+    print(md[i:j][:900])

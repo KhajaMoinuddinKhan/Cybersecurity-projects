@@ -105,10 +105,24 @@ def test_scanning_returns_a_row_for_every_port_asked_about(tmp_path, lab):
 # --- the checks find what the lab planted -----------------------------------
 
 def test_the_checks_find_every_flaw_the_lab_has(tmp_path, lab):
-    """The lab plants three; the assessment has to report all three."""
+    """The lab plants twelve; the assessment has to report the ones it has checks
+    for, and the count is asserted rather than the set so that adding a check
+    without adding a flaw fails here rather than passing quietly."""
+    from src.assessment import CHECK_NAMES
     scope = engagement(tmp_path, [lab.port])
     found = {finding.id for finding in assess_http(scope, "127.0.0.1", lab.port)}
-    assert found == {"path-traversal", "reflected-input", "version-disclosure"}
+    assert found == set(CHECK_NAMES), "checks that found nothing: %s" % (set(CHECK_NAMES) - found)
+
+
+def test_every_flaw_the_lab_declares_is_a_flaw_a_check_looks_for():
+    """The lab documents its flaws; each one has to map to a check, or the lab is
+    claiming a vulnerability nothing measures."""
+    from src.assessment import CHECK_NAMES
+    for flaw in FLAWS:
+        if flaw["id"] == "lab-state-changing-link":
+            continue          # that one is for the crawler, not the checks
+        name = flaw["id"][len("lab-"):]
+        assert name in CHECK_NAMES, "no check covers %s" % flaw["id"]
 
 
 def test_the_traversal_finding_carries_the_bytes_that_prove_it(tmp_path, lab):
@@ -118,15 +132,17 @@ def test_the_traversal_finding_carries_the_bytes_that_prove_it(tmp_path, lab):
     traversal = findings["path-traversal"]
     assert traversal.severity == "High"
     assert traversal.evidence, "it must show what came back"
-    assert any("outside the document root" in str(item.get("value", ""))
-               for item in traversal.evidence)
+    assert any("LAB-SECRET" in str(item.get("value", "")) for item in traversal.evidence), \
+        "the marker from the file outside the root is what proves the read escaped it"
+    assert traversal.confirmed is True
 
 
 def test_the_reflected_input_finding_shows_the_unescaped_probe(tmp_path, lab):
     scope = engagement(tmp_path, [lab.port])
     findings = {f.id: f for f in assess_http(scope, "127.0.0.1", lab.port)}
     evidence = " ".join(str(item.get("value", "")) for item in findings["reflected-input"].evidence)
-    assert "zq<\"'>zq" in evidence
+    assert "zq<\">'zq" in evidence
+    assert findings["reflected-input"].confirmed is True
 
 
 def test_the_checks_find_nothing_when_the_engagement_permits_nothing(tmp_path, lab):
@@ -152,8 +168,11 @@ def test_an_engagement_against_the_lab_produces_both_formats(tmp_path, lab):
 
     page = to_html(document)
     assert page.startswith("<!doctype html>")
-    # self-contained: a report about a client's security should not call out
-    for forbidden in ("http://", "https://", "<script", "<link"):
+    # Self-contained means the page makes no request when it is opened. Checking
+    # for the bare string "https://" would now fail on a finding that legitimately
+    # quotes a URL, so this checks for the things that fetch: a linked stylesheet,
+    # a script, an import, or a url() in a style.
+    for forbidden in ("<script", "<link", "@import", "url(", "<iframe", "<img"):
         assert forbidden not in page, forbidden
 
 

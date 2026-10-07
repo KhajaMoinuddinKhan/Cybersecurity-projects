@@ -18,7 +18,7 @@ import ssl
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from .scope import Scope
 
@@ -78,6 +78,11 @@ class Finding:
     remediation: str = ""
     business_impact: str = ""
     base_score: float | None = None
+    # Appended rather than inserted: a new field placed before the counters would
+    # silently shift positional construction, and a finding that reports the wrong
+    # thing is worse than one that reports nothing.
+    confirmed: bool = False
+    confirmation: str = ""
 
     def as_dict(self) -> dict:
         return {
@@ -85,7 +90,8 @@ class Finding:
             "host": self.host, "port": self.port, "detail": self.detail,
             "evidence": self.evidence, "cves": self.cves,
             "remediation": self.remediation, "business_impact": self.business_impact,
-            "base_score": self.base_score,
+            "base_score": self.base_score, "confirmed": self.confirmed,
+            "confirmation": self.confirmation,
         }
 
 
@@ -116,9 +122,27 @@ def probe_port(scope: Scope, host: str, port: int, timeout: float = DEFAULT_TIME
     return service
 
 
+class _StopAtRedirect(HTTPRedirectHandler):
+    """Refuse to follow a redirect, so the 302 itself is observable.
+
+    urlopen follows redirects by default, which meant the redirect check was reading
+    the page at the destination and concluding there was no redirect to report. The
+    response is the thing being examined, so it has to arrive unfollowed.
+    """
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def _opener(follow_redirects: bool):
+    if follow_redirects:
+        return build_opener()
+    return build_opener(_StopAtRedirect)
+
+
 def fetch(scope: Scope, host: str, port: int, path: str = "/", scheme: str = "http",
           timeout: float = DEFAULT_TIMEOUT, at: datetime | None = None,
-          headers: dict | None = None) -> dict:
+          headers: dict | None = None, follow_redirects: bool = True) -> dict:
     """One HTTP request, if the engagement permits it.
 
     Returns a dict rather than raising, so a refused or failed request is recorded
@@ -137,10 +161,46 @@ def fetch(scope: Scope, host: str, port: int, path: str = "/", scheme: str = "ht
             context = ssl.create_default_context()
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
-        with urlopen(request, timeout=timeout, context=context) as response:
+        opener = _opener(follow_redirects)
+        with opener.open(request, timeout=timeout) as response:
             body = response.read(20000).decode("utf-8", "replace")
             return {"ok": True, "refused": False, "url": url, "status": response.status,
                     "headers": {k.lower(): v for k, v in response.headers.items()}, "body": body}
+    except HTTPError as exc:
+        return {"ok": False, "refused": False, "url": url, "status": exc.code,
+                "headers": {k.lower(): v for k, v in (exc.headers or {}).items()},
+                "body": exc.read(20000).decode("utf-8", "replace") if exc.fp else ""}
+    except (URLError, OSError, ssl.SSLError) as exc:
+        return {"ok": False, "refused": False, "url": url, "error": type(exc).__name__}
+
+
+def _request_with_method(scope: Scope, host: str, port: int, path: str, method: str,
+                         scheme: str = "http", timeout: float = DEFAULT_TIMEOUT,
+                         at: datetime | None = None) -> dict | None:
+    """One request with a method of the caller's choosing, if scope permits it.
+
+    Kept beside `fetch` rather than folded into it so that the ordinary path stays
+    a GET and cannot be talked into another method by a caller passing an argument.
+    The scope check is the same one, on the same terms: a method is not a way round
+    the engagement, it is another action the engagement either allows or does not.
+    """
+    decision = scope.authorize(host, port, "connect", at=at)
+    if not decision.allowed:
+        return {"ok": False, "refused": True, "reason": decision.reason, "path": path}
+
+    url = "%s://%s:%d%s" % (scheme, host, port, path)
+    request = Request(url, method=method.upper(),
+                      headers={"User-Agent": "scoped-assessment/1.0"})
+    try:
+        context = None
+        if scheme == "https":
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+        with urlopen(request, timeout=timeout, context=context) as response:
+            return {"ok": True, "refused": False, "url": url, "status": response.status,
+                    "headers": {k.lower(): v for k, v in response.headers.items()},
+                    "body": response.read(20000).decode("utf-8", "replace")}
     except HTTPError as exc:
         return {"ok": False, "refused": False, "url": url, "status": exc.code,
                 "headers": {k.lower(): v for k, v in (exc.headers or {}).items()},
