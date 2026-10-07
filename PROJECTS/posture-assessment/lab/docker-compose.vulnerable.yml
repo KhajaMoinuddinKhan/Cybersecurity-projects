@@ -1,0 +1,16 @@
+# A compose file with the flaws the container controls look for.
+services:
+  web:
+    image: myapp:latest
+    privileged: true
+    network_mode: host
+    environment:
+      DATABASE_PASSWORD: correct-horse-battery-staple
+    ports:
+      - "8080:8080"
+
+  cache:
+    image: redis:7.2.5
+    read_only: true
+    mem_limit: 256m
+    user: "999:999"

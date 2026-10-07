@@ -1,0 +1,49 @@
+{
+ "note": "What the lab contains, and which control each flaw is meant to violate. The assessor is not told any of this; the tests read it so that a fixture which stops exercising a control fails rather than passes quietly.",
+ "artifacts": {
+  "Dockerfile.vulnerable": [
+   "no-root-user",
+   "no-latest-tag",
+   "no-secrets-in-configuration"
+  ],
+  "Dockerfile.hardened": [],
+  "docker-compose.vulnerable.yml": [
+   "no-privileged-container",
+   "no-host-network",
+   "no-root-user",
+   "no-latest-tag",
+   "no-secrets-in-configuration",
+   "read-only-root-filesystem",
+   "resource-limits-set"
+  ],
+  "deployment.vulnerable.yaml": [
+   "no-root-user",
+   "no-privileged-container",
+   "no-host-network",
+   "no-latest-tag",
+   "no-secrets-in-configuration",
+   "read-only-root-filesystem",
+   "resource-limits-set",
+   "no-exposed-management-port",
+   "least-privilege-iam"
+  ],
+  "deployment.hardened.yaml": [],
+  "main.tf": [
+   "no-exposed-management-port",
+   "least-privilege-iam",
+   "no-secrets-in-configuration",
+   "no-anonymous-access",
+   "no-latest-tag",
+   "no-root-user",
+   "read-only-root-filesystem",
+   "no-privileged-container"
+  ]
+ },
+ "inventory.json": [
+  "firmware-update-path",
+  "no-secrets-in-configuration"
+ ],
+ "broker": {
+  "anonymous": "no-anonymous-access"
+ }
+}

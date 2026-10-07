@@ -1,0 +1,7 @@
+# The policy file is YAML, so it needs a parser.
+PyYAML>=6.0
+
+# Only the lab needs this: it runs a real MQTT broker so the IoT arm has a real
+# service to assess. The tool itself speaks MQTT over a socket in the standard
+# library, and needs no client library to do it.
+amqtt>=0.11

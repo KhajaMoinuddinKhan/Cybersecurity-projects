@@ -1,0 +1,20 @@
+{
+ "devices": [
+  {
+   "name": "sensor-a",
+   "firmware": "2.1.0",
+   "firmware_update": {
+    "url": "https://firmware.example.com/a/2.1.1.bin",
+    "signature_verified": true
+   }
+  },
+  {
+   "name": "gateway-b",
+   "firmware": "4.0.3",
+   "firmware_update": {
+    "url": "https://firmware.example.com/b/4.0.4.img",
+    "signature_verified": true
+   }
+  }
+ ]
+}

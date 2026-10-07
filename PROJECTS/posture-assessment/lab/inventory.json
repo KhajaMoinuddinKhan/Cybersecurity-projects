@@ -1,0 +1,34 @@
+{
+ "note": "The organisation's own record of its devices. A firmware support window is not something a device announces over the network, so it comes from here -- and the inventory is an input, not an invention.",
+ "devices": [
+  {
+   "name": "lobby-sensor-01",
+   "model": "ESP32-WROOM",
+   "ip": "10.20.0.11",
+   "firmware": "1.4.2",
+   "firmware_update": {
+    "url": "http://firmware.example.com/esp32/latest.bin",
+    "signature_verified": false
+   },
+   "notes": "updated by hand over the air from a plaintext URL"
+  },
+  {
+   "name": "plant-gateway-02",
+   "model": "RPi-4B",
+   "ip": "10.20.0.12",
+   "firmware": "3.0.1",
+   "firmware_update": {
+    "url": "https://firmware.example.com/rpi/3.0.2.img",
+    "signature_verified": true
+   }
+  },
+  {
+   "name": "legacy-meter-07",
+   "model": "MeterX-200",
+   "ip": "10.20.0.30",
+   "firmware": "0.9.1",
+   "api_key": "embedded-key-in-the-inventory",
+   "notes": "the vendor has not published firmware since 2019"
+  }
+ ]
+}

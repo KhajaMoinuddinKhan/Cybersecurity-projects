@@ -1,0 +1,19 @@
+# A container artifact with the flaws the policy exists to catch.
+#
+# Each one is a real mistake rather than a contrived one: every line here is
+# something that has shipped in a real image, and each is mapped in the lab's
+# manifest to the control it violates.
+FROM python:latest
+
+# No USER instruction anywhere: the process runs as root.
+WORKDIR /app
+
+ENV DB_PASSWORD=hunter2-not-a-placeholder
+ENV API_KEY=sk-abcdefghijklmnopqrstuvwxyz0123456789
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+EXPOSE 8080
+CMD ["python", "app.py"]

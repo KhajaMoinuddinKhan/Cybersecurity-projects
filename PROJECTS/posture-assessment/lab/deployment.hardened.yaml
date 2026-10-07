@@ -1,0 +1,30 @@
+# The same workload, configured the way the policy asks for.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: api
+          image: myregistry/api:2.4.1@sha256:9f2c1a7b3e5d4c6f8a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f
+          securityContext:
+            privileged: false
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          resources:
+            limits: {cpu: "500m", memory: "512Mi"}
+            requests: {cpu: "100m", memory: "128Mi"}
+          env:
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: {name: api-secrets, key: jwt}

@@ -1,0 +1,13 @@
+# The same application, configured the way the policy asks for.
+FROM python:3.12.7-slim@sha256:2b0072f9d3e3f0c3e0a3b2f4c9d8e7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY --chown=10001:10001 . .
+USER 10001:10001
+
+EXPOSE 8080
+CMD ["python", "app.py"]

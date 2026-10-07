@@ -1,0 +1,9 @@
+listeners:
+  default:
+    type: tcp
+    bind: 127.0.0.1:18830
+sys_interval: 0
+auth:
+  allow-anonymous: true
+topic-check:
+  enabled: false
