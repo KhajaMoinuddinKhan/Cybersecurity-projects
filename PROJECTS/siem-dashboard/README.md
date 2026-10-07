@@ -518,6 +518,42 @@ experiment nobody has run yet. The captured corpus is not committed: it is real
 telemetry from a real machine, hostname and account name included, and it belongs
 on the machine that produced it.
 
+## Nothing is hard-coded, and finding that out found three bugs
+
+The technique commands used to live in `src/lab.py`. They do not any more: the
+file holds a list of Atomic Red Team guids, and the command text is read from the
+vendored copy of the atomics tree in `lab/atomics/` when it is needed. The reason
+is not tidiness. A copy of the tree drifts from the tree, and this one had:
+
+- T1082's "System Information Discovery" was recorded as a read-only `systeminfo`
+  query. The tree's test of that name runs `gatherNetworkInfo.vbs`, which writes a
+  report file. The hard-coded copy was safer than the source and had been
+  substituted without anyone noticing, which means the lab was not measuring the
+  technique it claimed to measure.
+- Two different Windows tests in T1082 share the name "System Information
+  Discovery", so a name is not an identity. The selectors are guids now, and a
+  stale one stops the lab loudly instead of running something else.
+- The atomics carry a test per platform under the same name, and keying on the
+  name alone had the lab resolving to a macOS or Linux variant and running a shell
+  command on Windows.
+
+**And it found the bug the whole exercise was for.** `sysmon-encoded-powershell-command`
+had never been shown a real encoded command, because endpoint protection refused to
+run the atomic. When the capture was finally split in two — techniques from an
+ordinary shell, the log read by one elevated process — the atomic ran, and the rule
+**missed it**: it looked for `-e JAB`, a common base64 prefix, and Atomic's payload
+begins `JgAgACgAZ` because it decodes to `& (gcm ...)`. A rule that recognises an
+obfuscation technique only when the obfuscated text happens to start a particular
+way is recognising the text, not the technique. It now matches the shape — the flag
+followed by a base64 argument — and measures at full precision and recall.
+
+The capture was re-taken, because the corpus has to contain what the current lab
+runs. Two labelling faults came out of that too: the driver recorded a window's end
+before settling, so late events fell outside their own window, and the reader padded
+every window at the front, so they landed in the *next* one and were labelled with
+the wrong technique. Windows are exact now, and the encoded command appears in
+exactly one of them.
+
 ## The two-process capture
 
 Reading Sysmon needs elevation. Spawning the techniques must not have it, and that

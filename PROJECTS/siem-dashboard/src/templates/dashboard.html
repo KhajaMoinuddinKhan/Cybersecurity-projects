@@ -797,6 +797,9 @@
   }
 
   async function refresh() {
+    // fetched once and not awaited: a report over a capture is not live data,
+    // and scoring every rule against every window should not delay a refresh
+    refreshMeasurement();
     var requestId = ++state.requestId;
     try {
       var response = await fetch("/api/dashboard?" + queryString(), {cache:"no-store", headers: authHeaders()});
@@ -1804,7 +1807,6 @@
     try { await refreshSearchSummary(); } catch (error) { console.error(error); }
     try { await refreshSearch(); } catch (error) { console.error(error); }
     try { await refreshBaseline(); } catch (error) { console.error(error); }
-    try { await refreshMeasurement(); } catch (error) { console.error(error); }
     try { await refreshSecurity(); } catch (error) { console.error(error); }
     try { await refreshBackups(); } catch (error) { console.error(error); }
   }

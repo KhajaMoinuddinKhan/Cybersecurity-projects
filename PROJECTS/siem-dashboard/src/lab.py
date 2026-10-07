@@ -44,26 +44,54 @@ __all__ = [
     "capture_corpus",
 ]
 
-# A technique whose effect is to read something and print it. Every command here
-# was read out of the atomics tree, checked for network access, for anything that
-# writes to the machine, and for anything needing elevation, and only then
-# copied in. The `atomic` field names the test it came from so the provenance is
-# checkable rather than asserted.
+# A technique is a *selector*, not a command. It names an Atomic Red Team test,
+# and the command text is read from the vendored copy of the atomics tree in
+# `lab/atomics/` at the moment it is needed. Nothing here holds the text, so
+# nothing here can drift from the source it claims to come from: if a test is
+# renamed the selector stops resolving loudly rather than quietly running
+# something else.
+#
+# What this file decides is which tests are allowed. That decision has to live
+# somewhere -- the atomics tree contains tests under the same technique ids that
+# download and execute code from the internet -- and a list of names is a much
+# smaller thing to review than a list of commands.
 @dataclass(frozen=True)
 class Technique:
     attack_id: str
     name: str
-    atomic: str
-    executor: str
-    command: str
+    guid: str
     arguments: dict[str, str] = field(default_factory=dict)
 
+    @property
+    def atomic(self) -> str:
+        """The atomic's own name for the test, for provenance."""
+        return str(_atomic_test(self.attack_id, self.guid).get("name") or "").strip()
+
+    @property
+    def executor(self) -> str:
+        """The executor the atomic declares for itself."""
+        test = _atomic_test(self.attack_id, self.guid)
+        return str((test.get("executor") or {}).get("name") or "").strip()
+
     def resolved(self) -> str:
-        """The command with Atomic's input arguments substituted."""
-        text = self.command
-        for key, value in self.arguments.items():
-            text = text.replace("#{%s}" % key, value)
-        return text
+        """The command, with the atomic's own argument defaults filled in.
+
+        A default comes from the atomic's `input_arguments` where it declares
+        one, so an argument is not a value this file invented either. An override
+        is applied on top; there are none, because every argument these tests
+        need is declared by the test itself.
+        """
+        test = _atomic_test(self.attack_id, self.guid)
+        command = str((test.get("executor") or {}).get("command") or "").strip()
+        values = {}
+        for key, spec in (test.get("input_arguments") or {}).items():
+            default = (spec or {}).get("default")
+            if default is not None:
+                values[str(key)] = str(default)
+        values.update({str(k): str(v) for k, v in self.arguments.items()})
+        for key, value in values.items():
+            command = command.replace("#{%s}" % key, value)
+        return command
 
     def as_dict(self) -> dict:
         return {
@@ -71,80 +99,83 @@ class Technique:
             "name": self.name,
             "atomic": self.atomic,
             "executor": self.executor,
-            "command": self.command,
+            "command": self.resolved(),
             "arguments": self.arguments,
-            "resolved": self.resolved(),
         }
 
 
+# Where the atomic sources live. Vendored rather than fetched, so the lab works
+# offline and so the text a capture ran can be read back afterwards.
+ATOMIC_SOURCE = Path(__file__).resolve().parent.parent / "lab" / "atomics"
+
+
+def _atomic_tests(attack_id: str) -> dict:
+    """Every atomic test for a technique, read from the vendored tree."""
+    import yaml
+    path = ATOMIC_SOURCE / ("%s.yaml" % attack_id)
+    if not path.exists():
+        raise CaptureError("no vendored atomics for %s; expected %s" % (attack_id, path))
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise CaptureError("%s is not valid YAML: %s" % (path.name, exc)) from exc
+    # An atomic file carries a test per platform under the same name, and the
+    # last one wins if the dict is keyed on the name alone -- which resolved
+    # "System Information Discovery" to the macOS or Linux variant and had the
+    # lab running a shell command on Windows. Only Windows tests are kept, and a
+    # test that does not declare its platforms is kept too rather than dropped
+    # silently.
+    # Keyed on the atomic's own `auto_generated_guid`, not on its name. Two
+    # different Windows tests in T1082 are both called "System Information
+    # Discovery", and keying on the name silently resolved to whichever came
+    # last -- a script that writes a report file, where the one meant was a
+    # read-only query. The guid is the atomics' own identifier and is unique.
+    tests = {}
+    for test in data.get("atomic_tests") or []:
+        guid = str(test.get("auto_generated_guid") or "").strip()
+        platforms = test.get("supported_platforms") or []
+        if not guid:
+            continue
+        if platforms and "windows" not in [str(p).lower() for p in platforms]:
+            continue
+        tests[guid] = test
+    return tests
+
+
+def _atomic_test(attack_id: str, guid: str) -> dict:
+    tests = _atomic_tests(attack_id)
+    if guid not in tests:
+        raise CaptureError(
+            "the vendored atomics for %s have no Windows test with guid %r"
+            % (attack_id, guid))
+    return tests[guid]
+
+
 ALLOWED_TECHNIQUES: tuple[Technique, ...] = (
-    Technique(
-        "T1082", "System Information Discovery",
-        "System Information Discovery", "command_prompt",
-        "systeminfo ; reg query HKLM\\SYSTEM\\CurrentControlSet\\Services\\Disk\\Enum",
-    ),
-    Technique(
-        "T1082", "Environment variables discovery",
-        "Environment variables discovery on windows", "command_prompt",
-        "set",
-    ),
-    Technique(
-        "T1082", "Machine GUID discovery",
-        "Windows MachineGUID Discovery", "command_prompt",
-        "REG QUERY HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography /v MachineGuid",
-    ),
-    Technique(
-        "T1082", "OS product name discovery",
-        "Discover OS Product Name via Registry", "command_prompt",
-        "reg query \"HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\" /v ProductName",
-    ),
-    Technique(
-        "T1057", "Process discovery with tasklist",
-        "Process Discovery - tasklist", "command_prompt",
-        "tasklist",
-    ),
-    Technique(
-        "T1057", "Process discovery with Get-Process",
-        "Process Discovery - Get-Process", "powershell",
-        "Get-Process | Select-Object -First 5 | Out-Null",
-    ),
-    Technique(
-        "T1016", "Network configuration discovery",
-        "System Network Configuration Discovery on Windows", "command_prompt",
-        "ipconfig /all ; netsh interface show interface ; arp -a ; net config",
-    ),
-    Technique(
-        "T1016", "Firewall rule discovery",
-        "List Windows Firewall Rules", "command_prompt",
-        "netsh advfirewall firewall show rule name=all",
-    ),
-    Technique(
-        "T1518", "Installed software discovery",
-        "Applications Installed", "powershell",
-        "Get-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* | "
-        "Select-Object -First 5 DisplayName | Out-Null",
-    ),
-    Technique(
-        "T1033", "Owner and user discovery",
-        "User Discovery - whoami", "command_prompt",
-        "whoami #{whoami_args}",
-        {"whoami_args": "/all"},
-    ),
-    # The encoded command is Atomic's own default for this test. It decodes to
-    # `iex 'Write-Host "Hello, from PowerShell!"'` -- deliberately obfuscated to
-    # be a realistic T1059.001 specimen, and benign in effect. It is the one
-    # technique here that a rule is written to catch, which is why the corpus
-    # would be worth much less without it.
-    Technique(
-        "T1059.001", "Encoded PowerShell command",
-        "PowerShell Command Execution", "command_prompt",
-        "powershell.exe -e #{obfuscated_code}",
-        {"obfuscated_code":
-         "JgAgACgAZwBjAG0AIAAoACcAaQBlAHsAMAB9ACcAIAAtAGYAIAAnAHgAJwApACkAIAAoACIAVwByACIA"
-         "KwAiAGkAdAAiACsAIgBlAC0ASAAiACsAIgBvAHMAdAAgACcASAAiACsAIgBlAGwAIgArACIAbABvACwA"
-         "IABmAHIAIgArACIAbwBtACAAUAAiACsAIgBvAHcAIgArACIAZQByAFMAIgArACIAaAAiACsAIgBlAGwA"
-         "bAAhACcAIgApAA=="},
-    ),
+    Technique("T1082", "System Information Discovery",
+              "66703791-c902-4560-8770-42b8a91f7667"),
+    Technique("T1082", "Environment variables discovery",
+              "f400d1c0-1804-4ff8-b069-ef5ddd2adbf3"),
+    Technique("T1082", "Machine GUID discovery",
+              "224b4daf-db44-404e-b6b2-f4d1f0126ef8"),
+    Technique("T1082", "OS product name discovery",
+              "be3b5fe3-a575-4fb8-83f6-ad4a68dd5ce7"),
+    Technique("T1057", "Process discovery with tasklist",
+              "c5806a4f-62b8-4900-980b-c7ec004e9908"),
+    Technique("T1057", "Process discovery with Get-Process",
+              "3b3809b6-a54b-4f5b-8aff-cb51f2e97b34"),
+    Technique("T1016", "Network configuration discovery",
+              "970ab6a1-0157-4f3f-9a73-ec4166754b23"),
+    Technique("T1016", "Firewall rule discovery",
+              "038263cb-00f4-4b0a-98ae-0696c67e1752"),
+    Technique("T1518", "Installed software discovery",
+              "c49978f6-bd6e-4221-ad2c-9e3e30cc1e3b"),
+    Technique("T1033", "Owner and user discovery",
+              "aab580c7-cc30-4a7c-b5a9-46a29066b022"),
+    # Atomic's own default for this test, kept because a rule is written to catch
+    # it: an encoded command line is the specimen T1059.001 exists to model.
+    Technique("T1059.001", "Encoded PowerShell command",
+              "a538de64-1c74-46ed-aa60-b995ed302598"),
 )
 
 BENIGN = "benign"

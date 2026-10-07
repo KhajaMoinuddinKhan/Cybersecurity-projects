@@ -350,11 +350,15 @@ def test_the_fixture_reproduces_the_measured_result():
     from src.anomaly import evaluate
     result = measure_corpus(load_corpus(FIXTURE))
     detected = {row["rule_id"] for row in result["rules"] if row["tp"] > 0}
+    # the five discovery rules, plus the encoded-PowerShell rule -- which is in
+    # here because the corpus finally contains a real encoded command, and it is
+    # the only High-severity rule in the set that has ever been exercised
     assert detected == {
         "disc-system-information", "disc-process-listing", "disc-network-configuration",
         "disc-software-inventory", "disc-account-discovery",
-    }, "the five discovery rules are the ones the README says detect something"
-    assert result["windows"] == 16
+        "sysmon-encoded-powershell-command",
+    }, "the rules the README says detect something"
+    assert result["windows"] == 17
     assert result["benign_windows"] == 6
 
     anomaly = evaluate(load_corpus(FIXTURE))
@@ -372,7 +376,10 @@ def test_the_fixture_marks_the_untested_rules_as_untested():
     """The corpus runs five techniques, so most rules have no evidence in it."""
     result = measure_corpus(load_corpus(FIXTURE))
     untested = [row["rule_id"] for row in result["rules"] if not row["tested"]]
-    assert "sysmon-encoded-powershell-command" in untested
+    # the encoded-PowerShell rule used to be one of these. It is not any more:
+    # the corpus now contains a real encoded command, and the rule detects it.
+    assert "sysmon-encoded-powershell-command" not in untested
+    assert "win-audit-log-cleared" in untested
     assert len(untested) > 10
 
 
@@ -518,7 +525,7 @@ def test_the_committed_capture_carries_no_identifying_traffic():
     import re as _re
     raw = NETWORK_FIXTURE.read_bytes()
     text = b" ".join(_re.findall(rb"[ -~]{5,}", raw)).decode("ascii", "replace")
-    for pattern in (r"Khan", r"LAPTOP-", r"tlsquic", r"hermes"):
+    for pattern in (r"Khan", r"LAPTOP-", r"tlsquic", r"hermes", r"@hotmail"):
         assert not _re.search(pattern, text, _re.I), pattern + " is in the capture"
 
 

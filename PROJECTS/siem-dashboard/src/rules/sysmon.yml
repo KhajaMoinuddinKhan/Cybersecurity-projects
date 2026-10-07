@@ -22,11 +22,28 @@ rules:
           - "\\pwsh.exe"
       keywords:
         data.CommandLine|contains:
-          - "-enc "
+          # The flag itself, not a guess at the payload. The list used to carry
+          # "-e JAB", a common base64 prefix, and the first time the rule was
+          # ever shown a real encoded command it missed it: Atomic's T1059.001
+          # payload starts with "JgAgACgAZ" because it decodes to `& (gcm ...)`.
+          # A rule that recognises an obfuscation technique only when the
+          # obfuscated text happens to begin a particular way is recognising the
+          # text, not the technique.
+          #
+          # The flag alone is not enough either, and that was the second thing
+          # the corpus taught: matching "-e " on its own fired on seven benign
+          # PowerShell command lines, because the flag is two characters and
+          # appears inside ordinary arguments. What identifies an encoded command
+          # is the flag followed by a long base64 argument, which is a shape
+          # rather than a word.
+          # `-enc` is PowerShell's own abbreviation for the switch and is not
+          # ambiguous, so it stays a plain keyword and catches short payloads.
+          - "-enc"
           - "-encodedcommand"
-          - "-e JAB"
           - "frombase64string"
-      condition: selection and keywords
+      encoded_argument:
+        data.CommandLine|re: "-e[ ]+[A-Za-z0-9+/=]{20,}"
+      condition: selection and (keywords or encoded_argument)
     falsepositives:
       - An administrative tool that encodes its own commands, such as some
         configuration management agents.

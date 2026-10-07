@@ -49,16 +49,74 @@ def test_the_allowlist_covers_more_than_one_technique():
     assert len({t.attack_id for t in ALLOWED_TECHNIQUES}) >= 4
 
 
-def test_arguments_are_substituted_into_the_command():
-    technique = Technique("T9999", "example", "an atomic", "command_prompt",
-                          "run --flag #{value}", {"value": "abc"})
-    assert technique.resolved() == "run --flag abc"
-    assert "#{" not in technique.resolved()
+def test_the_command_text_comes_from_the_vendored_tree():
+    """No command is stored in this repository's own source.
+
+    The atomics tree is the source of the text; `src/lab.py` holds only a list of
+    the atomic guids that are allowed. That distinction is what stops the lab
+    drifting from the atomics, which it had: the hard-coded copy of T1082's
+    system-information test had quietly been replaced with a read-only command,
+    and the tree's actual test for that name runs a script that writes a report
+    file.
+    """
+    from src.lab import Technique, ATOMIC_SOURCE
+    import dataclasses
+    fields = {f.name for f in dataclasses.fields(Technique)}
+    assert "command" not in fields and "executor" not in fields
+    assert {"attack_id", "name", "guid"} <= fields
+    assert ATOMIC_SOURCE.exists(), "the atomics must be vendored"
+    assert list(ATOMIC_SOURCE.glob("*.yaml")), "the atomics must be vendored"
 
 
-def test_an_unsubstituted_argument_would_be_visible():
-    technique = Technique("T9999", "example", "an atomic", "command_prompt", "run #{missing}")
-    assert "#{missing}" in technique.resolved()
+def test_every_allowed_technique_resolves_from_the_tree():
+    for technique in ALLOWED_TECHNIQUES:
+        assert technique.resolved().strip(), technique.guid
+        assert technique.executor in ("command_prompt", "powershell"), technique.guid
+        assert "#{" not in technique.resolved(), (technique.name, "an argument is unfilled")
+
+
+def test_arguments_come_from_the_atomic_not_from_this_file():
+    """`whoami /all` -- the `/all` is the atomic's own declared default."""
+    whoami = next(t for t in ALLOWED_TECHNIQUES if t.attack_id == "T1033")
+    assert whoami.arguments == {}, "no argument is overridden here"
+    assert "/all" in whoami.resolved()
+
+
+def test_a_selector_that_does_not_resolve_fails_loudly():
+    """A stale guid must stop the lab, not silently run something else.
+
+    Two different Windows tests in T1082 are both named "System Information
+    Discovery", so a name is not an identity. Keying on the atomic's guid means a
+    rename cannot quietly change what runs.
+    """
+    from src.lab import Technique, CaptureError
+    bogus = Technique("T1082", "nothing", "00000000-0000-0000-0000-000000000000")
+    with pytest.raises(CaptureError):
+        bogus.resolved()
+    unknown_technique = Technique("T9999", "nothing", "66703791-c902-4560-8770-42b8a91f7667")
+    with pytest.raises(CaptureError):
+        unknown_technique.resolved()
+
+
+def test_the_allowlist_excludes_the_atomics_that_download_code():
+    """The WinPwn tests are in the same file as the safe ones, and stay out.
+
+    They are under the same technique ids and fetch PowerShell from
+    raw.githubusercontent.com. They are excluded by guid, which is the only
+    stable way to say so.
+    """
+    import yaml
+    from src.lab import ATOMIC_SOURCE, ALLOWED_TECHNIQUES
+    allowed = {t.guid for t in ALLOWED_TECHNIQUES}
+    offenders = []
+    for path in ATOMIC_SOURCE.glob("*.yaml"):
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for test in data.get("atomic_tests") or []:
+            guid = str(test.get("auto_generated_guid") or "")
+            command = str((test.get("executor") or {}).get("command") or "")
+            if guid in allowed and "raw.githubusercontent.com" in command:
+                offenders.append((path.name, test.get("name")))
+    assert not offenders, offenders
 
 
 def test_the_reader_filter_recognises_its_own_process():
