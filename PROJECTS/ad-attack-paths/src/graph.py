@@ -58,6 +58,8 @@ class AttackGraph:
     incoming: dict = field(default_factory=lambda: defaultdict(list))
     edges: list = field(default_factory=list)
     unknown_rights: dict = field(default_factory=dict)
+    # Populated collector fields that produced no edge, by field name.
+    unmodelled: dict = field(default_factory=dict)
 
     def add(self, edge: Edge) -> None:
         self.edges.append(edge)
@@ -104,7 +106,8 @@ class AttackGraph:
                 "traversable": sum(1 for e in self.edges if e.traversable),
                 "context": sum(1 for e in self.edges if not e.traversable),
                 "by_kind": dict(by_kind), "by_capability": dict(by_capability),
-                "unknown_rights": dict(self.unknown_rights)}
+                "unknown_rights": dict(self.unknown_rights),
+                "unmodelled": dict(self.unmodelled)}
 
 
 def build_graph(data: CollectorData) -> AttackGraph:
@@ -127,6 +130,12 @@ def build_graph(data: CollectorData) -> AttackGraph:
     # object underneath the container it is linked to and the containment tree has to
     # be complete before that can be walked.
     _add_policy_edges(graph)
+
+    # What the collector collected and this did not use. A tool that reads a field and
+    # silently drops it is worse than one that never read it, because the report looks
+    # complete either way -- the same reason an unknown right is reported rather than
+    # treated as harmless.
+    graph.unmodelled = _unmodelled_fields(graph)
 
     # A right that appears in the data and not in the table is recorded rather than
     # dropped. Treating an unknown right as harmless is the same mistake as treating
@@ -272,6 +281,47 @@ def _add_service_principal_edges(graph: AttackGraph, node: Node) -> None:
                        note="the account's service principal name is hosted on this "
                             "machine as %s, so the service ticket grants access to it"
                             % (service or "an unnamed service")))
+
+
+# Fields that carry relationships, and the edge kind that would use each one. A field
+# here that arrives populated and produces nothing is data the tool collected and
+# discarded, and the report says so by name.
+RELATIONSHIP_FIELDS = {
+    "HasSIDHistory": "sid history -- a principal holding another domain's identifier, "
+                     "which is a way across a trust",
+    "AllowedToDelegate": "constrained delegation -- this principal may delegate to "
+                         "those services",
+    "AllowedToAct": "resource-based delegation -- this principal may act on behalf of "
+                    "others",
+    "GPOChanges": "what a policy changes on the machines it applies to, which is the "
+                  "local group membership it grants",
+    "DCRegistryData": "domain controller registry data, which carries its own sessions "
+                      "and the certificates it holds",
+    "UserRights": "rights held on a machine",
+    "LocalGroups": "local group membership on a machine",
+}
+
+
+def _unmodelled_fields(graph: AttackGraph) -> dict:
+    """Populated relationship fields that produced no edge, by name and by object.
+
+    Read from the parsed nodes rather than the raw files, so a field the parser never
+    captured is reported too -- that is the case that would otherwise be invisible.
+    """
+    produced = {edge.right for edge in graph.edges} | {"MemberOf", "HasSession",
+                                                       "LocalAdminTo", "GPOAppliesTo"}
+    missing = {}
+    for node in graph.data.nodes.values():
+        for field, meaning in RELATIONSHIP_FIELDS.items():
+            value = node.properties.get(field) or node.properties.get(field.lower())
+            if value in (None, [], {}, ""):
+                continue
+            if field in produced or field.lower() in {p.lower() for p in produced}:
+                continue
+            missing.setdefault(field, {"meaning": meaning, "objects": []})
+            if len(missing[field]["objects"]) < 5:
+                missing[field]["objects"].append(node.name or node.sid)
+    return missing
 
 
 def _add_primary_group_edges(graph: AttackGraph, node: Node) -> None:

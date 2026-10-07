@@ -291,6 +291,48 @@ def test_every_newly_parsed_field_is_used_or_reported(graph):
             "%s is parsed and never used" % field
 
 
+def test_a_populated_field_that_produces_no_route_is_reported(forest, graph):
+    """The failure this guards is silence. A collector field that arrives populated and
+    produces nothing leaves a report that looks complete -- the same reason an unknown
+    right is reported rather than treated as harmless. Nothing here is populated in this
+    data, so the field is populated by hand and the report must name it."""
+    assert graph.summary()["unmodelled"] == {}, "nothing is populated in this data"
+
+    victim = next(n for n in forest.nodes.values() if n.kind == "user")
+    victim.properties["AllowedToDelegate"] = ["S-1-5-21-0-0-0-1"]
+    try:
+        rebuilt = build_graph(forest)
+        reported = rebuilt.summary()["unmodelled"]
+        assert "AllowedToDelegate" in reported, \
+            "a populated field with no edge builder must be named, not dropped"
+        assert victim.name in reported["AllowedToDelegate"]["objects"]
+        assert reported["AllowedToDelegate"]["meaning"]
+    finally:
+        victim.properties.pop("AllowedToDelegate", None)
+
+
+def test_a_field_that_does_produce_a_route_is_not_reported_as_unmodelled(forest, graph):
+    """The check must not cry wolf: a field that is used must stay out of the list."""
+    reported = set(graph.summary()["unmodelled"])
+    assert "UserRights" not in reported
+    assert "LocalGroups" not in reported
+
+
+def test_the_report_names_the_unmodelled_fields(forest, graph):
+    victim = next(n for n in forest.nodes.values() if n.kind == "user")
+    victim.properties["AllowedToDelegate"] = ["S-1-5-21-0-0-0-1"]
+    try:
+        rebuilt = build_graph(forest)
+        jewels = crown_jewels(forest, rebuilt)
+        document = report_module.build(rebuilt, jewels, {"points": [], "total": 0},
+                                       {"cut": [], "size": 0, "note": "not asked for"})
+        markdown = report_module.to_markdown(document)
+        assert "AllowedToDelegate" in markdown
+        assert "nothing is dropped in silence" in markdown
+    finally:
+        victim.properties.pop("AllowedToDelegate", None)
+
+
 # --- certificate services --------------------------------------------------
 
 def test_an_escalation_is_derived_from_the_template_not_its_name(forest, graph):

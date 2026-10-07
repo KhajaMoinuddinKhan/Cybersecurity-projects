@@ -144,6 +144,21 @@ path from the default domain policy to the domain administrators group, which is
 something anybody can walk: a policy configures computers and users, and does not grant
 control of a group object. It read exactly as convincingly as the real paths beside it.
 
+## What it reads and does not use
+
+A collector returns fields this does not turn into routes, and the report names them
+rather than dropping them. `AllowedToDelegate` and `AllowedToAct` are delegation;
+`HasSIDHistory` is a principal holding another domain's identifier, which is a way
+across a trust; `GPOChanges` is the local group membership a policy grants. None of
+them is populated in this data, so nothing is reported here -- but a tool that reads a
+field and silently discards it produces a report that looks complete either way, which
+is the same failure as treating an unread rule as clear.
+
+Trusts are recorded and reported and deliberately not walked. A trust permits
+authentication across it and does not grant control of anything in the other domain,
+so treating it as a route invents paths. What actually crosses a trust is SID history
+or a compromised trust key, and that is the field above rather than the trust itself.
+
 ## Limits
 
 The tool reads what the collector collected. Sessions, local group membership and

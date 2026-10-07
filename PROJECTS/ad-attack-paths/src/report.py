@@ -213,6 +213,16 @@ def to_markdown(document: dict) -> str:
                      "clear." % ", ".join(sorted(
                          {r for rights in context["unresolved"].values() for r in rights})))
         lines.append("")
+    unmodelled = document["graph"].get("unmodelled") or {}
+    if unmodelled:
+        lines.append("Fields the collector populated that this does not turn into a "
+                     "route, named so that nothing is dropped in silence:")
+        lines.append("")
+        for field, detail in sorted(unmodelled.items()):
+            lines.append("- **`%s`** -- %s. On: %s." % (
+                field, detail["meaning"],
+                ", ".join("`%s`" % o for o in detail["objects"][:3])))
+        lines.append("")
     lines.append("Sessions are collected per machine and none were present in this "
                  "data, so no route here depends on one. Where they exist they are "
                  "walked in reverse -- compromising the machine yields whoever is "
