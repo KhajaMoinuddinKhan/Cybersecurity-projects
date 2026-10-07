@@ -558,6 +558,51 @@ access rights, and it was found the same way -- by running something and watchin
 nothing happen. The importer now records the size of a DNS answer, and all three
 rules measure at full precision and recall.
 
+## Correlation, measured
+
+The four correlation rules fire when two detection rules match in order, on the
+same host or account, inside a time window — and nothing had ever checked that,
+which made them the one part of the plan with no number attached. They are
+measured now, and each one gets a scenario that should fire it plus three that
+should not: the same steps in the wrong order, the same steps outside the rule's
+own window, and the same steps split across two hosts. A rule that fires on any
+of those is reporting a sequence that did not happen, which is the failure mode
+correlation is most prone to. All four fire on their own sequence and none fires
+on the three that should stay quiet.
+
+The stimulus is constructed rather than captured, and that is worth being plain
+about. There has been no account created on this machine during a capture, no
+lockout, no service installed and no audit log cleared, so those sequences cannot
+come from the corpus. What makes them usable rather than invented is that every
+event is run through `rule_matches` against the detection rule it stands for
+before it is used: a scenario cannot quietly stop representing what it says it
+represents. What is measured here is the ordering, the grouping and the window —
+which is what correlation is. Whether the constituent rules themselves fire is
+measured separately, on real telemetry.
+
+## Everything here is reproducible
+
+The point of the exercise is that a rule is measured rather than assumed, and a
+measurement a reader cannot re-derive is only a claim. So all of it travels with
+the repository.
+
+`tests/vectors/attack-lab-corpus.json` is the host capture, scrubbed: the
+machine's name, the account name, its SID and its real network destinations are
+replaced, addresses consistently through a hash so a flow still reads as a flow.
+`tests/vectors/network-lab.pcap` is the loopback capture the three network rules
+were measured against — a listener on each cleartext port, ordinary exchanges on
+high ports, and a DNS responder answering with a deliberately large TXT record.
+Nothing in either one leaves the machine it was made on, and tests assert that
+rather than trusting it.
+
+`lab/` holds the machinery that takes a capture: `run_driver.py` runs the
+techniques from an ordinary shell and records the times, `read_windows.py` is the
+single elevated process that reads the log for those windows and nothing else, and
+`pcap_lab.py` generates and captures the loopback traffic. They write to
+`$SIEM_LAB_WORK`, or `lab/out/` by default. The measurement re-derives from the
+committed captures with no privileges at all; taking a fresh capture needs one
+elevation, for the reading.
+
 ## Limits
 
 The anomaly detector is not deployable as a window-level alerting system: its

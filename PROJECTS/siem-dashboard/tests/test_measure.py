@@ -424,3 +424,114 @@ def test_a_sub_technique_keeps_its_number():
     assert _technique_key("attack.t1059.001") != _technique_key("attack.t1003.001")
     assert _technique_key("T1082") == "T1082"
     assert _technique_key("attack.t1082") == "T1082"
+
+
+# --- correlation -----------------------------------------------------------
+
+def test_every_correlation_rule_fires_on_the_sequence_it_describes():
+    """The four rules the plan's first bullet asks for, finally measured.
+
+    A correlation rule does not judge one event: it fires when two detection
+    rules match in order, on the same host or account, inside a window. Nothing
+    had ever checked that, so the rules had no number attached.
+    """
+    from src.measure import measure_correlation
+    result = measure_correlation()
+    assert result["total"] >= 4
+    for row in result["rules"]:
+        assert row["fires_when_it_should"], "%s never fires on its own sequence" % row["rule_id"]
+        assert row["verified_stimulus"], "%s uses a stimulus that proves nothing" % row["rule_id"]
+
+
+def test_no_correlation_rule_fires_on_a_sequence_that_did_not_happen():
+    """Wrong order, outside the window, split across hosts: none may fire.
+
+    A rule that fires on any of those is reporting a sequence that did not occur,
+    which is the failure mode correlation is most prone to and the reason the
+    negatives exist.
+    """
+    from src.measure import measure_correlation
+    result = measure_correlation()
+    assert result["fired_when_they_should_not"] == 0
+    for row in result["rules"]:
+        assert row["fires_when_it_should_not"] == []
+        assert row["precision"] == 1.0
+
+
+def test_the_correlation_stimulus_actually_trips_its_detection_rule():
+    """The scenarios are constructed, so each one is verified rather than assumed.
+
+    The corpus contains no account creation, no lockout, no service install and no
+    cleared log, so these sequences cannot come from it. What makes them usable is
+    that every event is run through `rule_matches` against the rule it stands for
+    before it is used -- a scenario cannot quietly stop representing what it says
+    it represents.
+    """
+    from src.measure import measure_correlation
+    result = measure_correlation()
+    assert result["unverified_stimulus"] == 0
+
+
+def test_correlation_report_reads_the_way_the_numbers_do():
+    from src.measure import measure_correlation, format_correlation
+    text = format_correlation(measure_correlation())
+    assert "correlation rule" in text
+    assert "spurious" in text
+    assert "fire on the sequence they describe" in text
+
+
+# --- the network rules, from the committed capture --------------------------
+
+NETWORK_FIXTURE = Path(__file__).resolve().parent / "vectors" / "network-lab.pcap"
+
+
+def test_the_network_rules_are_reproducible_from_the_committed_capture():
+    """The three PCAP rules, re-derived from a capture anyone can check.
+
+    Reporting that they measure at full precision with nothing behind it in the
+    repository is a claim rather than a measurement, so the capture is committed
+    and this re-derives the result from it.
+    """
+    from src import pcap_ingest
+    from src.rules import RuleEngine, event_fields, rule_matches
+    assert NETWORK_FIXTURE.exists(), "the capture must be committed"
+
+    summary = pcap_ingest.read_capture(NETWORK_FIXTURE)
+    payloads = pcap_ingest.flow_payloads(summary, capture_name="network-lab.pcap")
+    assert payloads, "the capture must yield flows"
+
+    engine = RuleEngine.from_directory()
+    network = [rule for rule in engine.rules if rule.id.startswith("net-")]
+    assert len(network) == 3
+
+    def fired(rule_id):
+        rule = next(r for r in network if r.id == rule_id)
+        return any(rule_matches(event_fields(p), rule) for p in payloads)
+
+    assert fired("net-cleartext-credential-service"), "the cleartext-service rule must fire"
+    assert fired("net-telnet-usage"), "the telnet rule must fire"
+    assert fired("net-high-volume-dns-txt"), "the large-TXT rule must fire"
+
+
+def test_the_committed_capture_carries_no_identifying_traffic():
+    """It is a capture of loopback traffic made for the lab, and it stays that way."""
+    import re as _re
+    raw = NETWORK_FIXTURE.read_bytes()
+    text = b" ".join(_re.findall(rb"[ -~]{5,}", raw)).decode("ascii", "replace")
+    for pattern in (r"Khan", r"LAPTOP-", r"tlsquic", r"hermes"):
+        assert not _re.search(pattern, text, _re.I), pattern + " is in the capture"
+
+
+def test_the_dns_reader_records_an_answer_size():
+    """The field the large-TXT rule matches on, which nothing produced.
+
+    `_dns_queries` returns early for a response, so the importer recorded only
+    questions and never answers and the rule could not fire on any capture. The
+    payloads now carry `response_bytes`.
+    """
+    from src import pcap_ingest
+    summary = pcap_ingest.read_capture(NETWORK_FIXTURE)
+    payloads = pcap_ingest.flow_payloads(summary, capture_name="network-lab.pcap")
+    dns = [p for p in payloads if str((p.get("fields") or {}).get("protocol")) == "DNS"]
+    assert dns, "the capture contains DNS"
+    assert any("response_bytes" in (p.get("fields") or {}) for p in dns)
