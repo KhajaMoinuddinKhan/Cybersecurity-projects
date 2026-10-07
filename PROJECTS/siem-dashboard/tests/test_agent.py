@@ -38,16 +38,27 @@ class IngestHandler(BaseHTTPRequestHandler):
             self.send_response(401)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(b'{"error": "bad key"}')
+            self._write(b'{"error": "bad key"}')
             return
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(
+        self._write(
             json.dumps(
                 {"accepted": len(body.get("events", [])), "rejected": 0, "errors": []}
             ).encode()
         )
+
+    def _write(self, body):
+        """A client that goes away mid-response is not a test failure.
+
+        socketserver prints a full traceback for it otherwise, which is noise
+        in a suite whose output is meant to be readable.
+        """
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
 
     def log_message(self, *args):  # keep pytest output clean
         pass

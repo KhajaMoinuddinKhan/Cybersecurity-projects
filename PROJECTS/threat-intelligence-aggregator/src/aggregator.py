@@ -374,9 +374,12 @@ def normalise_row(
     unknown type, and canonicalises the value for its type.
     """
 
-    for field in ("type", "value", "source"):
-        if field in row and not isinstance(row[field], str):
-            raise ValueError(f"IOC {field} must be text")
+    # The loop variable is not called `field`: that name is imported from dataclasses
+    # at the top of this module, and shadowing it here would break the first person to
+    # call field() anywhere below this loop.
+    for name in ("type", "value", "source"):
+        if name in row and not isinstance(row[name], str):
+            raise ValueError(f"IOC {name} must be text")
     kind = row.get("type", "").strip().lower()
     value = row.get("value", "").strip()
     source = row.get("source", default_source).strip() or default_source

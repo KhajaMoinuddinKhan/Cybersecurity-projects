@@ -377,17 +377,45 @@ POST_ROUTES = {
 }
 
 
+class QuietServer(ThreadingHTTPServer):
+    """A server that does not print a traceback when a client simply leaves.
+
+    socketserver's default ``handle_error`` writes the whole stack to stderr for any
+    exception a handler raises, and a client that disconnects mid-response raises one
+    every time. Those tracebacks are indistinguishable at a glance from a real fault,
+    which is exactly how a real fault goes unnoticed.
+    """
+
+    daemon_threads = True
+
+    def handle_error(self, request, client_address) -> None:
+        import sys
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return                       # the far end went away; nothing to report
+        super().handle_error(request, client_address)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "crypto-toolkit"
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # The client went away before the response finished. That is not a failure
+            # of this server: a browser that navigates away, a health check that times
+            # out and a scanner that closes early all look like this, and letting it
+            # reach socketserver means every one of them prints a full traceback --
+            # noise that hides the errors that matter.
+            self.close_connection = True
+
 
     def _json(self, status: int, payload: dict) -> None:
         self._send(status, json.dumps(payload, indent=2).encode("utf-8"),
@@ -470,7 +498,7 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *, quiet: bool = F
     plaintext from whoever opens it and will encrypt with them.
     """
 
-    server = ThreadingHTTPServer((host, port), Handler)
+    server = QuietServer((host, port), Handler)
     actual_host, actual_port = server.server_address[0], server.server_address[1]
     if not quiet:
         print("crypto-toolkit console on port %d, serving %s" % (actual_port, TEMPLATE_PATH.name))

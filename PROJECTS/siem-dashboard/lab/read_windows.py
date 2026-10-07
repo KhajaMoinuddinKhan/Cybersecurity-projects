@@ -1,6 +1,7 @@
 
 import json, os, sys
-from pathlib import Path, time, traceback
+import time, traceback
+from pathlib import Path
 for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
     os.environ.pop(key, None)
 SIEM = str(Path(__file__).resolve().parent.parent)

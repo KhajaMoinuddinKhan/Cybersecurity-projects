@@ -108,7 +108,16 @@ class _Handler(BaseHTTPRequestHandler):
         for name, value in (extra_headers or {}).items():
             self.send_header(name, value)
         self.end_headers()
-        self.wfile.write(payload)
+        try:
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # The client went away before the response finished. That is not a failure
+            # of this server: a browser that navigates away, a health check that times
+            # out and a scanner that closes early all look like this, and letting it
+            # reach socketserver means every one of them prints a full traceback --
+            # noise that hides the errors that matter.
+            self.close_connection = True
+
 
     def _page(self, title, body):
         """Every page links to the others, so a crawl has a graph to walk.

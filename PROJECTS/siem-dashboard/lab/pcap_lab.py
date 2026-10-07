@@ -1,6 +1,7 @@
 
 import os, sys, socket
-from pathlib import Path, threading, time, json
+import json, threading, time
+from pathlib import Path
 for key in ("PYTHONPATH","PYTHONHOME","VIRTUAL_ENV"):
     os.environ.pop(key, None)
 SIEM = str(Path(__file__).resolve().parent.parent)
