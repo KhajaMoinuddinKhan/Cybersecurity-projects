@@ -102,6 +102,47 @@ def _dns_queries(packet: Any, UDP: Any, DNS: Any, DNSQR: Any) -> list[str]:
     return [name for name in names if name]
 
 
+def _dns_response_size(packet: Any, UDP: Any, DNS: Any, DNSRR: Any) -> tuple[str, int]:
+    """The name a DNS *response* answers for, and how large the answer was.
+
+    `_dns_queries` returns early for anything that is a response, so the importer
+    recorded only questions and never answers -- and the rule that looks for a
+    large TXT record matches on `response_bytes`, a field nothing produced. It
+    could not fire on any capture, which is a rule that reads as exfiltration
+    coverage and is in fact dead. The size is the DNS payload, which is what a
+    data-over-DNS tunnel inflates.
+    """
+    if UDP not in packet or not packet.haslayer(DNS):
+        return "", 0
+    layer = packet[DNS]
+    if int(getattr(layer, "qr", 0) or 0) != 1:
+        return "", 0
+    name = ""
+    answers = getattr(layer, "an", None)
+    if answers is not None:
+        try:
+            entries = list(answers) if isinstance(answers, list) else [answers]
+        except TypeError:
+            entries = [answers]
+        for entry in entries:
+            rrname = getattr(entry, "rrname", None)
+            if rrname:
+                text = rrname.decode("utf-8", "replace") if isinstance(rrname, bytes) else str(rrname)
+                name = text.rstrip(".")
+                break
+    if not name:
+        question = getattr(layer, "qd", None)
+        qname = getattr(question, "qname", None) if question is not None else None
+        if qname:
+            name = (qname.decode("utf-8", "replace") if isinstance(qname, bytes)
+                    else str(qname)).rstrip(".")
+    try:
+        size = len(bytes(layer))
+    except Exception:
+        size = 0
+    return name, size
+
+
 def _service(destination_port: str) -> str:
     return SERVICE_PORTS.get(destination_port, "")
 
@@ -169,9 +210,18 @@ def read_capture(path: Path) -> dict[str, Any]:
                     entry["first_seen"] = stamp
                 entry["last_seen"] = stamp
 
+            response_name, response_size = _dns_response_size(packet, UDP, DNS, None)
+            if response_name and response_size:
+                answer = dns_names.setdefault(
+                    response_name, {"name": response_name, "queries": 0,
+                                    "response_bytes": 0, "first_seen": None}
+                )
+                answer["response_bytes"] = max(int(answer.get("response_bytes") or 0),
+                                               response_size)
+
             for name in _dns_queries(packet, UDP, DNS, DNSQR):
                 record = dns_names.setdefault(
-                    name, {"name": name, "queries": 0, "first_seen": None}
+                    name, {"name": name, "queries": 0, "response_bytes": 0, "first_seen": None}
                 )
                 record["queries"] += 1
                 if record["first_seen"] is None and entry["first_seen"]:
@@ -275,6 +325,9 @@ def flow_payloads(
                     "protocol": "DNS",
                     "query_name": record["name"],
                     "queries": str(record["queries"]),
+                    # the field the large-TXT rule matches on; without it that
+                    # rule could not fire on any capture at all
+                    "response_bytes": str(record.get("response_bytes") or 0),
                     "capture": capture_name,
                 },
             }

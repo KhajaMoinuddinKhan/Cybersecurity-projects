@@ -518,6 +518,46 @@ experiment nobody has run yet. The captured corpus is not committed: it is real
 telemetry from a real machine, hostname and account name included, and it belongs
 on the machine that produced it.
 
+## The two-process capture
+
+Reading Sysmon needs elevation. Spawning the techniques must not have it, and that
+was not obvious until it was measured: the encoded-PowerShell atomic is refused
+outright when an elevated parent asks for it, five attempts in a row, and runs
+perfectly from an ordinary shell. So the capture is split. An ordinary process
+runs the techniques and writes down the times; a second process, elevated once,
+reads the log for those windows and nothing else. Record-id marks cannot be taken
+by a process that is not there when the technique runs, so the windows are
+timestamps.
+
+That is what finally got the encoded-PowerShell window into the corpus, and the
+answer it produced is more interesting than a rule firing would have been. The
+atomic is not merely obfuscated; it resolves `iex` at runtime through `Get-Command`
+and hands it a string built by concatenation, which is the shape endpoint
+protection exists to refuse. It is refused here, correctly. The window therefore
+contains the protection working rather than the technique, the Defender rules fire
+on it, and `sysmon-encoded-powershell-command` has evidence and correctly stays
+quiet. The rule is not untested any more; it is tested and it did not fire, because
+the behaviour it names never happened.
+
+## The network rules
+
+The three rules that read the PCAP importer were measured the same way, against a
+capture of real loopback traffic: a listener on each cleartext port for the
+credential-access rules, an ordinary exchange on a high port for the benign
+windows, and a DNS responder that answers with a deliberately large TXT record.
+The label comes from how the traffic was made, not from the telemetry, and nothing
+leaves the machine.
+
+Two of the three worked. The third did not, and could not: `net-high-volume-dns-txt`
+matches on `response_bytes`, and nothing produced that field. The importer's DNS
+reader returned early for anything that was a response, so it recorded only
+questions and never answers, and the rule that looks for a large TXT record was
+incapable of firing on any capture at all. A rule that reads as exfiltration
+coverage and is in fact dead is the same failure as the LSASS rule that checked no
+access rights, and it was found the same way -- by running something and watching
+nothing happen. The importer now records the size of a DNS answer, and all three
+rules measure at full precision and recall.
+
 ## Limits
 
 The anomaly detector is not deployable as a window-level alerting system: its

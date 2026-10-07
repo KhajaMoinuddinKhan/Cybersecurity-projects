@@ -12,6 +12,7 @@ import re
 import pytest
 
 from src.lab import (ALLOWED_TECHNIQUES, BENIGN, BENIGN_WORKLOAD, CaptureError, Technique,
+                     read_window,
                      _event_fields, _is_reader_own, read_all)
 
 
@@ -206,3 +207,36 @@ def test_the_benign_workload_is_not_the_technique_list():
         if technique.attack_id == "T1016":
             continue                     # the deliberate overlap, asserted above
         assert command not in baseline, (technique.attack_id, "is in the baseline")
+
+
+def test_read_window_reports_a_channel_it_could_not_read():
+    """Time-based windows exist because two processes have to take them.
+
+    Reading Sysmon needs elevation; spawning the techniques must not have it,
+    because endpoint protection refuses the encoded-PowerShell atomic from an
+    elevated parent. Record-id marks cannot be taken by a process that is not
+    there when the technique runs, so the windows are timestamps instead.
+    """
+    events, readable = read_window("Sysmon", 0.0, 1.0,
+                                   runner=lambda script, timeout: ('{"events": [], "readable": false}', 1))
+    assert events == [] and readable is False
+
+
+def test_read_window_returns_the_events_when_the_channel_reads():
+    import json as _json
+    envelope = _json.dumps({
+        "events": [{"Channel": "System", "Id": 1, "RecordId": 5,
+                    "TimeCreated": "2026-10-07T12:00:00", "Message": "m",
+                    "Xml": '<Event><EventData><Data Name="Image">C:\\a.exe</Data></EventData></Event>'}],
+        "readable": True,
+    })
+    events, readable = read_window("System", 0.0, 1.0,
+                                   runner=lambda script, timeout: (envelope, 1))
+    assert readable is True
+    assert len(events) == 1 and events[0]["record_id"] == 5
+
+
+def test_read_window_refuses_an_empty_answer():
+    events, readable = read_window("System", 0.0, 1.0,
+                                   runner=lambda script, timeout: ("", 1))
+    assert events == [] and readable is False

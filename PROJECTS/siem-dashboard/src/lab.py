@@ -541,6 +541,77 @@ def capture_benign(seconds: float = 12.0, workload=None, rotation: int = 0) -> W
                   events=tuple(events))
 
 
+def read_window(channel: str, start: float, end: float, newest: int = 4000,
+                runner=None) -> tuple[list[dict], bool]:
+    """Everything a channel recorded between two times, and whether it could be read.
+
+    Windows are times rather than record ids because the two have to be taken by
+    different processes. Reading Sysmon needs elevation; spawning the techniques
+    must *not* have it. Running the encoded-PowerShell atomic from an elevated
+    parent is refused outright by endpoint protection -- five attempts in a row --
+    and that turned out to be the only thing elevation broke, because the same
+    command runs from an ordinary shell. Record-id marks cannot be taken by a
+    process that is not there when the technique runs; a pair of timestamps can.
+
+    Returns `(events, readable)`. A channel that could not be read says so rather
+    than returning an empty list, for the same reason `read_all` does.
+    """
+    runner = runner or _powershell
+    start_text = _windows_time(start)
+    end_text = _windows_time(end)
+    script = (
+        "$ErrorActionPreference='SilentlyContinue';"
+        "try {"
+        "  $e = Get-WinEvent -LogName '%s' -MaxEvents %d -ErrorAction Stop |"
+        "       Where-Object { $_.TimeCreated -ge [datetime]'%s' -and $_.TimeCreated -le [datetime]'%s' };"
+        "  $out = @();"
+        "  if ($e) { $out = $e | ForEach-Object {"
+        "    $x = [xml]$_.ToXml(); $pairs = @();"
+        "    foreach ($d in $x.Event.EventData.Data) {"
+        "      $pairs += ('<Data Name=\"' + $d.Name + '\">' + "
+        "[System.Security.SecurityElement]::Escape([string]$d.'#text') + '</Data>') };"
+        "    $mini = '<Event><EventData>' + ($pairs -join '') + '</EventData></Event>';"
+        "    [pscustomobject]@{ Channel=$_.LogName; Id=$_.Id; Provider=$_.ProviderName;"
+        "      Level=$_.LevelDisplayName; RecordId=$_.RecordId;"
+        "      TimeCreated=$_.TimeCreated.ToString('o'); User=$_.UserId; Xml=$mini;"
+        "      Message=$([string]$_.Message).Substring(0,[Math]::Min(1200,([string]$_.Message).Length)) } } };"
+        "  [pscustomobject]@{ events=@($out); readable=$true } | ConvertTo-Json -Depth 5 -Compress"
+        "} catch { [pscustomobject]@{ events=@(); readable=$false } | ConvertTo-Json -Depth 3 -Compress }"
+    ) % (channel.replace("'", "''"), newest, start_text, end_text)
+    text, reader_pid = runner(script, timeout=300)
+    text = (text or "").strip()
+    if not text:
+        return [], False
+    try:
+        envelope = json.loads(text)
+    except json.JSONDecodeError:
+        return [], False
+    if isinstance(envelope, list):
+        envelope = envelope[0] if envelope else {}
+    if not envelope.get("readable"):
+        return [], False
+    raw = envelope.get("events") or []
+    if isinstance(raw, dict):
+        raw = [raw]
+    events = []
+    for item in raw:
+        fields = _event_fields(item)
+        if _is_reader_own(fields, _READER_PIDS | {reader_pid}):
+            continue
+        payload = windows_event_to_payload(item.get("Channel") or channel, item)
+        payload["record_id"] = int(item.get("RecordId") or 0)
+        payload["captured_channel"] = item.get("Channel") or channel
+        events.append(payload)
+    events.sort(key=lambda e: e.get("record_id") or 0)
+    return events, True
+
+
+def _windows_time(epoch: float) -> str:
+    """An epoch as the local time string Get-WinEvent's filter wants."""
+    import datetime
+    return datetime.datetime.fromtimestamp(epoch).strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def capture_corpus(techniques=ALLOWED_TECHNIQUES, benign_windows: int = 3,
                    benign_seconds: float = 12.0, progress=print) -> dict:
     """Run every allowed technique and some benign windows, in one corpus."""

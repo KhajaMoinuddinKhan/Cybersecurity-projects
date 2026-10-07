@@ -47,8 +47,14 @@ def _technique_key(tag: str) -> str:
     case are presentation, so they are stripped here.
     """
     text = str(tag or "").strip().lower()
-    if "." in text:
-        text = text.rsplit(".", 1)[-1]
+    # Only the Sigma namespace is stripped. Splitting on the *last* dot collapsed
+    # every sub-technique to its number -- attack.t1059.001 and attack.t1003.001
+    # both became "001" -- so the LSASS rule counted the encoded-PowerShell window
+    # as one it names, and reported a true positive for a technique it does not
+    # detect. The sub-technique is part of the identifier.
+    for prefix in ("attack.", "mitre."):
+        if text.startswith(prefix):
+            text = text[len(prefix):]
     return text.upper()
 
 

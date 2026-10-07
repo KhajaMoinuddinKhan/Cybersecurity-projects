@@ -408,3 +408,19 @@ def test_the_snapshot_is_cached_until_the_corpus_changes(tmp_path):
 
     fresh = measurement_snapshot(path, with_anomaly=False, use_cache=False)
     assert fresh is not third
+
+
+def test_a_sub_technique_keeps_its_number():
+    """Splitting on the last dot collapsed every sub-technique to its number.
+
+    attack.t1059.001 and attack.t1003.001 both became "001", so the LSASS rule
+    counted the encoded-PowerShell window as one it names and reported a true
+    positive for a technique it does not detect. The sub-technique is part of the
+    identifier, so only the Sigma namespace is stripped.
+    """
+    from src.measure import _technique_key
+    assert _technique_key("attack.t1059.001") == "T1059.001"
+    assert _technique_key("attack.t1003.001") == "T1003.001"
+    assert _technique_key("attack.t1059.001") != _technique_key("attack.t1003.001")
+    assert _technique_key("T1082") == "T1082"
+    assert _technique_key("attack.t1082") == "T1082"
