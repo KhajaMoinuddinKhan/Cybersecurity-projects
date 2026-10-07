@@ -265,14 +265,12 @@ def load_collector(path: str | Path) -> CollectorData:
     if path.is_dir():
         entries = {p.name: p.read_bytes() for p in sorted(path.iterdir())
                    if p.suffix.lower() == ".json"}
-        opener = lambda name: entries[name]          # noqa: E731
         names = sorted(entries)
     elif zipfile.is_zipfile(path):
         with zipfile.ZipFile(path) as archive:
             names = [n for n in archive.namelist()
                      if n.lower().endswith(".json") and not n.startswith("__MACOSX")]
             entries = {n: archive.read(n) for n in names}
-        opener = lambda name: entries[name]          # noqa: E731
     else:
         raise CollectorError("%s is neither a zip archive nor a directory" % path)
 

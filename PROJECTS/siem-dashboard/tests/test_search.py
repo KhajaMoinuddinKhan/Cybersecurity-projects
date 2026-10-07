@@ -16,7 +16,6 @@ from src import search
 from src.app import get_connection
 from src.search import (
     FTS_TABLE,
-    FREE_TEXT_COLUMNS,
     SUPPORTED_FIELDS,
     ensure_schema,
     fts5_supported,

@@ -17,7 +17,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fixtures.make_pcap import (  # noqa: E402
     build_client_hello_record,
-    build_http_get,
     make_classic_pcap,
     make_ipv6_pcap,
 )

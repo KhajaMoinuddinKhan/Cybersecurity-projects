@@ -11,8 +11,7 @@ import re
 
 import pytest
 
-from src.lab import (ALLOWED_TECHNIQUES, BENIGN, BENIGN_WORKLOAD, CaptureError, Technique,
-                     read_window,
+from src.lab import (ALLOWED_TECHNIQUES, BENIGN, BENIGN_WORKLOAD, CaptureError, read_window,
                      _event_fields, _is_reader_own, read_all)
 
 

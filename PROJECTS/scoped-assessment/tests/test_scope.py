@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.scope import AuditLog, Scope, ScopeError, load_scope
+from src.scope import ScopeError, load_scope
 
 
 def make(tmp_path, **overrides):

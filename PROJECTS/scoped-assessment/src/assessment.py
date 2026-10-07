@@ -104,10 +104,12 @@ def assess_http(scope: Scope, host: str, port: int, scheme: str = "http",
     at = at or _now()
     findings: list[Finding] = []
 
+    # A probe, so that an endpoint the engagement refuses produces no findings and says
+    # so in the audit log rather than being quietly skipped. The response headers were
+    # read here and never used; the checks make their own requests.
     landing = fetch(scope, host, port, "/", scheme=scheme, at=at)
     if landing.get("refused"):
         return findings
-    headers = landing.get("headers") or {}
 
     for check in CHECKS:
         findings.extend(check.run(scope, host, port, scheme, at))

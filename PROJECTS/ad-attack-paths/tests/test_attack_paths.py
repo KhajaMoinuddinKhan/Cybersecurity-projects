@@ -11,6 +11,7 @@ objects the collector never collected.
 
 from __future__ import annotations
 
+import ast
 import glob
 import json
 import re
@@ -274,7 +275,6 @@ def test_a_service_principal_name_is_a_credential_route(graph):
 def test_a_privilege_held_on_a_machine_is_an_edge(graph):
     """A right like SeDebugPrivilege is escalation on that machine, and the data says
     who holds it where it was collected."""
-    privileges = {right.name for right in RIGHTS}
     for edge in graph.edges:
         if edge.kind == "ace" and edge.right in ("SeDebugPrivilege", "SeBackupPrivilege",
                                                  "SeImpersonatePrivilege"):
@@ -335,6 +335,46 @@ def test_the_report_names_the_unmodelled_fields(forest, graph):
         victim.properties.pop("AllowedToDelegate", None)
 
 
+def test_the_command_line_exits_zero(tmp_path):
+    """The entry point must finish, and this is the only check that says so.
+
+    The summary block read two names that existed in the analysis function and not in
+    main, so every run printed its analysis, wrote its report and then died with a
+    NameError on the last three lines. Nothing looked wrong -- the report was there --
+    and the process exited 1 the entire time. A test that only reads the report cannot
+    see that, which is why this one runs the command and checks the code.
+    """
+    import subprocess
+    import sys
+
+    command = [sys.executable, "-m", "src.cli", "--out", str(tmp_path / "out")]
+    for archive in ARCHIVES:
+        command += ["--data", archive]
+    result = subprocess.run(command, cwd=str(PROJECT), capture_output=True,
+                            text=True, timeout=900)
+    assert result.returncode == 0, \
+        "the command failed:\n%s" % result.stderr[-2000:]
+    assert "report written to" in result.stdout, "the command must say it finished"
+    assert (tmp_path / "out" / "report.md").exists()
+    assert (tmp_path / "out" / "report.html").exists()
+
+
+def test_the_command_line_summarises_what_it_found(tmp_path):
+    """The last lines of the summary are the ones the crash was hiding, so they are
+    checked by name rather than by exit code alone."""
+    import subprocess
+    import sys
+
+    command = [sys.executable, "-m", "src.cli", "--out", str(tmp_path / "out")]
+    for archive in ARCHIVES:
+        command += ["--data", archive]
+    result = subprocess.run(command, cwd=str(PROJECT), capture_output=True,
+                            text=True, timeout=900)
+    assert "certificate template(s) permit an escalation" in result.stdout
+    assert "combination(s) are stronger than either half" in result.stdout
+    assert "crown jewels" in result.stdout
+
+
 # --- nothing about this forest is written into the source -------------------
 
 def test_no_source_file_names_this_forest():
@@ -356,8 +396,6 @@ def test_no_source_file_names_this_forest():
     If a domain name appeared in the source, the tool would be carrying an answer rather
     than deriving one, and it would give that answer whatever it was pointed at.
     """
-    import ast
-
     domains = {d.upper() for d in load_forest(ARCHIVES).domains}
     assert len(domains) == 3, "the forest must supply the domain names being checked"
 
@@ -375,7 +413,6 @@ def test_no_source_file_names_this_forest():
 def test_no_source_file_hardcodes_a_count():
     """A count baked into the source would be an answer about the data. The numbers in
     the source are display limits and algorithm bounds, and they are named."""
-    import ast
     import re
     allowed = {"ROUTES_SHOWN", "REASON_CHARS", "STEP_CHARS", "OBJECTS_PER_FIELD"}
     for path in sorted((PROJECT / "src").rglob("*.py")):

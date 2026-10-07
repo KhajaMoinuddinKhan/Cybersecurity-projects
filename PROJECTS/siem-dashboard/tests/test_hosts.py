@@ -222,7 +222,7 @@ def test_list_hosts_computes_status_and_age(tmp_path):
         old = enrol_host(conn, "old")
         touch_host(conn, old["host_id"], 9)
         _aged(conn, old["host_id"], 1000)
-        idle = enrol_host(conn, "idle")
+        enrol_host(conn, "idle")      # never reports, so it must come back as such
 
         hosts = {host["name"]: host for host in list_hosts(conn, stale_after_seconds=300)}
         assert hosts["fresh"]["status"] == ONLINE

@@ -8,7 +8,7 @@ from scapy.layers.inet import IP, TCP
 from scapy.layers.l2 import Ether
 from scapy.utils import wrpcap
 
-from src.analyze_pcap import analyse_pcap, packet_to_record, port_number
+from src.analyze_pcap import analyse_pcap, port_number
 
 
 def write_raw_capture(path, frame):

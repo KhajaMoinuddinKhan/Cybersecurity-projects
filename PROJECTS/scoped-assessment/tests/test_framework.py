@@ -49,18 +49,6 @@ def test_the_lab_refuses_to_bind_anywhere_but_loopback():
         Server(port=0, host="0.0.0.0")
 
 
-def test_every_flaw_the_lab_claims_is_one_the_checks_look_for():
-    from src.assessment import CHECK_NAMES
-    declared = {flaw["id"].replace("lab-", "").replace("-disclosure", "-disclosure")
-                for flaw in FLAWS}
-    for flaw in FLAWS:
-        if flaw["imitates"]:
-            assert any(name in flaw["id"] or flaw["id"] in "lab-" + name
-                       for name in CHECK_NAMES), flaw["id"]
-
-
-# --- scanning is gated by the engagement ------------------------------------
-
 def test_a_port_the_engagement_does_not_list_is_never_opened(tmp_path, lab):
     scope = engagement(tmp_path, [lab.port + 1])
     service = probe_port(scope, "127.0.0.1", lab.port)
@@ -115,17 +103,32 @@ def test_the_checks_find_every_flaw_the_lab_has(tmp_path, lab):
 
 
 def test_every_flaw_the_lab_declares_is_a_flaw_a_check_looks_for():
-    """The lab documents its flaws; each one has to map to a check, or the lab is
-    claiming a vulnerability nothing measures."""
+    """The lab documents its flaws, and every one of them has to be measured by
+    something, or the lab is claiming a vulnerability nothing checks.
+
+    Asserted both ways, because one direction is not enough. A flaw with no check is a
+    claim the lab cannot support; a check with no flaw is a check that has never been
+    seen to fire, and a check that cannot fail is worse than no check.
+
+    Three entries are for the crawler rather than for the checks -- one it must refuse
+    to follow, and two it must be able to reach at all -- and they are named here rather
+    than inferred, so that adding a fourth is a decision somebody makes.
+    """
     from src.assessment import CHECK_NAMES
-    # Three entries exist for the crawler rather than for the checks: one it must
-    # refuse to follow, and two it must be able to reach at all.
     for_the_crawler = {"lab-state-changing-link", "lab-js-built-link", "lab-declared-path"}
-    for flaw in FLAWS:
-        if flaw["id"] in for_the_crawler:
-            continue
-        name = flaw["id"][len("lab-"):]
-        assert name in CHECK_NAMES, "no check covers %s" % flaw["id"]
+
+    covered = {flaw["id"][len("lab-"):] for flaw in FLAWS
+               if flaw["id"] not in for_the_crawler}
+    unmeasured = covered - set(CHECK_NAMES)
+    assert not unmeasured, "the lab declares flaws no check looks for: %s" % unmeasured
+
+    unexercised = set(CHECK_NAMES) - covered
+    assert not unexercised, "these checks have no flaw to fire on: %s" % unexercised
+
+    # and the crawler entries must be real paths the crawler is tested against
+    crawler_paths = {flaw["path"] for flaw in FLAWS if flaw["id"] in for_the_crawler}
+    assert len(crawler_paths) == len(for_the_crawler), \
+        "every crawler entry must name a distinct path"
 
 
 def test_the_traversal_finding_carries_the_bytes_that_prove_it(tmp_path, lab):

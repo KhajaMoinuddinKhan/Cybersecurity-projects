@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 
 import pytest
 
-from lab import FLAWS, LabServer
+from lab import LabServer
 from src.assessment import CHECK_NAMES, CONFIRMABLE, assess_http
 from src.crawl import STATE_CHANGING, crawl
 from src.scope import load_scope

@@ -3,7 +3,7 @@ import pytest
 
 pytest.importorskip("scapy")
 from scapy.layers.dns import DNS, DNSQR
-from scapy.layers.inet import ICMP, IP, TCP, UDP
+from scapy.layers.inet import ICMP, IP, UDP
 from scapy.layers.l2 import Ether
 from scapy.utils import wrpcap
 

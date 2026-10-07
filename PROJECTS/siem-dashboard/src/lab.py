@@ -31,7 +31,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .windows_collector import CHANNELS, SYSMON_CHANNEL, windows_event_to_payload
+from .windows_collector import CHANNELS, windows_event_to_payload
 
 __all__ = [
     "Technique",

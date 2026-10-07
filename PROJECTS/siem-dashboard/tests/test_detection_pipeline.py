@@ -36,7 +36,6 @@ from src.notify import Notifier
 from src.windows_collector import classify_event
 from src.rules import (
     CorrelationRule,
-    RuleEngine,
     RuleError,
     event_fields,
     load_rules,
@@ -722,7 +721,6 @@ def test_the_capture_endpoint_refuses_a_file_that_is_not_a_capture(tmp_path):
 
 
 def test_the_capture_endpoint_stores_flows(tmp_path):
-    from src.pcap_ingest import ingest_capture
 
     capture = tmp_path / "lab.pcap"
     _write_capture(capture)

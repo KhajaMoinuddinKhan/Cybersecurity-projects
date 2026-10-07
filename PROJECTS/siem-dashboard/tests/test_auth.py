@@ -10,7 +10,6 @@ import pytest
 from src.auth import (
     ACTIONS,
     PASSWORD_ENV_VAR,
-    PASSWORD_MIN_LENGTH,
     PERMISSIONS,
     ROLES,
     SCRYPT_DKLEN,

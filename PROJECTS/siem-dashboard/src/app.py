@@ -19,7 +19,7 @@ import threading
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Iterable
 
 from . import auth, backup, baseline, hosts, schema, search, security, triage
 from .correlation import CORRELATION_SOURCE, correlate

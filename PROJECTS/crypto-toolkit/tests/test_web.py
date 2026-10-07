@@ -14,8 +14,6 @@ a stored value.
 
 import ast
 import json
-import os
-import socket
 import sys
 import threading
 import urllib.error

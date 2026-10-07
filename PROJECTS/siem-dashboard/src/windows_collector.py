@@ -25,10 +25,10 @@ import subprocess
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable
 from xml.etree import ElementTree
 
-from .rules import RuleEngine, RuleError, shared_engine
+from .rules import RuleError, shared_engine
 
 PayloadIngestor = Callable[..., int]
 

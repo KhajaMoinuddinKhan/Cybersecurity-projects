@@ -15,8 +15,7 @@ def progress(msg):
     log.write(msg + "\n")
 
 try:
-    from src.lab import (ALLOWED_TECHNIQUES, BENIGN_WORKLOAD, CHANNELS, _run,
-                         reset_reader_pids)
+    from src.lab import (ALLOWED_TECHNIQUES, BENIGN_WORKLOAD, CHANNELS, _run)
 
     # Nothing here needs elevation, and running it with elevation is what endpoint
     # protection refused: the encoded-PowerShell atomic is a shape it blocks when

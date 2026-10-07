@@ -14,7 +14,6 @@ one, which is the point.
 from __future__ import annotations
 
 import ctypes
-import os
 import time
 from ctypes import POINTER, Structure, byref, c_char, c_char_p, c_int, c_uint, c_void_p
 
@@ -108,10 +107,15 @@ def _load():
         lib.pcap_geterr.argtypes = [c_void_p]
         lib.pcap_geterr.restype = c_char_p
         return lib
+    # `last` holds why the driver would not load, and it used to be thrown away: a
+    # machine with Npcap installed but unloadable got the same message as a machine
+    # with no Npcap at all, which sends the reader to install what they already have.
     raise CaptureUnavailable(
-        "no capture driver found (looked for wpcap.dll in %s); live capture needs "
-        "Npcap present on the machine."
-        % ", ".join(DLL_CANDIDATES)
+        "no capture driver could be loaded (looked for wpcap.dll in %s)%s; live capture "
+        "needs Npcap present on the machine."
+        % (", ".join(DLL_CANDIDATES),
+           "; the last attempt failed with %s: %s" % (type(last).__name__, last)
+           if last else "")
     )
 
 

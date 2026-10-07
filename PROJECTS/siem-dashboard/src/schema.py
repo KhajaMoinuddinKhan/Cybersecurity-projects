@@ -117,7 +117,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from .windows_collector import severity_from_windows_level, windows_event_to_payload
+from .windows_collector import windows_event_to_payload
 
 # The canonical field order, as documented above. ``normalise_event`` always
 # returns exactly these keys.

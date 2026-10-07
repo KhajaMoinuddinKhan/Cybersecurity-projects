@@ -29,7 +29,7 @@ from .attacks.length_extension import forge_mac, naive_mac
 from .attacks.nonce_reuse_ecdsa import recover_private_key
 from .attacks.nonce_reuse_gcm import forge_tag, recover_hash_subkey
 from .attacks.padding_oracle import padding_oracle, recover_plaintext
-from .cbc import CBC, PaddingError, pkcs7_unpad
+from .cbc import CBC, pkcs7_unpad
 from .ecdsa import P256_N, PrivateKey, generate_private_key, sign, verify
 from .gcm import GCM, InvalidTag
 from .hmac import hmac_sha256, hmac_sha256_hex

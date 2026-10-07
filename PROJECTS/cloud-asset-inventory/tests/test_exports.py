@@ -10,7 +10,6 @@ from src.inventory import (
     AZURE_RESOURCE_GRAPH,
     GCP_ASSET_INVENTORY,
     build_report,
-    group_counts,
     write_findings_csv,
     write_findings_json,
     write_inventory_csv,

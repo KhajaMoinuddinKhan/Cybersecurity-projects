@@ -18,7 +18,6 @@ a disconnection, and the audit is a read of the answer.
 
 from __future__ import annotations
 
-import socket
 from pathlib import Path
 
 from .findings import Evidence, make

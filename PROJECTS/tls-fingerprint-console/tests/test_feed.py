@@ -5,11 +5,8 @@ cover the parts that would silently degrade: a subscriber that misses records,
 a session that starts twice, and a stream endpoint that breaks the page when no
 capture driver is present.
 """
-import json
 import os
 import sys
-import threading
-import time
 
 import pytest
 
@@ -84,10 +81,12 @@ def test_feed_unsubscribe_stops_delivery():
 def test_feed_ignores_a_subscriber_that_stops_reading():
     """A stalled browser must not block the capture thread."""
     feed = LiveFeed()
-    q = feed.subscribe(maxsize=1)
+    stalled = feed.subscribe(maxsize=1)
     for i in range(50):
         feed.publish_event({"n": i})       # must not raise or block
     assert feed.stats()["events_total"] == 50
+    assert stalled.full(), "the subscriber must actually have stalled, or nothing was tested"
+    assert feed.subscriber_count == 1, "a stalled subscriber is still a subscriber"
 
 
 def test_feed_ignores_non_dict_records():

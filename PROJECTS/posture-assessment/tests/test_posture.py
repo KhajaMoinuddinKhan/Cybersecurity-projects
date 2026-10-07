@@ -9,13 +9,11 @@ looking reports a clean estate.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 
 import pytest
 
 from lab import Broker, LAB_DIR, manifest
-from src.container import assess_compose, assess_container, parse_dockerfile
+from src.container import assess_container, parse_dockerfile
 from src.iac import assess_terraform_file, parse_blocks
 from src.iot import assess_broker, assess_device, load_inventory
 from src.kubernetes import assess_kubernetes_file

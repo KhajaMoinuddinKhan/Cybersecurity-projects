@@ -17,7 +17,6 @@ input raises :class:`ValueError` with a readable message rather than a raw
 ``struct.error``.
 """
 
-import socket
 import struct
 
 _PCAP_MAGIC = {

@@ -317,15 +317,16 @@ def _unmodelled_fields(graph: AttackGraph) -> dict:
                                                        "LocalAdminTo", "GPOAppliesTo"}
     missing = {}
     for node in graph.data.nodes.values():
-        for field, meaning in RELATIONSHIP_FIELDS.items():
-            value = node.properties.get(field) or node.properties.get(field.lower())
+        for field_name, meaning in RELATIONSHIP_FIELDS.items():
+            value = (node.properties.get(field_name)
+                     or node.properties.get(field_name.lower()))
             if value in (None, [], {}, ""):
                 continue
-            if field in produced or field.lower() in {p.lower() for p in produced}:
+            if field_name in produced or field_name.lower() in {p.lower() for p in produced}:
                 continue
-            missing.setdefault(field, {"meaning": meaning, "objects": []})
-            if len(missing[field]["objects"]) < 5:
-                missing[field]["objects"].append(node.name or node.sid)
+            missing.setdefault(field_name, {"meaning": meaning, "objects": []})
+            if len(missing[field_name]["objects"]) < 5:
+                missing[field_name]["objects"].append(node.name or node.sid)
     return missing
 
 

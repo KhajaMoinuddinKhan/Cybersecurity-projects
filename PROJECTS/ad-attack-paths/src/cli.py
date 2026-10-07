@@ -117,13 +117,20 @@ def main(argv=None) -> int:
               "jewel in a single step" % len(cut.get("direct") or []))
     else:
         print("  the smallest change is %d object(s)" % cut["size"])
+    # Read from the document rather than from locals: the analysis function owns those
+    # and they are not in scope here. This block referred to names that only existed
+    # inside run_analysis, so every run printed the analysis and then died with a
+    # NameError before its last line -- the report was already written, so nothing
+    # looked wrong, and the exit code said 1 the whole time.
+    escalations = document.get("certificate_escalations") or []
     if escalations:
         worst = escalations[0]
         print("  %d certificate template(s) permit an escalation, worst: %s (%s)"
-              % (len(escalations), worst.template, ", ".join(worst.conditions)))
+              % (len(escalations), worst["template"], ", ".join(worst["conditions"])))
+    chains = document.get("certificate_chains") or []
     if chains:
         print("  %d combination(s) are stronger than either half, worst: %s"
-              % (len(chains), ", ".join(chains[0].conditions)))
+              % (len(chains), ", ".join(chains[0]["conditions"])))
     print("report written to %s" % Path(args.out).resolve())
     return 0
 

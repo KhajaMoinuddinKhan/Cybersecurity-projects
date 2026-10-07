@@ -24,7 +24,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-from .mlkem import MLKEM_512, MLKEM_768, MLKEM_1024, MLKEM_PARAMETER_SETS
+from .mlkem import MLKEM_PARAMETER_SETS
 from .mlkem import decapsulate as mlkem_decapsulate
 from .mlkem import encapsulate_random as mlkem_encapsulate
 from .mlkem import generate_key_pair as mlkem_keygen

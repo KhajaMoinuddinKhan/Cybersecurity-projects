@@ -16,7 +16,7 @@ from __future__ import annotations
 import socket
 import ssl
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 

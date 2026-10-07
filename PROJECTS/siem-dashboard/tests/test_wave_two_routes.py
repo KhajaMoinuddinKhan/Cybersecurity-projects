@@ -11,10 +11,9 @@ import hmac
 import struct
 import time
 
-import pytest
 
-from src import auth, hosts, security
-from src.app import backup_directory, dashboard_app, get_connection
+from src import auth
+from src.app import dashboard_app, get_connection
 
 PASSWORD = "CorrectHorse9!"
 

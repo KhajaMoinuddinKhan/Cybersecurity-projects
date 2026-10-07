@@ -5,12 +5,10 @@ host is enrolled, an agent ships events with the key it was given, a user signs
 in, and the detections that result are triaged. The existing suites cover the
 pipeline and the individual modules; this one covers the wiring between them.
 """
-import json
 
-import pytest
 
-from src import auth, hosts, triage
-from src.app import SESSION_COOKIE, dashboard_app, get_connection
+from src import auth, hosts
+from src.app import dashboard_app, get_connection
 
 # A Sysmon process-creation record with an encoded command line, which is what
 # the shipped sysmon-encoded-powershell-command rule looks for.

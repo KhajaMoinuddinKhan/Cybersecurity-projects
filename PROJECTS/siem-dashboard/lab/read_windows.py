@@ -1,6 +1,6 @@
 
 import json, os, sys
-import time, traceback
+import traceback
 from pathlib import Path
 for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
     os.environ.pop(key, None)
@@ -15,7 +15,7 @@ def progress(msg):
     log.write(msg + "\n")
 
 try:
-    from src.lab import CHANNELS, read_window, reset_reader_pids, CaptureError
+    from src.lab import read_window, reset_reader_pids, CaptureError
     reset_reader_pids()
     plan = json.load(open(os.path.join(WORK, "windows.json"), encoding="utf-8"))
 

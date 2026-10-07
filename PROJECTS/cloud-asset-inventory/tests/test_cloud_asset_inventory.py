@@ -1,5 +1,4 @@
 """Normalisation, loading and the bundled sample exports."""
-import json
 from pathlib import Path
 
 from src.inventory import GENERIC, build_findings, load_export

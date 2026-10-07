@@ -186,7 +186,6 @@ def cmd_watch(args):
 
 def cmd_demo(args):
     """Analyse the built-in synthetic capture so the console has something to show."""
-    import tempfile
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from fixtures.make_pcap import make_classic_pcap
     from .pipeline import analyse
