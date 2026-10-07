@@ -196,6 +196,65 @@ def _unprivileged_writers(template, privileged) -> set:
             if ace.right in WRITE_RIGHTS and ace.principal_sid not in privileged}
 
 
+@dataclass
+class Chain:
+    """Two conditions that combine into something neither is on its own.
+
+    Each template is judged on its own attributes and the judgement is correct. The
+    mistake is stopping there: a template that lets its holder request certificates on
+    behalf of others is not itself a takeover, and a template that lets the requester
+    choose the subject is not itself reachable. Together they are neither of those
+    things -- the first is how you get the credential the second accepts.
+    """
+
+    templates: list = field(default_factory=list)
+    conditions: list = field(default_factory=list)
+    severity: str = "High"
+    note: str = ""
+
+    def as_dict(self) -> dict:
+        return {"templates": list(self.templates), "conditions": list(self.conditions),
+                "severity": self.severity, "note": self.note}
+
+
+def certificate_chains(escalations) -> list:
+    """The combinations, reported beside the individual findings rather than instead.
+
+    Two are modelled, and both are stated as the sequence rather than as a label:
+
+    - a **request agent** template beside one that lets the requester supply the
+      subject: enrol in the first, and the certificate it issues is accepted by the
+      second on behalf of anybody. Neither template is a takeover alone.
+    - **manage the authority** beside anything else: the right to change an authority's
+      configuration is the right to enable a template that was not enabled, so it
+      combines with every condition present.
+    """
+    by_condition = {}
+    for escalation in escalations:
+        for condition in escalation.conditions:
+            by_condition.setdefault(condition, []).append(escalation)
+
+    chains = []
+    if "ESC3" in by_condition and "ESC1" in by_condition:
+        chains.append(Chain(
+            templates=sorted({e.template for e in by_condition["ESC3"]} |
+                             {e.template for e in by_condition["ESC1"]}),
+            conditions=["ESC3", "ESC1"],
+            severity="Critical",
+            note="the request agent certificate from the first is accepted by the "
+                 "second on behalf of any principal, so the pair issues a logon as "
+                 "anybody -- neither template is a takeover on its own"))
+    if "ESC3" in by_condition and "ESC2" in by_condition:
+        chains.append(Chain(
+            templates=sorted({e.template for e in by_condition["ESC3"]} |
+                             {e.template for e in by_condition["ESC2"]}),
+            conditions=["ESC3", "ESC2"],
+            severity="High",
+            note="the request agent certificate is accepted by the any-purpose "
+                 "template on behalf of any principal"))
+    return chains
+
+
 def certificate_escalations(data, graph, privileged=frozenset()) -> list:
     """Every template reachable from an enabled authority that satisfies a condition.
 
@@ -221,3 +280,33 @@ def certificate_escalations(data, graph, privileged=frozenset()) -> list:
             found.append(escalation)
     found.sort(key=lambda e: (e.severity, e.template))
     return found
+
+
+def authority_managers(data, graph, privileged=frozenset()) -> list:
+    """Who can change an authority's configuration, and what that means.
+
+    The right to manage an authority is the right to enable a template that was not
+    enabled, so it is not a condition of its own but a multiplier on every condition
+    present. Reported separately because that is what it is.
+    """
+    managers = []
+    for node in data.nodes.values():
+        if node.kind != "enterpriseca":
+            continue
+        # The rights point *into* the authority: the holder is the source and the
+        # authority is the target, so these are its predecessors and not its successors.
+        for edge in graph.predecessors(node.sid):
+            if edge.right not in ("ManageCA", "ManageCertificates"):
+                continue
+            if edge.source in privileged:
+                continue          # an administrator managing the authority is intended
+            # Three objects share the name ESSOS-CA -- the root, the intermediate and
+            # the issuing authority -- so a name alone does not say which one this is.
+            managers.append({"authority": node.name, "authority_sid": node.sid,
+                             "authority_kind": node.kind,
+                             "principal": graph.name_of(edge.source),
+                             "principal_sid": edge.source,
+                             "right": edge.right,
+                             "note": "may change this authority's configuration, which "
+                                     "includes enabling a template that is not enabled"})
+    return managers

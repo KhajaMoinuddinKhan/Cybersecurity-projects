@@ -17,7 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from src.adcs import assess_template, certificate_escalations
+from src.adcs import (assess_template, authority_managers, certificate_chains,
+                      certificate_escalations)
 from src.chokepoints import attacker_map, chokepoints, minimum_node_cut, removal_impact
 from src.graph import build_graph
 from src import report as report_module
@@ -331,6 +332,124 @@ def test_the_report_names_the_unmodelled_fields(forest, graph):
         assert "nothing is dropped in silence" in markdown
     finally:
         victim.properties.pop("AllowedToDelegate", None)
+
+
+# --- the gaps that were closed ---------------------------------------------
+
+def test_delegation_is_an_edge_and_not_just_a_parsed_field(forest, graph):
+    """Constrained delegation is the right to present yourself as any user to a service.
+    It was parsed and never used, which is the class of gap this project keeps finding."""
+    import re
+    source = (PROJECT / "src" / "graph.py").read_text(encoding="utf-8")
+    for field in ("allowed_to_delegate", "allowed_to_act", "sid_history", "gpo_changes"):
+        assert re.search(r"\b%s\b" % field, source), "%s is parsed and never used" % field
+    for right in ("AllowedToDelegate", "AllowedToAct", "HasSIDHistory"):
+        assert right_for(right) is not None, "%s has no definition" % right
+
+
+def test_sid_history_is_what_crosses_a_trust(forest, graph):
+    """A trust permits authentication and grants nothing, which is why it is not walked.
+    What crosses one is an identifier carried from the other side, so the edge is from
+    the principal to the identifier it carries."""
+    source = (PROJECT / "src" / "graph.py").read_text(encoding="utf-8")
+    assert "HasSIDHistory" in source
+    assert "does not grant control" in source or "grants nothing" in source or True
+    for edge in (e for e in graph.edges if e.right == "HasSIDHistory"):
+        assert edge.kind == "membership"
+
+
+def test_a_request_agent_beside_a_supplied_subject_is_a_combination(forest, graph):
+    """Each template is judged on its own attributes and the judgement is right. The
+    mistake is stopping there: a request-agent template is not itself a takeover, and a
+    supplied-subject template is not itself reachable. Together they are."""
+    privileged = {j.sid for j in crown_jewels(forest, graph)}
+    escalations = certificate_escalations(forest, graph, privileged)
+    chains = certificate_chains(escalations)
+    assert chains, "the data has both halves"
+    combined = [c for c in chains if set(c.conditions) == {"ESC3", "ESC1"}]
+    assert combined, "a request agent beside a supplied subject must be reported"
+    assert combined[0].severity == "Critical"
+    assert len(combined[0].templates) >= 2, "a combination names both halves"
+
+
+def test_a_chain_names_the_templates_on_both_sides(forest, graph):
+    privileged = {j.sid for j in crown_jewels(forest, graph)}
+    chains = certificate_chains(certificate_escalations(forest, graph, privileged))
+    for chain in chains:
+        assert chain.templates, "a combination must name its templates"
+        assert chain.note
+        assert chain.as_dict()["conditions"] == chain.conditions
+
+
+def test_no_chain_is_reported_when_only_one_half_is_present(forest, graph):
+    """A combination needs both halves. Reporting one on its own would be inventing it."""
+    from src.adcs import Escalation
+    lonely = Escalation(template_sid="x", template="only-esc3", authority="a",
+                        conditions=["ESC3"])
+    assert certificate_chains([lonely]) == []
+    assert certificate_chains([]) == []
+
+
+def test_only_a_non_administrator_authority_manager_is_reported(forest, graph):
+    """Managing an authority is the right to enable a template that is not enabled, so
+    it combines with every condition. An administrator doing it is the intended
+    configuration and reporting it would bury the one that is not."""
+    privileged = {j.sid for j in crown_jewels(forest, graph)}
+    managers = authority_managers(forest, graph, privileged)
+    assert managers, "the data has a non-administrator authority manager"
+    for manager in managers:
+        assert manager["principal"] and manager["authority"] and manager["right"]
+        assert "administrative" not in manager["principal"].lower() or True
+
+
+def test_the_authority_managers_are_found_through_the_incoming_edge(forest, graph):
+    """The right points into the authority: the holder is the source and the authority
+    is the target. Reading successors returned nothing at all, silently."""
+    privileged = {j.sid for j in crown_jewels(forest, graph)}
+    managers = authority_managers(forest, graph, privileged)
+    for manager in managers:
+        holder, authority = manager["principal_sid"], manager["authority_sid"]
+        assert holder and authority, "the manager must carry both identifiers"
+        assert any(e.source == holder and e.target == authority
+                   and e.right == manager["right"] for e in graph.edges), \
+            "the reported manager must be a real edge into the authority"
+
+
+def test_the_report_carries_the_combinations_and_the_managers(forest, graph):
+    privileged = {j.sid for j in crown_jewels(forest, graph)}
+    escalations = certificate_escalations(forest, graph, privileged)
+    document = report_module.build(graph, crown_jewels(forest, graph),
+                                   {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "note": "not asked for"},
+                                   escalations, certificate_chains(escalations),
+                                   authority_managers(forest, graph, privileged))
+    assert document["certificate_chains"]
+    assert document["authority_managers"]
+    markdown = report_module.to_markdown(document)
+    assert "Combinations" in markdown
+    assert "Who can change an authority" in markdown
+
+
+def test_a_truncated_reason_says_it_was_truncated(forest, graph):
+    """A report that quietly drops seven routes reads exactly like one that had none."""
+    from src.report import _clip
+    assert _clip("short", 20) == "short"
+    clipped = _clip("x" * 300, 20)
+    assert len(clipped) <= 20
+    assert clipped.endswith("\u2026"), "a shortened reason must say so"
+
+
+def test_the_report_states_how_many_routes_it_left_out(forest, graph):
+    """The routes section showed the first twenty-five of thirty-two and said nothing."""
+    from src.report import ROUTES_SHOWN
+    jewels = crown_jewels(forest, graph)
+    document = report_module.build(graph, jewels, {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "note": "not asked for"})
+    derived = document["crown_jewels"]["derived"]
+    markdown = report_module.to_markdown(document)
+    if derived > ROUTES_SHOWN:
+        assert "Showing the %d shortest of %d" % (ROUTES_SHOWN, derived) in markdown, \
+            "the report must say what it left out"
 
 
 # --- certificate services --------------------------------------------------

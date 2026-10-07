@@ -122,10 +122,11 @@ RIGHTS = (
 
     # --- delegation ----------------------------------------------------------
     Right("AllowedToDelegate", "delegation",
-          note="constrained delegation: ask for a service ticket to the target"),
+          note="constrained delegation: this principal may present itself to the target "
+               "as any user, so it authenticates there as whoever it likes"),
     Right("AllowedToAct", "delegation",
-          note="resource-based constrained delegation: write the target's "
-               "msDS-AllowedToActOnBehalfOfOtherIdentity"),
+          note="resource-based constrained delegation: this principal may act on behalf "
+               "of the identity named here"),
     Right("AllowedToActOnBehalfOfOtherIdentity", "delegation",
           note="resource-based constrained delegation: the target may act on behalf of "
                "whatever identity is named in this attribute, so writing it is taking "

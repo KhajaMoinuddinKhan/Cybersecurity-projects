@@ -18,7 +18,8 @@ from datetime import datetime, timezone
 __all__ = ["build", "to_markdown", "to_html"]
 
 
-def build(graph, jewels, choke, cut, escalations=(), generated_at=None) -> dict:
+def build(graph, jewels, choke, cut, escalations=(), chains=(), managers=(),
+          generated_at=None) -> dict:
     seeded = [jewel for jewel in jewels if not jewel.derived]
     derived = [jewel for jewel in jewels if jewel.derived]
     return {
@@ -37,8 +38,19 @@ def build(graph, jewels, choke, cut, escalations=(), generated_at=None) -> dict:
         "choke_total": choke["total"],
         "cut": cut,
         "certificate_escalations": [e.as_dict() for e in escalations],
+        "certificate_chains": [c.as_dict() for c in chains],
+        "authority_managers": list(managers),
         "context": _context(graph),
     }
+
+
+# How much of each section is shown. They are choices about the document rather than
+# about the analysis, so they are named here and every one of them says what it left
+# out -- a report that quietly drops seven routes reads exactly like one that had none.
+ROUTES_SHOWN = 25
+REASON_CHARS = 150
+STEP_CHARS = 110
+OBJECTS_PER_FIELD = 3
 
 
 def _context(graph) -> dict:
@@ -49,6 +61,15 @@ def _context(graph) -> dict:
             by_kind[edge.kind] = by_kind.get(edge.kind, 0) + 1
     return {"non_traversable": by_kind,
             "unresolved": {sid: rights for sid, rights in graph.unknown_rights.items()}}
+
+
+def _clip(text: str, width: int) -> str:
+    """Shorten for a table cell, and say so. A silently truncated reason reads as the
+    whole reason, which is the one thing a report must not do."""
+    text = text or ""
+    if len(text) <= width:
+        return text
+    return text[:width - 1].rstrip() + "\u2026"
 
 
 def _escalations_markdown(document: dict) -> list:
@@ -64,6 +85,35 @@ def _escalations_markdown(document: dict) -> list:
              "its name.", "",
              "| Template | Condition | Severity | Who can enroll | Why |",
              "| --- | --- | --- | --- | --- |"]
+    chains = document.get("certificate_chains") or []
+    if chains:
+        lines.append("### Combinations")
+        lines.append("")
+        lines.append("Each template above is judged on its own attributes, and the "
+                     "judgement is right. These are the pairs that are stronger than "
+                     "either half, because the first is how you get the credential the "
+                     "second accepts.")
+        lines.append("")
+        for chain in chains:
+            lines.append("- **%s** (%s) -- %s" % (", ".join(chain["conditions"]),
+                                                   chain["severity"], chain["note"]))
+            lines.append("  Templates: %s" % ", ".join("`%s`" % x for x in chain["templates"]))
+        lines.append("")
+    managers = document.get("authority_managers") or []
+    if managers:
+        lines.append("### Who can change an authority")
+        lines.append("")
+        lines.append("The right to manage an authority is the right to enable a template "
+                     "that is not enabled, so it combines with every condition above. "
+                     "Only holders without administrative rights are listed.")
+        lines.append("")
+        lines.append("| Principal | Right | Authority |")
+        lines.append("| --- | --- | --- |")
+        for manager in managers:
+            lines.append("| `%s` | `%s` | `%s` (%s) |" % (
+                manager["principal"], manager["right"], manager["authority"],
+                manager.get("authority_kind", "")))
+        lines.append("")
     for row in rows:
         enrollees = row.get("enrollee_names") or row.get("enrollees") or []
         who = ", ".join("`%s`" % e for e in enrollees[:3]) if enrollees else \
@@ -115,7 +165,7 @@ def to_markdown(document: dict) -> str:
     lines.append("| --- | --- | --- |")
     for jewel in crown["seeded_list"]:
         lines.append("| %s | `%s` | %s |" % (jewel["kind"], jewel["name"],
-                                             "; ".join(jewel["reasons"])[:150]))
+                                             _clip("; ".join(jewel["reasons"]), REASON_CHARS)))
     lines.append("")
 
     lines.append("### Reached from those (%d)" % crown["derived"])
@@ -138,7 +188,12 @@ def to_markdown(document: dict) -> str:
     lines.append("Each route below is a sequence an attacker can actually walk, one "
                  "step at a time. The shortest are shown first.")
     lines.append("")
-    for jewel in crown["derived_list"][:25]:
+    if crown["derived"] > ROUTES_SHOWN:
+        lines.append("Showing the %d shortest of %d. The remainder are in the crown "
+                     "jewel table above, which is not truncated."
+                     % (ROUTES_SHOWN, crown["derived"]))
+        lines.append("")
+    for jewel in crown["derived_list"][:ROUTES_SHOWN]:
         lines.append("### %s" % jewel["name"])
         lines.append("")
         lines.append("%d hop%s to `%s`." % (jewel["hops"],
@@ -150,7 +205,7 @@ def to_markdown(document: dict) -> str:
         for index, step in enumerate(jewel["steps"], 1):
             lines.append("| %d | `%s` | `%s` | `%s` | %s |"
                          % (index, step["from"], step["right"], step["to"],
-                            (step["why"] or "")[:110]))
+                            _clip(step["why"], STEP_CHARS)))
         lines.append("")
 
     lines.append("## What to fix")
@@ -225,7 +280,7 @@ def to_markdown(document: dict) -> str:
         for field, detail in sorted(unmodelled.items()):
             lines.append("- **`%s`** -- %s. On: %s." % (
                 field, detail["meaning"],
-                ", ".join("`%s`" % o for o in detail["objects"][:3])))
+                ", ".join("`%s`" % o for o in detail["objects"][:OBJECTS_PER_FIELD])))
         lines.append("")
     lines.append("Sessions are collected per machine and none were present in this "
                  "data, so no route here depends on one. Where they exist they are "
@@ -305,8 +360,12 @@ def to_html(document: dict) -> str:
                             escape(who), escape(row["note"])))
         parts.append("</table>")
 
+    if crown["derived"] > ROUTES_SHOWN:
+        parts.append("<p>Showing the %d shortest of %d routes. The remainder are in the "
+                     "crown jewel table above, which is not truncated.</p>"
+                     % (ROUTES_SHOWN, crown["derived"]))
     parts.append("<h2>The routes</h2>")
-    for jewel in crown["derived_list"][:25]:
+    for jewel in crown["derived_list"][:ROUTES_SHOWN]:
         parts.append("<h3>%s <span class='k'>%d hop(s)</span></h3>"
                      % (escape(jewel["name"]), jewel["hops"]))
         parts.append("<table><tr><th>From</th><th>Right</th><th>To</th><th>Grants</th></tr>")

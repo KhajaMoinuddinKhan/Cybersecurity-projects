@@ -110,6 +110,11 @@ class Node:
     primary_group: str = ""
     # certificate services. The authority is hosted on a machine, holds security
     # descriptors of its own, and has templates enabled on it.
+    # what a policy changes on the machines it applies to, and the domain controller's
+    # own registry data. Both are parsed so that a populated one is used rather than
+    # silently dropped.
+    gpo_changes: dict = field(default_factory=dict)
+    dc_registry: dict = field(default_factory=dict)
     hosting_computer: str = ""
     ca_security: list = field(default_factory=list)
     cert_templates: list = field(default_factory=list)
@@ -117,6 +122,7 @@ class Node:
     sid_history: list = field(default_factory=list)
     spn_targets: list = field(default_factory=list)
     allowed_to_delegate: list = field(default_factory=list)
+    allowed_to_act: list = field(default_factory=list)
     source_file: str = ""
 
     @property
@@ -357,11 +363,17 @@ def _build_node(entry: dict, kind: str, source_file: str) -> Node | None:
         user_rights=[r for r in (entry.get("UserRights") or []) if isinstance(r, dict)],
         is_dc=bool(entry.get("IsDC")),
         primary_group=str(entry.get("PrimaryGroupSID") or ""),
-        sid_history=[str(s) for s in (entry.get("HasSIDHistory") or [])],
+        sid_history=[str(s.get("ObjectIdentifier") or s) if isinstance(s, dict) else str(s)
+                     for s in (entry.get("HasSIDHistory") or [])],
         # SPNTargets are objects, not identifiers: each names a computer, a port and
         # the service, and coercing them to strings loses all three.
         spn_targets=[t for t in (entry.get("SPNTargets") or []) if isinstance(t, dict)],
-        allowed_to_delegate=[str(s) for s in (entry.get("AllowedToDelegate") or [])],
+        allowed_to_delegate=[str(s.get("ObjectIdentifier") or s) if isinstance(s, dict) else str(s)
+                             for s in (entry.get("AllowedToDelegate") or [])],
+        allowed_to_act=[str(s.get("ObjectIdentifier") or s) if isinstance(s, dict) else str(s)
+                        for s in (entry.get("AllowedToAct") or [])],
+        gpo_changes=dict(entry.get("GPOChanges") or {}),
+        dc_registry=dict(entry.get("DCRegistryData") or {}),
         hosting_computer=str(entry.get("HostingComputer") or ""),
         ca_security=[a for a in ((entry.get("CARegistryData") or {}).get("CASecurity", {})
                                  .get("Data") or []) if isinstance(a, dict)],

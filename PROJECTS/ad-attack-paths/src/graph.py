@@ -122,6 +122,9 @@ def build_graph(data: CollectorData) -> AttackGraph:
         _add_privilege_edges(graph, node)
         _add_service_principal_edges(graph, node)
         _add_primary_group_edges(graph, node)
+        _add_delegation_edges(graph, node)
+        _add_sid_history_edges(graph, node)
+        _add_policy_change_edges(graph, node)
         _add_certificate_authority_edges(graph, node)
         _add_trust_edges(graph, node)
         _add_containment_edges(graph, node)
@@ -295,8 +298,10 @@ RELATIONSHIP_FIELDS = {
                     "others",
     "GPOChanges": "what a policy changes on the machines it applies to, which is the "
                   "local group membership it grants",
-    "DCRegistryData": "domain controller registry data, which carries its own sessions "
-                      "and the certificates it holds",
+    "DCRegistryData": "domain controller registry settings, among them the certificate "
+                      "mapping methods and whether strong certificate binding is "
+                      "enforced -- a weak mapping is what lets a certificate for one "
+                      "identity be accepted as another",
     "UserRights": "rights held on a machine",
     "LocalGroups": "local group membership on a machine",
 }
@@ -341,6 +346,92 @@ def _add_primary_group_edges(graph: AttackGraph, node: Node) -> None:
                    right="MemberOf", capability="membership",
                    note="the primary group, which is membership recorded on the member "
                         "rather than in the group's member list"))
+
+
+def _add_delegation_edges(graph: AttackGraph, node: Node) -> None:
+    """Delegation, which is the right to be somebody else to a service.
+
+    Constrained delegation names the services a principal may present itself to, and
+    the whole of the technique is that it can present itself as *any* user there --
+    including one with rights the principal does not have. Resource-based delegation is
+    the same right written on the target rather than on the holder.
+
+    Both run from the holder to the service, and both are real routes rather than
+    context: the target service treats the delegation as that identity.
+    """
+    for service_sid in node.allowed_to_delegate:
+        if graph.data.get(service_sid) is None:
+            graph.unknown_references.setdefault(node.sid, set()).add(service_sid)
+            continue
+        graph.add(Edge(source=node.sid, target=service_sid, kind="ace",
+                       right="AllowedToDelegate", capability="control",
+                       note="constrained delegation: may present itself to this service "
+                            "as any user, so it authenticates there as whoever it likes"))
+    for identity_sid in node.allowed_to_act:
+        if graph.data.get(identity_sid) is None:
+            graph.unknown_references.setdefault(node.sid, set()).add(identity_sid)
+            continue
+        graph.add(Edge(source=node.sid, target=identity_sid, kind="ace",
+                       right="AllowedToAct", capability="control",
+                       note="resource-based delegation: this principal may act on behalf "
+                            "of the identity named here"))
+
+
+def _add_sid_history_edges(graph: AttackGraph, node: Node) -> None:
+    """SID history: an identifier from another domain carried into this one.
+
+    This is what actually crosses a trust. A trust on its own permits authentication
+    and grants nothing, which is why it is not walked -- but a principal carrying a SID
+    from the other side already holds whatever that identifier was granted there. The
+    edge is from the principal to the identifier it carries, so the permissions granted
+    to the identifier become reachable by the principal.
+    """
+    for carried in node.sid_history:
+        target = graph.data.get(carried)
+        if target is None:
+            # The identifier is from another domain and that domain's objects are not
+            # in this collection. That is a fact worth reporting, not a parse failure:
+            # the permissions it carries cannot be resolved without the other domain.
+            graph.unknown_references.setdefault(node.sid, set()).add(carried)
+            continue
+        graph.add(Edge(source=node.sid, target=carried, kind="membership",
+                       right="HasSIDHistory", capability="membership",
+                       note="holds this identifier from another domain, so everything "
+                            "granted to it applies to this principal"))
+
+
+def _add_policy_change_edges(graph: AttackGraph, node: Node) -> None:
+    """What a policy grants on the machines it applies to.
+
+    A policy that adds a principal to a machine's local administrators group is a
+    policy that makes that principal an administrator of that machine. The change is
+    recorded against the policy and names the computers it affects, so the edge runs
+    from the principal to each affected machine.
+    """
+    changes = node.gpo_changes or {}
+    if not changes:
+        return
+    granted = {"LocalAdmins": "LocalAdminTo", "RemoteDesktopUsers": "RemoteInteractiveLogonRight",
+               "DcomUsers": "ExecuteCommand", "PSRemoteUsers": "ExecuteCommand"}
+    affected = []
+    for computer in changes.get("AffectedComputers") or []:
+        sid = str(computer.get("ObjectIdentifier") or computer) \
+            if isinstance(computer, dict) else str(computer)
+        if sid:
+            affected.append(sid)
+    for key, right_name in granted.items():
+        for member in changes.get(key) or []:
+            member_sid = str(member.get("ObjectIdentifier") or member) \
+                if isinstance(member, dict) else str(member)
+            if not member_sid:
+                continue
+            for computer_sid in affected:
+                if graph.data.get(computer_sid) is None:
+                    continue
+                graph.add(Edge(source=member_sid, target=computer_sid, kind="ace",
+                               right=right_name, capability=capability_of(right_name) or "access",
+                               note="this policy adds the principal to the machine's %s "
+                                    "group, so the policy grants it there" % key))
 
 
 def _add_certificate_authority_edges(graph: AttackGraph, node: Node) -> None:

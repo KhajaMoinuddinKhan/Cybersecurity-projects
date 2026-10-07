@@ -23,7 +23,7 @@ from . import report as report_module
 from .chokepoints import attacker_map, chokepoints, minimum_node_cut
 from .graph import build_graph
 from .schema import CollectorError, load_collector, load_forest
-from .adcs import certificate_escalations
+from .adcs import authority_managers, certificate_chains, certificate_escalations
 from .tier0 import Tier0Error, crown_jewels
 
 __all__ = ["main", "run_analysis"]
@@ -61,8 +61,10 @@ def run_analysis(paths, out_dir="attack-paths", include_derived=True,
     # that --seeds-only narrows the report without narrowing the assessment.
     privileged = {j.sid for j in crown_jewels(data, graph)}
     escalations = certificate_escalations(data, graph, privileged)
+    chains = certificate_chains(escalations)
+    managers = authority_managers(data, graph, privileged)
 
-    document = report_module.build(graph, jewels, choke, cut, escalations,
+    document = report_module.build(graph, jewels, choke, cut, escalations, chains, managers,
                                    generated_at=datetime.now(timezone.utc))
     document["cut_sources"] = len(sources)
     (out / "report.md").write_text(report_module.to_markdown(document), encoding="utf-8")
@@ -119,6 +121,9 @@ def main(argv=None) -> int:
         worst = escalations[0]
         print("  %d certificate template(s) permit an escalation, worst: %s (%s)"
               % (len(escalations), worst.template, ", ".join(worst.conditions)))
+    if chains:
+        print("  %d combination(s) are stronger than either half, worst: %s"
+              % (len(chains), ", ".join(chains[0].conditions)))
     print("report written to %s" % Path(args.out).resolve())
     return 0
 
