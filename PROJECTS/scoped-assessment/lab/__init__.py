@@ -86,7 +86,9 @@ DOCUMENT_ROOT = Path(__file__).resolve().parent / "root"
 # Served from the filesystem root of the lab, so a traversal has somewhere to go.
 OUTSIDE = Path(__file__).resolve().parent
 
-_SECRET = "LAB-SECRET-3f9a2c71\n"
+# A file outside the document root, so a traversal has something to reach that a
+# legitimate request could not. The scanner is not told its contents.
+_OUTSIDE_FILE = "a file that lives outside the document root\n"
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -277,7 +279,7 @@ def _prepare_files() -> None:
         "A file in a folder that should not be listed.\n", encoding="utf-8")
     # Outside the document root, so a traversal has something to reach that a
     # legitimate request could not.
-    (OUTSIDE / "secret.txt").write_text(_SECRET, encoding="utf-8")
+    (OUTSIDE / "secret.txt").write_text(_OUTSIDE_FILE, encoding="utf-8")
 
 
 def serve(port: int = 8099, host: str = "127.0.0.1") -> None:

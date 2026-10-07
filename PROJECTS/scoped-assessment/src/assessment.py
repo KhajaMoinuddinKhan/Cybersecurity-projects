@@ -515,43 +515,89 @@ def _reflected_input(scope, host, port, scheme, at):
 
 
 def _path_traversal(scope, host, port, scheme, at):
-    marker = "LAB-SECRET-3f9a2c71"
-    for name in ("../secret.txt", "..%2Fsecret.txt", "....//secret.txt", "..%252Fsecret.txt"):
-        attempt = fetch(scope, host, port, "/files?name=" + name, scheme=scheme, at=at)
-        content = attempt.get("body") or ""
-        if attempt.get("status") == 200 and marker in content:
-            evidence = Evidence()
-            evidence.add("request", "GET /files?name=%s" % name, "")
-            evidence.add("response", "the file outside the document root was returned", content[:400])
-            evidence.add("confirmation", "the response carried the file's marker",
-                         "a file reachable by a legitimate path could not contain it")
-            return [_finding(
-                id="path-traversal",
-                title="The file endpoint can be walked out of its document root",
-                severity="High",
-                host=host, port=port,
-                detail=("A file name supplied in the query string is joined to the document "
-                        "root and read, with nothing confining the result to that root. A "
-                        "sequence of parent references therefore reads files the service was "
-                        "never meant to serve. The check stopped at the one file the lab "
-                        "placed outside its root."),
-                evidence=evidence.as_list(),
-                remediation=("Resolve the requested path and verify the result is inside the "
-                             "root before opening it, and serve files by identifier rather "
-                             "than by name where the content is not public."),
-                business_impact=("Any file the service account can read becomes readable "
-                                 "remotely, which typically means configuration, keys and "
-                                 "credentials rather than only content."),
-                confirmed=True,
-                confirmation=("The bytes returned contained a marker that exists only in the "
-                              "file outside the document root, so the read demonstrably "
-                              "escaped it."),
-            )]
+    """Does a file name escape the document root it is joined to?
+
+    Confirmed by differential rather than by recognising the file: the same name is
+    requested through the parameter and directly, and the finding is confirmed when
+    the parameter reaches something the direct request cannot. That works on any
+    target, whereas looking for a particular file's contents only works on the one
+    the lab happened to place -- which is what this check used to do, and a
+    confirmation that only holds for the test fixture is not a confirmation.
+    """
+    # The name is the same for both requests, so the only difference between them
+    # is the route. A payload list of one shape would be a guess about the target;
+    # these are the encodings that matter, and each is tried the same way.
+    for name in ("../secret.txt", "..%2Fsecret.txt", "....//secret.txt",
+                 "..%252Fsecret.txt", "../etc/passwd"):
+        through = fetch(scope, host, port, "/files?name=" + name, scheme=scheme, at=at)
+        if through.get("refused") or through.get("status") != 200:
+            continue
+        body = through.get("body") or ""
+        if not body.strip():
+            continue
+
+        # The control: ask for the file by its own path. If the traversal reached
+        # something, this must not reach it -- otherwise the file was public all
+        # along and nothing escaped.
+        direct_name = name.split("/")[-1].replace("%2F", "/").replace("%252F", "/")
+        direct = fetch(scope, host, port, "/" + direct_name, scheme=scheme, at=at)
+        reached_directly = direct.get("status") == 200
+
+        # A second, independent sign for the well-known case: the contents are a
+        # file of the shape they claim to be, not an error page that answered 200.
+        looks_like_passwd = "root:" in body and ":/" in body
+        looks_like_a_file = not body.lstrip()[:1].lower().startswith("<")
+
+        confirmed = (not reached_directly) and looks_like_a_file
+        evidence = Evidence()
+        evidence.add("request", "GET /files?name=%s" % name, "")
+        evidence.add("response", "the parameter returned %d bytes" % len(body), body[:400])
+        evidence.add("control", "GET /%s, the file by its own path" % direct_name,
+                     "HTTP %s" % direct.get("status") if not direct.get("error")
+                     else direct.get("error"))
+        evidence.add(
+            "confirmation",
+            "the same file was unreachable by its own path and reachable through the "
+            "parameter, so the read escaped the root" if confirmed else
+            "the file was reachable directly as well, so nothing escaped the root",
+            "yes" if confirmed else "no")
+        if looks_like_passwd:
+            evidence.add("observation", "the contents have the shape of a password file", "")
+
+        return [_finding(
+            id="path-traversal",
+            title="The file endpoint can be walked out of its document root",
+            severity="High",
+            host=host, port=port,
+            detail=("A file name supplied in the query string is joined to the document "
+                    "root and read, with nothing confining the result to that root. A "
+                    "sequence of parent references therefore reads files the service was "
+                    "never meant to serve. The check stopped at the first name that "
+                    "worked and read nothing further."),
+            evidence=evidence.as_list(),
+            remediation=("Resolve the requested path and verify the result is inside the "
+                         "root before opening it, and serve files by identifier rather "
+                         "than by name where the content is not public."),
+            business_impact=("Any file the service account can read becomes readable "
+                             "remotely, which typically means configuration, keys and "
+                             "credentials rather than only content."),
+            confirmed=confirmed,
+            confirmation=("The same name was requested directly and refused, and through "
+                          "the parameter and served. Nothing in the check knows what the "
+                          "file is; the difference between the two requests is the whole "
+                          "evidence." if confirmed else
+                          "The file was reachable by its own path as well, so this is a "
+                          "file name that escaped nothing and is reported as observed "
+                          "rather than confirmed."),
+        )]
     return []
 
 
 # The registry, filled once every check above exists. The names, the confirmation
-# flags and the tests all read from here, so the three cannot drift apart.
+# flags and the tests all read from here, so the three cannot drift apart. This
+# block lives at the end of the module because every function it names has to
+# exist before it runs -- and because a slice that rewrote the last function once
+# deleted it, which is why a test now asserts the registry is not empty.
 _register(
     Check("version-disclosure", "Does the service name its own version?",
           _version_disclosure, confirmable=False),

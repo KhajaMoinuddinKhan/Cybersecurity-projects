@@ -135,8 +135,8 @@ def test_the_traversal_finding_carries_the_bytes_that_prove_it(tmp_path, lab):
     traversal = findings["path-traversal"]
     assert traversal.severity == "High"
     assert traversal.evidence, "it must show what came back"
-    assert any("LAB-SECRET" in str(item.get("value", "")) for item in traversal.evidence), \
-        "the marker from the file outside the root is what proves the read escaped it"
+    assert any("control" == item.get("kind") for item in traversal.evidence), \
+        "the control request is what makes this a confirmation rather than a claim"
     assert traversal.confirmed is True
 
 

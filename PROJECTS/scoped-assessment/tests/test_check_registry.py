@@ -43,6 +43,14 @@ def test_every_registered_check_is_runnable():
         assert check.title, check.id
 
 
+def test_the_registry_is_not_empty():
+    """A rewrite of the last function in the module once took the registry with it,
+    and every check stopped running while every check still existed. The suite
+    noticed; this notices sooner and says why."""
+    assert len(CHECKS) >= 11, "the registry is empty or truncated: %d checks" % len(CHECKS)
+    assert CHECKS[0].run.__name__.startswith("_"), CHECKS[0].run
+
+
 def test_no_two_checks_share_an_id():
     assert len(CHECK_NAMES) == len(set(CHECK_NAMES))
 
