@@ -460,13 +460,16 @@ def to_html(document: dict) -> str:
     parts.append("<h3>The smallest change</h3>")
     if cut.get("unbounded"):
         parts.append("<p><strong>No set of intermediate objects disconnects these.</strong> "
-                     "%s</p>" % escape(cut["note"]))
+                     "%s.</p>" % escape(cut["note"].rstrip(".")))
         if cut.get("direct"):
             parts.append("<table><tr><th>From</th><th>Crown jewel</th></tr>")
             for item in cut["direct"]:
                 parts.append("<tr><td><code>%s</code></td><td><code>%s</code></td></tr>"
                              % (escape(item["source"]), escape(item["sink"])))
             parts.append("</table>")
+            if cut.get("direct_total", 0) > len(cut["direct"]):
+                parts.append("<p>Showing %d of %d; the rest are in the crown jewel table "
+                             "above.</p>" % (len(cut["direct"]), cut["direct_total"]))
     else:
         parts.append("<p>Removing <strong>%d object(s)</strong> disconnects every route, "
                      "and that is the minimum, computed exactly with max-flow.</p>"
