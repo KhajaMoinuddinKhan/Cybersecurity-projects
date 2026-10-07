@@ -424,10 +424,58 @@ def test_no_source_file_hardcodes_a_count():
 
 # --- the gaps that were closed ---------------------------------------------
 
+def test_every_edge_builder_runs_on_data_that_uses_it(forest, graph):
+    """The builders for delegation, SID history and policy changes are dead in this
+    data, which means nothing here exercises them -- and a check that has never run is
+    not known to work. Four of them called an attribute the graph does not have, so any
+    collection with an unresolved reference raised AttributeError and the analysis died.
+    The data is built by hand and every builder is made to run.
+    """
+    holder = next(n for n in forest.nodes.values() if n.kind == "user")
+    service = next(n for n in forest.nodes.values() if n.kind == "computer")
+    policy = next(n for n in forest.nodes.values() if n.kind == "gpo")
+
+    holder.allowed_to_delegate = [service.sid]
+    holder.allowed_to_act = [service.sid]
+    holder.sid_history = ["S-1-5-21-0-0-0-9999"]        # deliberately unresolved
+    policy.gpo_changes = {"LocalAdmins": [{"ObjectIdentifier": holder.sid}],
+                          "AffectedComputers": [{"ObjectIdentifier": service.sid}]}
+    try:
+        rebuilt = build_graph(forest)
+    finally:
+        holder.allowed_to_delegate, holder.allowed_to_act, holder.sid_history = [], [], []
+        policy.gpo_changes = {}
+
+    rights = {e.right for e in rebuilt.edges}
+    assert "AllowedToDelegate" in rights
+    assert "AllowedToAct" in rights
+    assert "LocalAdminTo" in rights
+    # the unresolved identifier is recorded rather than raising or being dropped
+    assert rebuilt.summary()["unknown_references"], \
+        "an identifier the collection does not contain must be recorded"
+
+
+def test_an_unresolved_reference_is_reported_and_not_fatal(forest, graph):
+    """An unresolved reference is a fact about the collection. Treating it as absent
+    would silently remove whatever it granted, and raising would end the analysis."""
+    victim = next(n for n in forest.nodes.values() if n.kind == "user")
+    victim.sid_history = ["S-1-5-21-0-0-0-4242"]
+    try:
+        rebuilt = build_graph(forest)
+        reported = rebuilt.summary()["unknown_references"]
+        assert victim.sid in reported
+        assert "S-1-5-21-0-0-0-4242" in reported[victim.sid]
+        document = report_module.build(rebuilt, crown_jewels(forest, rebuilt),
+                                       {"points": [], "total": 0},
+                                       {"cut": [], "size": 0, "note": "not asked for"})
+        assert "does not contain" in report_module.to_markdown(document)
+    finally:
+        victim.sid_history = []
+
+
 def test_delegation_is_an_edge_and_not_just_a_parsed_field(forest, graph):
     """Constrained delegation is the right to present yourself as any user to a service.
     It was parsed and never used, which is the class of gap this project keeps finding."""
-    import re
     source = (PROJECT / "src" / "graph.py").read_text(encoding="utf-8")
     for field in ("allowed_to_delegate", "allowed_to_act", "sid_history", "gpo_changes"):
         assert re.search(r"\b%s\b" % field, source), "%s is parsed and never used" % field

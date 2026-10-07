@@ -294,6 +294,17 @@ def to_markdown(document: dict) -> str:
                      "clear." % ", ".join(sorted(
                          {r for rights in context["unresolved"].values() for r in rights})))
         lines.append("")
+    unresolved = document["graph"].get("unknown_references") or {}
+    if unresolved:
+        total = sum(len(v) for v in unresolved.values())
+        lines.append("Relationships that point at objects the collection does not "
+                     "contain: **%d identifier%s** across **%d object%s**. They are "
+                     "named rather than dropped -- an unresolved reference is a fact "
+                     "about the collection, and treating it as absent would silently "
+                     "remove whatever it granted."
+                     % (total, "" if total == 1 else "s",
+                        len(unresolved), "" if len(unresolved) == 1 else "s"))
+        lines.append("")
     unmodelled = document["graph"].get("unmodelled") or {}
     if unmodelled:
         lines.append("Fields the collector populated that this does not turn into a "

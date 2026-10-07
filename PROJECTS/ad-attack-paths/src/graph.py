@@ -58,6 +58,12 @@ class AttackGraph:
     incoming: dict = field(default_factory=lambda: defaultdict(list))
     edges: list = field(default_factory=list)
     unknown_rights: dict = field(default_factory=dict)
+    # Identifiers a relationship points at that the collection does not contain. Four
+    # edge builders record these and none of them could: the attribute was never
+    # declared, so any forest with an unresolved reference raised AttributeError and
+    # the whole analysis died. Nothing in this data resolves badly, which is the only
+    # reason it never happened here.
+    unknown_references: dict = field(default_factory=dict)
     # Populated collector fields that produced no edge, by field name.
     unmodelled: dict = field(default_factory=dict)
 
@@ -107,6 +113,7 @@ class AttackGraph:
                 "context": sum(1 for e in self.edges if not e.traversable),
                 "by_kind": dict(by_kind), "by_capability": dict(by_capability),
                 "unknown_rights": dict(self.unknown_rights),
+                "unknown_references": {k: sorted(v) for k, v in self.unknown_references.items()},
                 "unmodelled": dict(self.unmodelled)}
 
 
