@@ -104,6 +104,15 @@ class Node:
     links: list = field(default_factory=list)
     # where this account's service principal name is hosted
     spn_targets: list = field(default_factory=list)
+    # The primary group is how a directory expresses membership that does not appear
+    # in the member list. A domain controller is a member of Domain Controllers this
+    # way, so reading only the member list is reading membership that may not be there.
+    primary_group: str = ""
+    # certificate services. The authority is hosted on a machine, holds security
+    # descriptors of its own, and has templates enabled on it.
+    hosting_computer: str = ""
+    ca_security: list = field(default_factory=list)
+    cert_templates: list = field(default_factory=list)
     primary_group: str = ""
     sid_history: list = field(default_factory=list)
     spn_targets: list = field(default_factory=list)
@@ -349,7 +358,14 @@ def _build_node(entry: dict, kind: str, source_file: str) -> Node | None:
         is_dc=bool(entry.get("IsDC")),
         primary_group=str(entry.get("PrimaryGroupSID") or ""),
         sid_history=[str(s) for s in (entry.get("HasSIDHistory") or [])],
-        spn_targets=[str(s) for s in (entry.get("SPNTargets") or [])],
+        # SPNTargets are objects, not identifiers: each names a computer, a port and
+        # the service, and coercing them to strings loses all three.
+        spn_targets=[t for t in (entry.get("SPNTargets") or []) if isinstance(t, dict)],
         allowed_to_delegate=[str(s) for s in (entry.get("AllowedToDelegate") or [])],
+        hosting_computer=str(entry.get("HostingComputer") or ""),
+        ca_security=[a for a in ((entry.get("CARegistryData") or {}).get("CASecurity", {})
+                                 .get("Data") or []) if isinstance(a, dict)],
+        cert_templates=[t for t in (entry.get("EnabledCertTemplates") or [])
+                        if isinstance(t, dict)],
         source_file=source_file,
     )

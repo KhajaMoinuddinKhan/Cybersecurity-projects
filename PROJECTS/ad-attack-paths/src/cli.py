@@ -23,6 +23,7 @@ from . import report as report_module
 from .chokepoints import attacker_map, chokepoints, minimum_node_cut
 from .graph import build_graph
 from .schema import CollectorError, load_collector, load_forest
+from .adcs import certificate_escalations
 from .tier0 import Tier0Error, crown_jewels
 
 __all__ = ["main", "run_analysis"]
@@ -54,7 +55,14 @@ def run_analysis(paths, out_dir="attack-paths", include_derived=True,
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    document = report_module.build(graph, jewels, choke, cut,
+    # The escalation assessment needs the whole privileged set, including the objects
+    # that only reach a crown jewel, because that set is what makes the write-rights
+    # condition mean anything. It is computed here rather than reused from above so
+    # that --seeds-only narrows the report without narrowing the assessment.
+    privileged = {j.sid for j in crown_jewels(data, graph)}
+    escalations = certificate_escalations(data, graph, privileged)
+
+    document = report_module.build(graph, jewels, choke, cut, escalations,
                                    generated_at=datetime.now(timezone.utc))
     document["cut_sources"] = len(sources)
     (out / "report.md").write_text(report_module.to_markdown(document), encoding="utf-8")
@@ -107,6 +115,10 @@ def main(argv=None) -> int:
               "jewel in a single step" % len(cut.get("direct") or []))
     else:
         print("  the smallest change is %d object(s)" % cut["size"])
+    if escalations:
+        worst = escalations[0]
+        print("  %d certificate template(s) permit an escalation, worst: %s (%s)"
+              % (len(escalations), worst.template, ", ".join(worst.conditions)))
     print("report written to %s" % Path(args.out).resolve())
     return 0
 

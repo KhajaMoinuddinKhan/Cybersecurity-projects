@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 __all__ = ["build", "to_markdown", "to_html"]
 
 
-def build(graph, jewels, choke, cut, generated_at=None) -> dict:
+def build(graph, jewels, choke, cut, escalations=(), generated_at=None) -> dict:
     seeded = [jewel for jewel in jewels if not jewel.derived]
     derived = [jewel for jewel in jewels if jewel.derived]
     return {
@@ -36,6 +36,7 @@ def build(graph, jewels, choke, cut, generated_at=None) -> dict:
         "choke_points": [point.as_dict() for point in choke["points"]],
         "choke_total": choke["total"],
         "cut": cut,
+        "certificate_escalations": [e.as_dict() for e in escalations],
         "context": _context(graph),
     }
 
@@ -48,6 +49,24 @@ def _context(graph) -> dict:
             by_kind[edge.kind] = by_kind.get(edge.kind, 0) + 1
     return {"non_traversable": by_kind,
             "unresolved": {sid: rights for sid, rights in graph.unknown_rights.items()}}
+
+
+def _escalations_markdown(document: dict) -> list:
+    """The certificate section, or nothing at all when there is nothing to say."""
+    rows = document.get("certificate_escalations") or []
+    if not rows:
+        return []
+    lines = ["## Certificate services", "",
+             "An authority issues a certificate for whatever its templates permit, and a "
+             "template that lets the requester choose the subject, or that carries an "
+             "authentication purpose, is a route to any principal's identity. The "
+             "conditions below are read from the template's own attributes, not from "
+             "its name.", "",
+             "| Template | Condition | Severity | Why |", "| --- | --- | --- | --- |"]
+    for row in rows:
+        lines.append("| %s | %s | %s | %s |" % (
+            row["template"], ", ".join(row["conditions"]), row["severity"], row["note"]))
+    return lines + [""]
 
 
 def to_markdown(document: dict) -> str:
@@ -107,6 +126,8 @@ def to_markdown(document: dict) -> str:
             lines.append("| %s | `%s` | %d | `%s` |" % (jewel["kind"], jewel["name"],
                                                          jewel["hops"], jewel["reaches"]))
         lines.append("")
+
+    lines.extend(_escalations_markdown(document))
 
     lines.append("## The routes")
     lines.append("")
@@ -249,6 +270,22 @@ def to_html(document: dict) -> str:
                          "<td><code>%s</code></td></tr>"
                          % (escape(jewel["kind"]), escape(jewel["name"]), jewel["hops"],
                             escape(jewel["reaches"])))
+        parts.append("</table>")
+
+    rows = document.get("certificate_escalations") or []
+    if rows:
+        parts.append("<h2>Certificate services</h2><p>An authority issues a certificate "
+                     "for whatever its templates permit, and a template that lets the "
+                     "requester choose the subject, or that carries an authentication "
+                     "purpose, is a route to any principal's identity. These conditions "
+                     "are read from the template's own attributes, not its name.</p>")
+        parts.append("<table><tr><th>Template</th><th>Condition</th><th>Severity</th>"
+                     "<th>Why</th></tr>")
+        for row in rows:
+            parts.append("<tr><td>%s</td><td>%s</td><td class=\"sev-%s\">%s</td><td>%s</td></tr>"
+                         % (escape(row["template"]), escape(", ".join(row["conditions"])),
+                            escape(row["severity"].lower()), escape(row["severity"]),
+                            escape(row["note"])))
         parts.append("</table>")
 
     parts.append("<h2>The routes</h2>")

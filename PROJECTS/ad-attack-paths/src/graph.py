@@ -118,6 +118,8 @@ def build_graph(data: CollectorData) -> AttackGraph:
         _add_local_membership_edges(graph, node)
         _add_privilege_edges(graph, node)
         _add_service_principal_edges(graph, node)
+        _add_primary_group_edges(graph, node)
+        _add_certificate_authority_edges(graph, node)
         _add_trust_edges(graph, node)
         _add_containment_edges(graph, node)
 
@@ -270,6 +272,69 @@ def _add_service_principal_edges(graph: AttackGraph, node: Node) -> None:
                        note="the account's service principal name is hosted on this "
                             "machine as %s, so the service ticket grants access to it"
                             % (service or "an unnamed service")))
+
+
+def _add_primary_group_edges(graph: AttackGraph, node: Node) -> None:
+    """The primary group, which is membership the member list does not carry.
+
+    A directory records a principal's primary group as an attribute on the principal
+    rather than as an entry in the group's member list, and the two are not kept in
+    step: an object can be in a group this way and in no member list at all. A domain
+    controller is a member of Domain Controllers through its primary group, so reading
+    only member lists is relying on the collector having resolved it.
+    """
+    if not node.primary_group:
+        return
+    if graph.data.get(node.primary_group) is None:
+        return
+    graph.add(Edge(source=node.sid, target=node.primary_group, kind="membership",
+                   right="MemberOf", capability="membership",
+                   note="the primary group, which is membership recorded on the member "
+                        "rather than in the group's member list"))
+
+
+def _add_certificate_authority_edges(graph: AttackGraph, node: Node) -> None:
+    """Certificate services: the machine it runs on, its own permissions, its templates.
+
+    An authority issues certificates for whatever the templates enabled on it permit,
+    so a template that allows a subject alternative name is a route to any principal's
+    identity. That is the escalation this models the *surface* for: which authority,
+    where it runs, who can change it, and which templates are live on it.
+    """
+    if node.kind != "enterpriseca":
+        return
+    host = node.hosting_computer
+    if host and graph.data.get(host) is not None:
+        graph.add(Edge(source=host, target=node.sid, kind="ace", right="HostsCA",
+                       capability="control",
+                       note="the certificate authority runs on this machine, so "
+                            "controlling the machine is controlling every certificate "
+                            "it issues"))
+    for ace in node.ca_security:
+        if not isinstance(ace, dict):
+            continue
+        principal = str(ace.get("PrincipalSID") or "")
+        right = right_for(str(ace.get("RightName") or ""))
+        if not principal or graph.data.get(principal) is None:
+            continue
+        if right is None:
+            graph.unknown_rights.setdefault(node.sid, set()).add(
+                str(ace.get("RightName") or "?"))
+            continue
+        graph.add(Edge(source=principal, target=node.sid, kind="ace", right=right.name,
+                       capability=right.capability,
+                       note="%s on the certificate authority -- %s"
+                            % (right.name, right.note)))
+    for template in node.cert_templates:
+        template_id = str(template.get("ObjectIdentifier") or "")
+        target = graph.data.get(template_id)
+        if target is None:
+            graph.unknown_references.setdefault(node.sid, set()).add(template_id)
+            continue
+        graph.add(Edge(source=node.sid, target=template_id, kind="ace",
+                       right="EnabledOnCA", capability="control",
+                       note="the template is enabled on the authority, so whoever can "
+                            "edit it can issue certificates from it"))
 
 
 def _add_policy_edges(graph: AttackGraph) -> None:

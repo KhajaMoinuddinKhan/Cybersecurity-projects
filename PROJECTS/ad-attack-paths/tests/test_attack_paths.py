@@ -17,8 +17,10 @@ from pathlib import Path
 
 import pytest
 
+from src.adcs import assess_template, certificate_escalations
 from src.chokepoints import attacker_map, chokepoints, minimum_node_cut, removal_impact
 from src.graph import build_graph
+from src import report as report_module
 from src.paths import all_shortest_paths, enumerate_paths, entry_points, shortest_path
 from src.rights import CAPABILITIES, RIGHTS, capability_of, is_traversable, right_for
 from src.schema import CollectorError, load_collector, load_forest
@@ -287,6 +289,84 @@ def test_every_newly_parsed_field_is_used_or_reported(graph):
                   "members", "aces", "trusts", "contained_by"):
         assert re.search(r"\b%s\b" % field, source), \
             "%s is parsed and never used" % field
+
+
+# --- certificate services --------------------------------------------------
+
+def test_an_escalation_is_derived_from_the_template_not_its_name(forest, graph):
+    """The templates in this data are literally named ESC1, ESC2, ESC3 and ESC4, which
+    is a gift and a trap: matching those names would pass every test here and be
+    worthless, exactly like looking for the group called Domain Admins. The detector
+    is run again with every name replaced and must return the same answer."""
+    jewels = crown_jewels(forest, graph)
+    privileged = {j.sid for j in jewels}
+    before = certificate_escalations(forest, graph, privileged)
+    assert before, "the data contains vulnerable templates"
+
+    original = {n.sid: n.name for n in forest.by_kind("certtemplate")}
+    for node in forest.by_kind("certtemplate"):
+        node.name = "TEMPLATE-%s" % node.sid[-4:]
+    try:
+        after = certificate_escalations(forest, graph, privileged)
+    finally:
+        for node in forest.by_kind("certtemplate"):
+            node.name = original[node.sid]
+
+    assert len(after) == len(before)
+    assert sorted(e.conditions for e in after) == sorted(e.conditions for e in before)
+    assert not any("ESC" in e.template for e in after)
+
+
+def test_a_template_only_administrators_can_write_is_not_a_finding(forest, graph):
+    """ESC4 is a template a principal *without* administrative rights can edit. Reading
+    every write right as a finding reported twenty-five of the twenty-seven templates
+    in this forest, including the ones for domain controllers and administrators --
+    which buries the ones that are real."""
+    jewels = crown_jewels(forest, graph)
+    privileged = {j.sid for j in jewels}
+    found = certificate_escalations(forest, graph, privileged)
+    esc4 = [e for e in found if "ESC4" in e.conditions]
+    assert len(found) < len(list(forest.by_kind("certtemplate"))), \
+        "a template that only its administrators can write is the intended configuration"
+    for finding in esc4:
+        assert finding.principals, "an ESC4 finding must name who can write to it"
+        for principal in finding.principals:
+            assert principal not in privileged, \
+                "%s is already privileged" % graph.name_of(principal)
+
+
+def test_a_template_nobody_has_enabled_is_not_reported(forest, graph):
+    """A template that is not enabled on an authority cannot issue anything."""
+    found = certificate_escalations(forest, graph)
+    for finding in found:
+        assert finding.authority, "every reported template must name the authority"
+
+
+def test_the_escalation_conditions_come_from_attributes(forest, graph):
+    """Each condition has to be readable from the template's own settings."""
+    from src.adcs import (ANY_PURPOSE, CERTIFICATE_REQUEST_AGENT, _authenticates,
+                          _ekus, _supplies_own_subject)
+    for template in forest.by_kind("certtemplate"):
+        props = template.properties
+        if _supplies_own_subject(props) and _authenticates(props):
+            assert "ESC1" in assess_template(template)[0].conditions
+        if ANY_PURPOSE in _ekus(props):
+            assert "ESC2" in assess_template(template)[0].conditions
+        if CERTIFICATE_REQUEST_AGENT in _ekus(props):
+            assert "ESC3" in assess_template(template)[0].conditions
+
+
+def test_the_report_carries_the_escalations(forest, graph):
+    jewels = crown_jewels(forest, graph)
+    privileged = {j.sid for j in jewels}
+    escalations = certificate_escalations(forest, graph, privileged)
+    document = report_module.build(graph, jewels, {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "note": "not asked for"},
+                                   escalations)
+    assert document["certificate_escalations"], "the report must carry them"
+    markdown = report_module.to_markdown(document)
+    assert "Certificate services" in markdown
+    assert "Certificate services" in report_module.to_html(document)
 
 
 # --- the crown jewels -----------------------------------------------------
