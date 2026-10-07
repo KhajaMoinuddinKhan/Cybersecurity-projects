@@ -36,7 +36,7 @@ def build(graph, jewels, choke, cut, escalations=(), chains=(), managers=(),
         },
         "choke_points": [point.as_dict() for point in choke["points"]],
         "choke_total": choke["total"],
-        "cut": cut,
+        "cut": _named_cut(graph, cut),
         "certificate_escalations": [e.as_dict() for e in escalations],
         "certificate_chains": [c.as_dict() for c in chains],
         "authority_managers": list(managers),
@@ -51,6 +51,23 @@ ROUTES_SHOWN = 25
 REASON_CHARS = 150
 STEP_CHARS = 110
 OBJECTS_PER_FIELD = 3
+
+
+def _named_cut(graph, cut: dict) -> dict:
+    """The cut with every object named, and the count of what the table leaves out.
+
+    The table showed identifiers rather than names -- the same fault the certificate
+    enrollment column had -- and it showed ten rows under a sentence saying forty-five
+    objects reach a crown jewel in one step, with nothing to say the other thirty-five
+    had been left out.
+    """
+    named = dict(cut)
+    direct = []
+    for item in cut.get("direct") or []:
+        direct.append({"source": graph.name_of(item["source"]),
+                       "sink": graph.name_of(item["sink"])})
+    named["direct"] = direct
+    return named
 
 
 def _context(graph) -> dict:
@@ -230,7 +247,7 @@ def to_markdown(document: dict) -> str:
     lines.append("")
     if cut.get("unbounded"):
         lines.append("**No set of intermediate objects disconnects these.** %s."
-                     % cut["note"])
+                     % cut["note"].rstrip("."))
         lines.append("")
         if cut.get("direct"):
             lines.append("Reached in a single step, so the object itself has to be fixed:")
@@ -240,6 +257,10 @@ def to_markdown(document: dict) -> str:
             for item in cut["direct"]:
                 lines.append("| `%s` | `%s` |" % (item["source"], item["sink"]))
             lines.append("")
+            if cut.get("direct_total", 0) > len(cut["direct"]):
+                lines.append("Showing %d of %d; the rest are in the crown jewel table "
+                             "above." % (len(cut["direct"]), cut["direct_total"]))
+                lines.append("")
     else:
         lines.append("Removing **%d object%s** disconnects every route, and %d is the "
                      "minimum: computed exactly with max-flow rather than approximated "

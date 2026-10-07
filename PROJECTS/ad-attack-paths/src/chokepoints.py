@@ -276,8 +276,11 @@ def minimum_node_cut(graph, sources, sinks) -> dict:
     unbounded = flow == INF or bool(direct)
     if unbounded:
         return {"cut": [], "size": 0, "flow": "unbounded", "unbounded": True,
-                "direct": direct[:10],
-                "note": ("no set of intermediate objects disconnects these: %d starting "
+                # The list is shortened for the report and the count is not: ten rows
+                # under a sentence saying forty-five is a table that lost thirty-five
+                # findings without mentioning it.
+                "direct": direct[:10], "direct_total": len(direct),
+                "note": ("%d starting "
                          "object(s) reach a crown jewel in a single step, so those "
                          "objects have to be fixed rather than routed around"
                          % len(direct))}

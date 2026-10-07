@@ -480,6 +480,41 @@ def test_the_report_carries_the_combinations_and_the_managers(forest, graph):
     assert "Who can change an authority" in markdown
 
 
+def test_the_single_step_table_names_objects_and_says_what_it_left_out(forest, graph):
+    """It listed identifiers rather than names, and it showed ten rows under a sentence
+    saying forty-five objects reach a crown jewel in one step -- the other thirty-five
+    dropped without a word. Both are the faults the report keeps having: a reader
+    cannot act on a SID, and a table that quietly loses findings reads like a short
+    list rather than a truncated one."""
+    jewels = crown_jewels(forest, graph)
+    document = report_module.build(graph, jewels, {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "unbounded": True,
+                                    "direct": [{"source": next(iter(graph.data.nodes)),
+                                                "sink": next(iter(graph.data.nodes))}],
+                                    "direct_total": 45,
+                                    "note": "45 starting objects reach a crown jewel"})
+    markdown = report_module.to_markdown(document)
+    assert "Showing 1 of 45" in markdown, "the table must say what it left out"
+    for line in markdown.splitlines():
+        if line.startswith("| `") and "` | `" in line:
+            assert not line.split("|")[1].strip().startswith("`S-1-5-"), \
+                "a row must name the object, not print its identifier"
+
+
+def test_the_lead_in_does_not_repeat_the_note(forest, graph):
+    """The paragraph opened with a bold sentence and then the note said the same thing
+    again, so it read as a stutter."""
+    jewels = crown_jewels(forest, graph)
+    document = report_module.build(graph, jewels, {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "unbounded": True, "direct": [],
+                                    "direct_total": 0,
+                                    "note": "45 starting objects reach a crown jewel in "
+                                            "a single step"})
+    markdown = report_module.to_markdown(document)
+    assert markdown.count("single step") <= 2, "the sentence is repeated"
+    assert "**No set of intermediate objects disconnects these.** 45 starting" in markdown
+
+
 def test_the_certificate_table_rows_stay_with_their_header(forest, graph):
     """A markdown table is only a table where its rows touch it. The rows were emitted
     after two other sections, so the certificate table rendered as a header followed by
