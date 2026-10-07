@@ -114,9 +114,33 @@ def _atomic_tests(attack_id: str) -> dict:
     import yaml
     path = ATOMIC_SOURCE / ("%s.yaml" % attack_id)
     if not path.exists():
-        raise CaptureError("no vendored atomics for %s; expected %s" % (attack_id, path))
+        # The file is tracked in git and vendored deliberately, so its absence is
+        # almost never a mistake in this repository. It contains the attack command
+        # text for the technique, and an antivirus that reads that as malicious will
+        # quarantine it -- which is what Windows Defender does to T1518.yaml. Naming
+        # the likely cause turns an error that looks like a bug in this code into one
+        # that points at the machine it is running on.
+        raise CaptureError(
+            "no vendored atomics for %s; expected %s -- the file is tracked in git, so "
+            "if it is missing the working copy has been altered: a checkout that "
+            "removed it, or an antivirus that quarantined it (this file holds the "
+            "technique's attack command text, and Windows Defender reads T1518.yaml as "
+            "Trojan:Script/Wacatac.H!ml). Restore it with `git checkout -- %s`, and add "
+            "an exclusion for the repository if it keeps disappearing."
+            % (attack_id, path, path))
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except OSError as exc:
+        # Errno 22 on a file that exists is what a quarantined file looks like from
+        # here: the directory entry is still there and the content is not openable,
+        # which is the state an antivirus leaves a file in when it has taken it. A
+        # bare "Invalid argument" reads like a bug in this code; it is not one.
+        raise CaptureError(
+            "%s could not be read (%s). The file exists, so this is the machine rather "
+            "than the repository: an antivirus holding it in quarantine looks exactly "
+            "like this, and this file holds the technique's attack command text. Check "
+            "the antivirus history for %s and add an exclusion for the repository."
+            % (path.name, exc, path.name)) from exc
     except yaml.YAMLError as exc:
         raise CaptureError("%s is not valid YAML: %s" % (path.name, exc)) from exc
     # An atomic file carries a test per platform under the same name, and the
