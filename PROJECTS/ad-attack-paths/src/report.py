@@ -85,6 +85,13 @@ def _escalations_markdown(document: dict) -> list:
              "its name.", "",
              "| Template | Condition | Severity | Who can enroll | Why |",
              "| --- | --- | --- | --- | --- |"]
+    for row in rows:
+        enrollees = row.get("enrollee_names") or row.get("enrollees") or []
+        who = ", ".join("`%s`" % e for e in enrollees[:3]) if enrollees else \
+            "nobody outside the administrators"
+        lines.append("| %s | %s | %s | %s | %s |" % (
+            row["template"], ", ".join(row["conditions"]), row["severity"], who, row["note"]))
+
     chains = document.get("certificate_chains") or []
     if chains:
         lines.append("### Combinations")
@@ -114,12 +121,7 @@ def _escalations_markdown(document: dict) -> list:
                 manager["principal"], manager["right"], manager["authority"],
                 manager.get("authority_kind", "")))
         lines.append("")
-    for row in rows:
-        enrollees = row.get("enrollee_names") or row.get("enrollees") or []
-        who = ", ".join("`%s`" % e for e in enrollees[:3]) if enrollees else \
-            "nobody outside the administrators"
-        lines.append("| %s | %s | %s | %s | %s |" % (
-            row["template"], ", ".join(row["conditions"]), row["severity"], who, row["note"]))
+
     return lines + [""]
 
 
@@ -132,7 +134,6 @@ def to_markdown(document: dict) -> str:
                     "" if document["objects"] == 1 else "s",
                     len(document["forest"]), "" if len(document["forest"]) == 1 else "s"))
     lines.append("")
-
     lines.append("## Summary")
     lines.append("")
     lines.append("The directory holds **%d objects** and **%d relationships**, of which "

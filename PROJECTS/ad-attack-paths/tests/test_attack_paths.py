@@ -480,6 +480,38 @@ def test_the_report_carries_the_combinations_and_the_managers(forest, graph):
     assert "Who can change an authority" in markdown
 
 
+def test_the_certificate_table_rows_stay_with_their_header(forest, graph):
+    """A markdown table is only a table where its rows touch it. The rows were emitted
+    after two other sections, so the certificate table rendered as a header followed by
+    nothing and the findings turned up as loose rows further down the page."""
+    privileged = {j.sid for j in crown_jewels(forest, graph)}
+    escalations = certificate_escalations(forest, graph, privileged)
+    document = report_module.build(graph, crown_jewels(forest, graph),
+                                   {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "note": "not asked for"},
+                                   escalations, certificate_chains(escalations),
+                                   authority_managers(forest, graph, privileged))
+    markdown = report_module.to_markdown(document)
+    lines = markdown.splitlines()
+    header = next(i for i, l in enumerate(lines)
+                  if l.startswith("| Template | Condition |"))
+    separator = lines[header + 1]
+    assert set(separator.replace("|", "").replace(" ", "")) <= {"-"}, \
+        "the line after the header must be the separator"
+    assert lines[header + 2].startswith("| "), \
+        "the first data row must follow the separator, not another section"
+    assert "Template" in lines[header + 2] or "@" in lines[header + 2], \
+        "the row must be a certificate finding"
+    # and every finding is accounted for, in one run of rows
+    rows = 0
+    for line in lines[header + 2:]:
+        if not line.startswith("| "):
+            break
+        rows += 1
+    assert rows == len(escalations), \
+        "the table must carry every finding: %d rows for %d findings" % (rows, len(escalations))
+
+
 def test_the_two_formats_agree_about_the_data(forest, graph):
     """The html report carried less than the markdown one, so the same analysis read
     differently depending on which file somebody opened."""
