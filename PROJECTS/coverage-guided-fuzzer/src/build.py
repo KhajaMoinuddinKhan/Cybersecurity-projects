@@ -84,8 +84,32 @@ def target_directory(target: str) -> Path:
     return candidate
 
 
+def sanitizer_available() -> bool:
+    """Whether a sanitizer can be linked here.
+
+    It is worth asking rather than assuming. AddressSanitizer catches a read or a write
+    that leaves the memory a program actually has, at the moment it happens, which is
+    strictly better than waiting for the process to die of it -- and it does not link
+    everywhere. It needs a runtime the toolchain has to ship, and on one platform here
+    it does not, so the build says whether it got it rather than silently not having it.
+    """
+    try:
+        found = compiler()
+    except BuildError:
+        return False
+    probe = "int main(void){return 0;}"
+    source = BUILD_DIR / "sanitizer-probe.c"
+    BUILD_DIR.mkdir(exist_ok=True)
+    source.write_text(probe, encoding="utf-8")
+    done = subprocess.run(found + ["-fsanitize=address", str(source), "-o",
+                                   str(BUILD_DIR / "sanitizer-probe")],
+                          capture_output=True, text=True, timeout=300)
+    return done.returncode == 0
+
+
 def build(name: str = "target", vulnerable: bool = True, force: bool = False,
-          exploit: bool = False, target: str = "parser") -> Path:
+          exploit: bool = False, target: str = "parser",
+          sanitize: bool = False) -> Path:
     """Compile the instrumented target and return the library.
 
     `vulnerable` selects the build. Both are compiled from the same source: the fixed
@@ -99,6 +123,8 @@ def build(name: str = "target", vulnerable: bool = True, force: bool = False,
         suffix = "%s-%s" % (target, suffix)
     if exploit:
         suffix += "-exploit"
+    if sanitize:
+        suffix += "-asan"
     output = BUILD_DIR / ("%s-%s%s" % (name, suffix, _extension()))
     # The target is instrumented and the driver is not, and that separation is the
     # point rather than a detail. The coverage is meant to describe the target; a driver
@@ -140,6 +166,14 @@ def build(name: str = "target", vulnerable: bool = True, force: bool = False,
     common = ["-O0", "-g"]                # -g so a crash can be attributed to a line
     if not vulnerable:
         common.append("-DBOUNDED")
+    if sanitize:
+        # The target is compiled with it; the runtime and the driver are not, because
+        # they are the harness and a defect in the harness is not what is being looked
+        # for. The link needs it either way, for the runtime.
+        if not sanitizer_available():
+            raise BuildError("this toolchain cannot link a sanitizer, so the build "
+                             "would be the same as without one and the report would "
+                             "say otherwise")
 
     # Separate compilation, because the instrumentation flag cannot be turned off per
     # file on one command line and three groups of files need three answers.
@@ -148,8 +182,11 @@ def build(name: str = "target", vulnerable: bool = True, force: bool = False,
     for index, (sources, with_coverage) in enumerate(groups):
         for source in sources:
             obj = BUILD_DIR / ("%s-%s-%d.obj" % (name, suffix, index))
-            step = compiler() + common + (["-fsanitize-coverage=trace-pc,trace-cmp"]
-                                          if with_coverage else [])
+            step = compiler() + common
+            if with_coverage:
+                step.append("-fsanitize-coverage=trace-pc,trace-cmp")
+                if sanitize:
+                    step.append("-fsanitize=address")
             step += ["-c", str(source), "-o", str(obj)]
             done = subprocess.run(step, capture_output=True, text=True, timeout=900)
             if done.returncode or not obj.exists():
@@ -158,7 +195,10 @@ def build(name: str = "target", vulnerable: bool = True, force: bool = False,
                                     done.stderr.strip() or done.stdout.strip()))
             objects.append(obj)
 
-    link = compiler() + common + [str(o) for o in objects] + ["-o", str(output)]
+    link = compiler() + common
+    if sanitize:
+        link.append("-fsanitize=address")
+    link += [str(o) for o in objects] + ["-o", str(output)]
     done = subprocess.run(link, capture_output=True, text=True, timeout=900)
     if done.returncode or not output.exists():
         raise BuildError("the linker refused the target:\n%s"

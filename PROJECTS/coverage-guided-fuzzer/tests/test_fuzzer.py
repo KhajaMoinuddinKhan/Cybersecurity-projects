@@ -18,7 +18,8 @@ where the attacker put it", and the fixed build must not.
 
 import pytest
 
-from src.build import available_targets, build, describe
+from src.build import (BuildError, available_targets, build, describe,
+                       sanitizer_available)
 from src.coverage import CoverageMap
 from src.corpus import Corpus, minimise
 from src.crash import group
@@ -595,6 +596,54 @@ def test_stepping_stones_do_not_crowd_out_the_real_discoveries():
     stones = sum(1 for e in chosen if e.found_by == "stepping stone")
     assert stones < len(chosen) // 4, "the stepping stones took over the search"
     assert stones > 0, "and they were never tried at all"
+
+
+# --- the sanitizer ---------------------------------------------------------------
+
+def test_whether_a_sanitizer_can_be_linked_is_answered_rather_than_assumed():
+    """It links on one platform here and not the other, and a build that quietly went
+    without one would make the report claim a precision it does not have."""
+    assert isinstance(sanitizer_available(), bool)
+
+
+def test_a_sanitizer_build_is_refused_when_it_cannot_be_linked(toolchain):
+    """Asking for one where it does not link has to fail loudly. A silent fallback to a
+    build without it is a report that says a defect was caught by a sanitizer when the
+    sanitizer was never there."""
+    if sanitizer_available():
+        return          # it links here, so there is nothing to refuse
+    with pytest.raises(BuildError) as raised:
+        build(vulnerable=True, force=True, target="interval", sanitize=True)
+    assert "cannot link a sanitizer" in str(raised.value)
+
+
+def test_a_sanitizer_build_catches_what_the_plain_one_only_dies_of(toolchain):
+    """The whole reason for it. A read past the end of an input is a read past the end of
+    the memory the program was given, and the plain build dies of it without saying where
+    or what -- or, worse, does not die at all, because the read stayed inside the buffer
+    the harness happened to hand over."""
+    if not sanitizer_available():
+        pytest.skip("this toolchain cannot link a sanitizer")
+    from multiprocessing import shared_memory
+    exe = build(vulnerable=True, force=True, target="interval", sanitize=True)
+    assert exe.exists()
+    region = shared_memory.SharedMemory(name="cgf-test-asan", create=True, size=75792)
+    try:
+        # 16384 * 4 wraps to zero in sixteen bits, so the check accepts it on any input
+        # at all, and the loop reads sixteen thousand intervals out of two bytes.
+        payload = (16384).to_bytes(2, "little")
+        scratch = exe.parent / "asan-input.bin"
+        scratch.write_bytes(payload)
+        import subprocess as sp
+        done = sp.run([str(exe), "cgf-test-asan", str(scratch)], capture_output=True,
+                      text=True, timeout=60)
+        said = (done.stderr or "") + (done.stdout or "")
+        assert "AddressSanitizer" in said, "the sanitizer said nothing"
+        assert "overflow" in said, "and did not name an overflow"
+        assert "cgf_parse" in said, "and did not say where"
+    finally:
+        region.close()
+        region.unlink()
 
 
 # --- the toolchain ---------------------------------------------------------------------

@@ -175,6 +175,16 @@ int main(int argc, char **argv) {
     size_t size = fread(buffer, 1, sizeof buffer, input);
     fclose(input);
 
-    LLVMFuzzerTestOneInput(buffer, size);
+    /* A buffer of exactly the input's length, rather than the large one it was read
+     * into. A parser that reads past the end of its input is reading past the end of
+     * what it was given, and handing it a megabyte of scratch to overrun hides that
+     * completely: the read stays inside the allocation, nothing faults, and a defect of
+     * that shape is invisible. This is also simply more faithful -- a real caller passes
+     * the data it has, not the data plus a margin. */
+    uint8_t *exact = (uint8_t *)malloc(size ? size : 1);
+    if (!exact) return 5;
+    memcpy(exact, buffer, size);
+    LLVMFuzzerTestOneInput(exact, size);
+    free(exact);
     return 0;
 }

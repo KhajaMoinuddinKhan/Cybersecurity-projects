@@ -13,7 +13,8 @@ import sys
 import time
 from pathlib import Path
 
-from .build import BuildError, available_targets, build, describe
+from .build import (BuildError, available_targets, build, describe,
+                    sanitizer_available)
 from .corpus import minimise
 from .crash import group
 from .coverage import CoverageMap
@@ -41,7 +42,8 @@ def _run_fuzz(args) -> int:
         print(toolchain["reason"], file=sys.stderr)
         return 2
     try:
-        executable = build(vulnerable=True, force=args.rebuild, target=args.target)
+        executable = build(vulnerable=True, force=args.rebuild, target=args.target,
+                           sanitize=args.sanitize)
     except BuildError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -80,6 +82,8 @@ def _run_fuzz(args) -> int:
           % (len(engine.corpus), engine.corpus.total_bytes()))
     print("  coverage: %d edges" % coverage.total_edges)
     print("  crashes: %d distinct" % len(engine.findings))
+    print("  the target was built %s a sanitizer"
+          % ("with" if args.sanitize else "without"))
     if engine.learned:
         print("  the target named %d values it compares against" % len(engine.learned))
     if engine.stats.stepping_stones:
@@ -167,6 +171,10 @@ def main(argv=None) -> int:
     fuzz.add_argument("--target", default="parser",
                       help="which target to fuzz; one of %s"
                            % ", ".join(available_targets()))
+    fuzz.add_argument("--sanitize", action="store_true",
+                      help="build the target with AddressSanitizer, which catches a "
+                           "read or a write that leaves the memory the program has "
+                           "(available: %s)" % sanitizer_available())
     fuzz.add_argument("--out", help="directory to write the crashing inputs to")
     fuzz.add_argument("--rebuild", action="store_true", help="rebuild the target")
     fuzz.add_argument("--minimise", action="store_true",

@@ -79,17 +79,28 @@ signature stops meaning anything for exactly the crashes it exists to group.
 one per input, but a fork server removes the rest by forking a child that is already past
 initialisation, and the platform this is developed on has no `fork`.
 
-**There is no sanitizer.** AddressSanitizer would catch a read or a write that leaves the
-memory a program has, at the point it happens. It does not initialise in a process on this
-platform, so the crash detection is the process dying, and the report says so rather than
-implying a precision it does not have. One consequence is worth naming: a read that goes
-past the end of an *input* without leaving the buffer the harness handed over is not
-detected here at all, and a defect of that shape would be invisible to this fuzzer.
+**The sanitizer is available on one platform and not the other.** AddressSanitizer
+catches a read or a write that leaves the memory a program has, at the point it happens,
+and names the function it happened in; the plain build dies of the same defect without
+saying where, or does not die at all. It links here on Linux and not on Windows, and the
+build asks rather than assuming — a request for it where it cannot be linked is refused
+rather than quietly producing a build without one, because a report that says a sanitizer
+caught something when it was never there is worse than no sanitizer.
+
+The target is handed a buffer of exactly its input's length for the same reason. A parser
+given a megabyte of scratch to overrun will read past its input and stay inside the
+allocation, nothing faults, and a defect of that shape is invisible — which is not
+hypothetical: the first version of the `interval` target had exactly that and was
+correctly not detected.
 
 **A corrupted run can be slow.** Overwriting a parser's own loop counters makes it spin,
 and a run like that takes hundreds of milliseconds to fail where every other input takes
 microseconds. The fuzzer kills those and records them as hangs, which is a finding in its
 own right, but it is a real cost.
+
+**There is no fork server on the platform this was developed on.** Where there is one to
+be had, it is not used here, and the persistent process is the substitute rather than the
+equivalent.
 
 **The second target is still one this author wrote.** It is a different format and a
 different bug class, and finding it says more than finding the first one does, but it is
