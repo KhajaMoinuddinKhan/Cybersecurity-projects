@@ -163,8 +163,60 @@ class Mutator:
         index = self.rng.randrange(len(data) + 1)
         return data[:index] + bytearray(token) + data[index:]
 
+    # -- the comparisons ---------------------------------------------------------
+    def solve_comparison(self, data: bytes, comparisons: list) -> bytearray:
+        """Rewrite a byte the program compared, using the value it compared against.
+
+        This is the difference between a search and a guided one. Coverage says an input
+        was rejected; a comparison says it was rejected because the first byte should
+        have been `R`, and that the byte it read was `X`. The distance between those two
+        statements is four billion guesses and one substitution.
+
+        Only comparisons against a constant are used, because only those name a value the
+        program wanted. A comparison between two values it read names nothing.
+
+        The byte to rewrite is found by value: the input byte the program loaded is one
+        of the operands, so every position holding that value is a candidate and one is
+        chosen. That is a guess about *where*, which is a guess of a few dozen, rather
+        than a guess about *what*, which was the impossible one.
+        """
+        useful = [(a, b, w) for a, b, w, is_constant in comparisons
+                  if is_constant and 1 <= w <= 4 and a != b]
+        if not useful:
+            return bytearray(data)
+        constant, observed, width = self.rng.choice(useful)
+        # The program may have loaded the constant or the input byte as either operand,
+        # so try both readings and take the one that matches something in the input.
+        for wanted, seen in ((constant, observed), (observed, constant)):
+            positions = _find_value(data, seen, width)
+            if positions:
+                result = bytearray(data)
+                position = self.rng.choice(positions)
+                result[position:position + width] = wanted.to_bytes(width, "little")
+                return result
+        return bytearray(data)
+
+    def insert_learned(self, data: bytearray, tokens: tuple) -> bytearray:
+        """Insert a value the target compared against, which is a token it revealed.
+
+        The tag of a format is four bytes a random search will not find. The target hands
+        them over one comparison at a time, and they belong in the mutations that place a
+        value rather than in the ones that flip a bit.
+        """
+        if not tokens:
+            return data
+        token = self.rng.choice(tokens)
+        if isinstance(token, int):
+            width = max(1, (token.bit_length() + 7) // 8)
+            token = token.to_bytes(width, "little")
+        if not data:
+            return bytearray(token)
+        index = self.rng.randrange(len(data) + 1)
+        return data[:index] + bytearray(token) + data[index:]
+
     # -- the composition ---------------------------------------------------------
-    def havoc(self, data: bytes, other: bytes = None, rounds: int = None) -> bytearray:
+    def havoc(self, data: bytes, other: bytes = None, rounds: int = None,
+              comparisons: list = None, tokens: tuple = ()) -> bytearray:
         """A stack of the mutations above, which is what most of the budget goes on.
 
         Any single mutation is a weak search on its own. Applying several in sequence is
@@ -186,6 +238,11 @@ class Mutator:
             lambda d: self.insert_bytes(d),
             lambda d: self.insert_dictionary(d),
             lambda d: self.splice(d, other) if other else d,
+            # The two guided ones. They are in the same stack as everything else rather
+            # than run separately, because a comparison is usually only solvable once the
+            # input has the right shape, and the shape comes from the unguided mutations.
+            lambda d: self.solve_comparison(d, comparisons) if comparisons else d,
+            lambda d: self.insert_learned(d, tokens) if tokens else d,
         ]
         if rounds is None:
             # The depth is drawn from a distribution rather than fixed, because the two
@@ -205,6 +262,20 @@ class Mutator:
                 result = result[:self.max_length]
         return result
 
-    def generate(self, data: bytes, other: bytes = None) -> bytearray:
+    def generate(self, data: bytes, other: bytes = None, comparisons: list = None,
+                 tokens: tuple = ()) -> bytearray:
         """One new input, from one or two existing ones."""
-        return self.havoc(data, other)
+        return self.havoc(data, other, comparisons=comparisons, tokens=tokens)
+
+
+def _find_value(data: bytes, value: int, width: int) -> list:
+    """Every position where `value` appears at that width."""
+    if width == 1:
+        return [i for i, byte in enumerate(data) if byte == value]
+    needle = value.to_bytes(width, "little")
+    out = []
+    start = data.find(needle)
+    while start != -1:
+        out.append(start)
+        start = data.find(needle, start + 1)
+    return out

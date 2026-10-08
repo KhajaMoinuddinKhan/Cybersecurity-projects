@@ -5,24 +5,31 @@
  *
  *     "RECS" | count | (type, length, payload) * count
  *
- * A name record carries a callback the parser invokes once the name has been read, and
- * the name and the callback are kept together in one structure -- which is how this
- * kind of code is usually written, because the two belong to each other.
+ * Three record types. A name record carries a callback the parser invokes once the name
+ * has been read, and the name and the callback are kept together in one structure --
+ * which is how this kind of code is usually written, because the two belong to each
+ * other. A number record reads a value. A detail record writes the structure back out.
  *
- * The parser checks that a record fits inside the input before reading it, so the
- * reading is bounded. What it does not check is whether the payload fits the name
- * buffer, and a name longer than the buffer runs off the end of it and into the
- * callback that sits immediately after.
+ * There are two defects, and they are the pair that makes a real exploit rather than a
+ * crash.
  *
- * That is the whole bug, and it is a real one. The bound on the *input* is correct and
- * the bound on the *destination* is missing, which is how this class of defect actually
- * happens; and the consequence is a function pointer under the attacker's control
- * rather than a return address they would first have to find a way to reach, which is
- * the variant that gets exploited in practice.
+ * The first is a missing bound. The parser checks that a record fits inside the input
+ * before reading it, so the reading is bounded; it never checks that the payload fits the
+ * name buffer, and a name longer than the buffer runs off the end of it and into the
+ * callback that sits immediately after. The bound on the *input* is correct and the bound
+ * on the *destination* is missing, which is how this class of defect actually happens.
  *
- * Nothing here is planted to be found by a fuzzer that knows where to look. The tag,
- * the count, the type byte and a length longer than thirty-two all have to be reached
- * in sequence, and coverage is what tells the search it is getting closer.
+ * The second is a disclosure. The detail record writes the whole structure out, including
+ * the callback it has just stored, which is a function's address. That is what makes the
+ * first defect usable: address space layout randomisation means the attacker cannot know
+ * where to point the corrupted callback, and the disclosure tells them. Either defect
+ * alone is a finding; together they are an exploit, and they are the two halves that
+ * actually appear together in the wild.
+ *
+ * Nothing here is planted to be found by a fuzzer that knows where to look. The tag, the
+ * count, the type byte, a length longer than thirty-two and a detail record to read the
+ * address from all have to be reached, and the comparisons the parser makes are what
+ * tell the search it is getting closer.
  */
 
 #include <stddef.h>
@@ -44,8 +51,8 @@
  * instruction pointer was taken over rather than merely broken.
  *
  * It writes a marker rather than returning a code, because the process that reaches it
- * is one whose stack has been overwritten, and returning cleanly is not something it
- * can be trusted to do. */
+ * is one whose stack has been overwritten, and returning cleanly is not something it can
+ * be trusted to do. */
 EXPORTED volatile int hijacked = 0;
 
 EXPORTED void win(void) {
@@ -60,7 +67,7 @@ EXPORTED void win(void) {
     exit(0);
 }
 
-EXPORTED void *address_of_win(void) { return (void *)&win; }
+EXPORTED void *cgf_address_of_win(void) { return (void *)&win; }
 
 typedef void (*callback)(void);
 
@@ -74,6 +81,8 @@ typedef struct {
 
 static void name_stored(void) { /* the ordinary case does nothing */ }
 
+EXPORTED void *cgf_address_of_name_stored(void) { return (void *)&name_stored; }
+
 static void handle_name(const uint8_t *payload, size_t length) {
     name_record record;
     record.on_complete = name_stored;
@@ -83,7 +92,7 @@ static void handle_name(const uint8_t *payload, size_t length) {
     memcpy(record.name, payload, copied);
     record.name[copied] = 0;
 #else
-    /* The bug: `length` was checked against the input, not against this buffer. */
+    /* The defect: `length` was checked against the input, not against this buffer. */
     memcpy(record.name, payload, length);
     record.name[length < NAME_BUFFER ? length : NAME_BUFFER - 1] = 0;
 #endif
@@ -99,15 +108,33 @@ static void handle_number(const uint8_t *payload, size_t length) {
     (void)value;
 }
 
-static int dispatch(const uint8_t *type, const uint8_t *payload, size_t length) {
-    switch (*type) {
-        case 1: handle_name(payload, length); return 1;
-        case 2: handle_number(payload, length); return 1;
-        default: return 0;
+/* The detail record. It writes the structure back to the caller so the record can be
+ * round-tripped, and the structure it writes still holds the callback. */
+static void handle_detail(const uint8_t *payload, size_t length,
+                          uint8_t *out, size_t *out_length, size_t out_capacity) {
+    name_record record;
+    record.on_complete = name_stored;
+    size_t copied = length < NAME_BUFFER - 1 ? length : NAME_BUFFER - 1;
+    memcpy(record.name, payload, copied);
+    record.name[copied] = 0;
+    if (out && out_length) {
+        size_t want = sizeof record;
+#ifdef BOUNDED
+        /* The fix: the caller gets the name, not the address of a function. */
+        want = copied;
+        if (want > out_capacity) want = out_capacity;
+        memcpy(out, record.name, want);
+#else
+        if (want > out_capacity) want = out_capacity;
+        memcpy(out, &record, want);
+#endif
+        *out_length = want;
     }
 }
 
-EXPORTED int parse(const uint8_t *input, size_t size) {
+EXPORTED int cgf_parse(const uint8_t *input, size_t size,
+                   uint8_t *out, size_t out_capacity, size_t *out_length) {
+    if (out_length) *out_length = 0;
     if (size < 5) return 0;
     if (input[0] != 'R') return 0;
     if (input[1] != 'E') return 0;
@@ -122,13 +149,19 @@ EXPORTED int parse(const uint8_t *input, size_t size) {
         uint8_t length = input[offset + 1];
         offset += 2;
         if (offset + length > size) return 0;
-        dispatch(&type, input + offset, length);
+        switch (type) {
+            case 1: handle_name(input + offset, length); break;
+            case 2: handle_number(input + offset, length); break;
+            case 3: handle_detail(input + offset, length, out, out_length,
+                                  out_capacity); break;
+            default: return 0;
+        }
         offset += length;
     }
     return 1;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    parse(data, size);
+    cgf_parse(data, size, NULL, 0, NULL);
     return 0;
 }

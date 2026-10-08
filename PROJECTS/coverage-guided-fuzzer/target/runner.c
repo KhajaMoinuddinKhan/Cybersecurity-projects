@@ -32,6 +32,9 @@
 #include <string.h>
 
 #define COVERAGE_MAP_SIZE 65536
+#define MAX_COMPARISONS 512
+/* map, the edge counter, the comparison count, padding, then the comparisons */
+#define REGION_SIZE (COVERAGE_MAP_SIZE + 16 + MAX_COMPARISONS * 20)
 #define MAX_INPUT (1 << 20)
 
 extern void coverage_attach(uint8_t *region);
@@ -48,7 +51,7 @@ static uint8_t *attach(const char *name) {
     /* Create if absent, open if present: the fuzzer creates it once and every
      * subsequent execution opens the same one. */
     region = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0,
-                                COVERAGE_MAP_SIZE + 8, name);
+                                REGION_SIZE, name);
     if (!region) return NULL;
     return (uint8_t *)MapViewOfFile(region, FILE_MAP_ALL_ACCESS, 0, 0, 0);
 }
@@ -73,7 +76,7 @@ static uint8_t *attach(const char *name) {
     }
     region = shm_open(path, O_RDWR, 0600);
     if (region < 0) return NULL;
-    void *view = mmap(NULL, COVERAGE_MAP_SIZE + 8, PROT_READ | PROT_WRITE, MAP_SHARED,
+    void *view = mmap(NULL, REGION_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
                       region, 0);
     return view == MAP_FAILED ? NULL : (uint8_t *)view;
 }

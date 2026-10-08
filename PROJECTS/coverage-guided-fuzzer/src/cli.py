@@ -129,12 +129,14 @@ def _run_exploit(args) -> int:
     scratch.mkdir(parents=True, exist_ok=True)
     result = demonstrate(vulnerable, patched, scratch)
 
-    print("  target function at 0x%016X" % result["address"])
     if not result["vulnerable_reached"]:
-        print("  the overflow did not reach the function pointer: %s"
-              % result["vulnerable_note"])
+        print("  the exploit did not take control: %s" % result["vulnerable_note"])
         return 1
-    print("  offset %d overwrites the function pointer" % result["offset"])
+    print("  stage one: the parser disclosed 0x%016X" % result["disclosed"])
+    print("  the function it wants is %+d from there, so it aims at 0x%016X"
+          % (result["delta"], result["target"]))
+    print("  stage two: offset %d puts that address over the callback"
+          % result["offset"])
     print("  vulnerable: %s" % result["vulnerable_note"])
     print("  patched:    %s%s" % (result["patched_note"],
                                   " (and did not crash)"

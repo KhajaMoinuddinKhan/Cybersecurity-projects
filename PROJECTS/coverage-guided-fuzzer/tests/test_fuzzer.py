@@ -255,6 +255,65 @@ def test_splicing_combines_two_inputs():
     assert b"Z" in bytes(joined) or len(joined) != len(GOOD)
 
 
+# --- what the comparisons teach it ----------------------------------------------
+
+def test_the_target_names_the_values_it_compares_against(coverage_map, vulnerable):
+    """The comparisons are the half of the feedback that says what the program wanted,
+    rather than only where it went."""
+    with PersistentTarget(vulnerable, coverage_map) as target:
+        target.run(TAG + bytes([1, 1, 4]) + b"ABcd")
+        comparisons = coverage_map.comparisons()
+    assert comparisons, "no comparisons were reported at all"
+    constants = [a for a, b, width, is_constant in comparisons if is_constant]
+    assert constants, "no comparison was against a constant"
+    for byte in TAG:
+        assert byte in constants, \
+            "the target never named %d, which is one of the tag's bytes" % byte
+
+
+def test_the_search_learns_the_tag_without_being_told_it(coverage_map, vulnerable):
+    """The load-bearing test for the comparison feedback.
+
+    An empty dictionary is the honest starting point: the search is told nothing about
+    the format and has to find the tag the way it finds everything else. It can, because
+    the parser compares each byte of it against a constant and the comparison names the
+    constant.
+    """
+    with PersistentTarget(vulnerable, coverage_map) as target:
+        engine = Engine(target, seed=4, dictionary=())
+        engine.add_seed(b"")
+        engine.run(budget=200000, time_limit=SEARCH_SECONDS, stop_after_crashes=1)
+    for byte in TAG:
+        assert byte in engine.learned, \
+            "the search never learned %d, one of the tag's bytes" % byte
+    assert engine.findings, "and it did not reach the defect either"
+
+
+def test_a_learned_token_reaches_the_mutations():
+    """A value learned from a comparison has to be usable, not merely recorded."""
+    mutator = Mutator(seed=3)
+    produced = {bytes(mutator.insert_learned(bytearray(b"AAAA"), (0x52,)))
+                for _ in range(50)}
+    assert any(b"\x52" in p for p in produced), "the learned token never appears"
+
+
+def test_solving_a_comparison_rewrites_the_byte_the_program_read():
+    """The guided mutation: the program compared a byte of the input against a constant,
+    so the mutation writes the constant over that byte."""
+    mutator = Mutator(seed=1)
+    # the target read 0x58 ('X') and wanted 0x52 ('R')
+    comparisons = [(0x52, 0x58, 1, True)]
+    result = bytes(mutator.solve_comparison(b"XXXX", comparisons))
+    assert result == b"RXXX" or result == b"XRXX" or result == b"XXRX" or result == b"XXXR"
+
+
+def test_a_comparison_between_two_read_values_is_not_used():
+    """Only a comparison against a constant names something the program wanted."""
+    mutator = Mutator(seed=1)
+    not_constant = [(0x52, 0x58, 1, False)]
+    assert bytes(mutator.solve_comparison(b"XXXX", not_constant)) == b"XXXX"
+
+
 # --- the corpus ----------------------------------------------------------------------
 
 def test_the_corpus_rejects_a_duplicate():
@@ -326,7 +385,7 @@ def test_a_crash_is_recorded_with_the_path_that_reached_it(coverage_map, vulnera
     with PersistentTarget(vulnerable, coverage_map) as target:
         engine = Engine(target, seed=5, dictionary=(TAG,))
         engine.add_seed(b"")
-        engine.run(budget=4000, time_limit=60, stop_after_crashes=1)
+        engine.run(budget=60000, time_limit=SEARCH_SECONDS, stop_after_crashes=1)
     assert engine.findings
     for finding in engine.findings.values():
         assert finding.edges > 0, "a crash without a path cannot be compared to another"
@@ -388,13 +447,47 @@ def test_the_offset_is_found_by_measurement(exploit_builds, tmp_path):
     vulnerable, _ = exploit_builds
     found = find_offset(vulnerable, tmp_path)
     assert found.offset >= 32, "the pointer cannot sit inside the buffer"
-    assert found.address != 0, "the harness reports the address it used"
+    assert found.disclosed > 0x1000, "the disclosure has to name a real address"
+    assert found.target > 0x1000, "and the exploit has to aim somewhere real"
 
 
-def test_the_exploit_reports_a_usable_address(exploit_builds, tmp_path):
+def test_the_exploit_aims_using_what_the_parser_disclosed(exploit_builds, tmp_path):
+    """The address is not known in advance and is not assumed: it is read out of the
+    parser and used. An exploit that worked without it would not be using it."""
     vulnerable, patched = exploit_builds
     result = demonstrate(vulnerable, patched, tmp_path)
-    assert result["address"] > 0x1000
+    assert result["vulnerable_reached"]
+    assert result["disclosed"] > 0x1000, "nothing was disclosed"
+    assert result["target"] != result["disclosed"], \
+        "the exploit aimed at the disclosed address rather than computing from it"
+    assert result["target"] == result["disclosed"] + result["delta"]
+
+
+def test_the_fixed_build_removes_the_disclosure(exploit_builds, tmp_path):
+    """The fix is two things, and the second is what stops the exploit. A build that
+    bounded the copy but still handed out an address would still be leaking."""
+    vulnerable, patched = exploit_builds
+    result = demonstrate(vulnerable, patched, tmp_path)
+    assert result["patched_reached"] is False
+    assert "disclosure is gone" in (result["patched_note"] or ""), \
+        "the fix did not remove the disclosure: %s" % result["patched_note"]
+
+
+def test_the_disclosure_names_the_function_the_parser_stores(exploit_builds, tmp_path):
+    """The disclosed address has to be the one the parser stored, and the way to check
+    that is to use it: the harness computes where the function it wants must be from what
+    was disclosed, compares that against the function's real address, and refuses to go
+    on if they disagree. A disclosure that named the wrong thing would stop it there.
+
+    This is read through the harness rather than by loading the target as a library,
+    because a position-independent executable cannot be loaded as one -- which is true on
+    the platform this runs on in CI and is not a fact about the disclosure.
+    """
+    vulnerable, _ = exploit_builds
+    found = find_offset(vulnerable, tmp_path)
+    assert found.reached, found.note
+    assert found.disclosed > 0x1000, "nothing real was disclosed"
+    assert found.target == found.disclosed + found.delta
 
 
 # --- the toolchain ---------------------------------------------------------------------

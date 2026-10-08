@@ -34,6 +34,9 @@ class Entry:
     new_edges: int = 0      # how many of them nothing had reached before
     executions: int = 0     # how many times it has been chosen as a parent
     found_by: str = "seed"
+    # What that input was told it was missing, from the run that found it. Mutating it
+    # later is guided by these rather than by the input's shape.
+    comparisons: list = field(default_factory=list)
 
     @property
     def size(self) -> int:
@@ -48,7 +51,7 @@ class Corpus:
     _seen: set = field(default_factory=set)
 
     def add(self, data: bytes, edges: int = 0, new_edges: int = 0,
-            found_by: str = "mutation") -> bool:
+            found_by: str = "mutation", comparisons: list = None) -> bool:
         """Keep an input if it is not a duplicate. Returns whether it was kept.
 
         Duplicates are rejected on the bytes, not on the coverage: two inputs that reach
@@ -59,7 +62,8 @@ class Corpus:
             return False
         self._seen.add(data)
         self.entries.append(Entry(data=data, edges=edges, new_edges=new_edges,
-                                  found_by=found_by))
+                                  found_by=found_by,
+                                  comparisons=list(comparisons or [])))
         return True
 
     def __len__(self) -> int:

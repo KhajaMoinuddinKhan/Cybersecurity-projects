@@ -72,6 +72,10 @@ class Engine:
         self.mutator = Mutator(seed=seed, dictionary=dictionary, max_length=max_length)
         self.corpus = Corpus()
         self.findings: dict = {}          # signature -> Finding
+        # The values the target has compared against, which are the tokens it revealed
+        # rather than ones it was given. They are the format's magic numbers and field
+        # values, learned one comparison at a time.
+        self.learned: set = set()
         self.stats = Stats()
         self.verbose = verbose
         self.seed = seed
@@ -108,6 +112,31 @@ class Engine:
         self.stats.crashes += 1
         return finding
 
+    def harvest(self, comparisons: list) -> int:
+        """Take the constants the target compared against and keep them as tokens.
+
+        A value the program compared an input byte against is a value the program wants,
+        which makes it worth trying elsewhere -- in another position, in another input,
+        at another length.
+
+        The width is not what makes a value worth keeping; its size is. A length is
+        compared at the width of a `size_t`, which is eight bytes, and the value it is
+        compared against is a small number like five. Skipping eight-byte comparisons
+        because eight bytes is usually an address threw away the single most useful
+        constant in the program -- the one the search has to satisfy before it can reach
+        anything else -- and the search then learned nothing at all and never started.
+        A value that fits in four bytes is data whatever width it was compared at; one
+        that does not is a pointer or a hash and is left alone.
+        """
+        before = len(self.learned)
+        for a, b, width, is_constant in comparisons:
+            if not is_constant:
+                continue
+            for value in (a, b):
+                if value and value < (1 << 32):
+                    self.learned.add(value)
+        return len(self.learned) - before
+
     def step(self) -> dict:
         """One execution. Returns what happened, for a caller that wants to watch."""
         parent = self.corpus.choose(self.rng)
@@ -115,11 +144,16 @@ class Engine:
         other = None
         if len(self.corpus) > 1 and self.rng.random() < 0.25:
             other = self.corpus.choose(self.rng).data
-        candidate = bytes(self.mutator.generate(parent.data, other))
+        # The comparisons from the parent's last run are what make this mutation guided:
+        # they say what that input was missing.
+        candidate = bytes(self.mutator.generate(
+            parent.data, other, comparisons=parent.comparisons,
+            tokens=tuple(sorted(self.learned))))
 
         outcome = self.target.run(candidate)
         self.stats.executions += 1
         self.stats.elapsed = time.time() - self.stats.started
+        self.harvest(self.target.coverage.comparisons())
 
         if outcome.crashed:
             finding = self._record_crash(outcome, candidate, "mutation")
@@ -128,7 +162,11 @@ class Engine:
         new = self.target.coverage.new_coverage(outcome.coverage)
         if new:
             self.stats.edges_found += new
-            if self.corpus.add(candidate, edges=outcome.edges, new_edges=new):
+            # The comparisons are kept with the entry, so mutating it later is guided by
+            # what that specific input was told it was missing.
+            comparisons = self.target.coverage.comparisons()
+            if self.corpus.add(candidate, edges=outcome.edges, new_edges=new,
+                               comparisons=comparisons):
                 self.stats.corpus_additions += 1
                 return {"kind": "coverage", "new_edges": new, "data": candidate}
         return {"kind": "nothing", "new_edges": 0}

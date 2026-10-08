@@ -115,7 +115,7 @@ def build(name: str = "target", vulnerable: bool = True, force: bool = False,
     for index, (sources, with_coverage) in enumerate(groups):
         for source in sources:
             obj = BUILD_DIR / ("%s-%s-%d.obj" % (name, suffix, index))
-            step = compiler() + common + (["-fsanitize-coverage=trace-pc"]
+            step = compiler() + common + (["-fsanitize-coverage=trace-pc,trace-cmp"]
                                           if with_coverage else [])
             step += ["-c", str(source), "-o", str(obj)]
             done = subprocess.run(step, capture_output=True, text=True, timeout=900)
