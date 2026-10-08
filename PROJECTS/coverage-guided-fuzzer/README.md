@@ -63,10 +63,22 @@ to a callback is a call to itself, which is infinite recursion and a program tha
 before reading its first input.
 
 The target runs as a process of its own, because a defect in the same process as the
-search takes the search down with it. One process is started and fed inputs down a pipe
-rather than a process per input; a crash ends that process, and the fuzzer notices and
-starts another. The coverage and the comparisons from the run that died were written into
-shared memory before it died, so nothing about the crash is lost.
+search takes the search down with it. Two ways to drive it, and the difference is what
+each costs and what each survives:
+
+- **A persistent process**, fed inputs down a pipe. A crash ends it, and the fuzzer
+  notices and starts another; the coverage and comparisons from the run that died were
+  written into shared memory before it died, so nothing about the crash is lost. This is
+  the faster of the two on the machine this was measured on, at about 8,400 executions a
+  second against 3,100.
+- **A fork server**, where the platform has `fork`. The process is started once and
+  stopped one step before reading, and each execution forks it -- so the child begins
+  where the image mapping and the runtime initialisation were already finished. It is
+  slower here than the persistent process, which was not what was expected, and the
+  reason is that the persistent process forks nothing at all while the fork server pays
+  for a fork and a wait per execution. What it buys instead is a child that has never run
+  anything before, and a crash that takes the child rather than the server, so the search
+  is never interrupted by the thing it is searching for.
 
 The address space of the target is not randomised, and that is deliberate. A crash through
 a corrupted stack goes wherever the corruption pointed, so with the layout randomised the
@@ -98,9 +110,11 @@ and a run like that takes hundreds of milliseconds to fail where every other inp
 microseconds. The fuzzer kills those and records them as hangs, which is a finding in its
 own right, but it is a real cost.
 
-**There is no fork server on the platform this was developed on.** Where there is one to
-be had, it is not used here, and the persistent process is the substitute rather than the
-equivalent.
+**The fork server is slower than the persistent process here, not faster.** That is the
+opposite of the usual result and it is what was measured: a fork and a wait per execution
+costs more than a pipe round trip when the process on the other end of the pipe is already
+running. A fork server is normally reached for because persistent mode is not available
+or not safe for the target, not because it is quick.
 
 **The second target is still one this author wrote.** It is a different format and a
 different bug class, and finding it says more than finding the first one does, but it is

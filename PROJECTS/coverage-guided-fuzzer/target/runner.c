@@ -33,9 +33,12 @@
 
 #define COVERAGE_MAP_SIZE 65536
 #define MAX_COMPARISONS 512
-/* map, the edge counter, the comparison count, padding, then the comparisons */
-#define REGION_SIZE (COVERAGE_MAP_SIZE + 16 + MAX_COMPARISONS * 20)
-#define MAX_INPUT (1 << 20)
+#define MAX_INPUT (1 << 16)
+/* map, the edge counter, the comparison count, padding, the comparisons, the length of
+ * the input, then the input itself */
+#define INPUT_LENGTH_OFFSET (COVERAGE_MAP_SIZE + 16 + MAX_COMPARISONS * 20)
+#define INPUT_DATA_OFFSET (INPUT_LENGTH_OFFSET + 4)
+#define REGION_SIZE (INPUT_DATA_OFFSET + MAX_INPUT)
 
 extern void coverage_attach(uint8_t *region);
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
@@ -58,6 +61,7 @@ static uint8_t *attach(const char *name) {
 #else
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static int region = -1;
@@ -137,6 +141,62 @@ static int persistent(void) {
     }
 }
 
+#ifndef _WIN32
+/* The fork server.
+ *
+ * The persistent process removes the cost of starting a program per input, and this
+ * removes the rest of it. Starting a process is expensive because it does everything:
+ * map the image, run the loaders, initialise the runtime, and only then reach the point
+ * where an input can be read. A fork copies a process that has already done all of that
+ * and is stopped one step before reading -- so the child begins where the work was
+ * already finished, and the price of an execution becomes the price of a fork.
+ *
+ * The protocol is one byte each way. The fuzzer puts the input in the shared region and
+ * writes a byte; this forks, the child runs the input and exits, the parent waits and
+ * writes back what happened. The child exits with `_exit` rather than `exit` so it does
+ * not run the parent's atexit handlers or flush buffers it shares.
+ *
+ * A crash is a child that did not exit cleanly, and the parent survives it, which is the
+ * other thing a fork server buys: the search is never interrupted by the thing it is
+ * searching for.
+ */
+static int fork_server(uint8_t *shared) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    for (;;) {
+        uint8_t command;
+        if (read(STDIN_FILENO, &command, 1) != 1) return 0;
+        if (command == 0xFF) return 0;          /* the fuzzer is done */
+
+        uint32_t length;
+        memcpy(&length, shared + INPUT_LENGTH_OFFSET, sizeof length);
+        if (length > MAX_INPUT) length = MAX_INPUT;
+
+        pid_t child = fork();
+        if (child < 0) return 6;
+        if (child == 0) {
+            /* The child. Its coverage and comparisons land in the same shared region,
+             * which is the point of mapping it before forking. */
+            LLVMFuzzerTestOneInput(shared + INPUT_DATA_OFFSET, length);
+            _exit(0);
+        }
+
+        int status = 0;
+        if (waitpid(child, &status, 0) < 0) return 7;
+        /* What the child did, in the same shape the fuzzer reads from a process exit:
+         * the exit code, or the signal that killed it. */
+        int reported = 0;
+        if (WIFEXITED(status)) {
+            reported = WEXITSTATUS(status);
+        } else if (WIFSIGNALED(status)) {
+            reported = 128 + WTERMSIG(status);
+        }
+        if (write(STDOUT_FILENO, &reported, sizeof reported) != (ssize_t)sizeof reported) {
+            return 0;
+        }
+    }
+}
+#endif
+
 int main(int argc, char **argv) {
 #ifdef _WIN32
     /* Do not let the platform stop to report a crash.
@@ -156,9 +216,19 @@ int main(int argc, char **argv) {
     if (argc < 3) return 2;
     int persistent_mode = 0;
     const char *region_name;
+    int fork_server_mode = 0;
     if (strcmp(argv[1], "--persistent") == 0) {
         persistent_mode = 1;
         region_name = argv[2];
+    } else if (strcmp(argv[1], "--fork-server") == 0) {
+#ifdef _WIN32
+        /* There is no fork here, so there is no fork server here. Refusing rather than
+         * falling back keeps the caller from believing it got one. */
+        return 8;
+#else
+        fork_server_mode = 1;
+        region_name = argv[2];
+#endif
     } else {
         region_name = argv[1];
     }
@@ -168,6 +238,13 @@ int main(int argc, char **argv) {
     coverage_attach(shared);
 
     if (persistent_mode) return persistent();
+#ifndef _WIN32
+    /* Guarded here as well as at the definition. The function only exists where fork
+     * does, and a call to it outside the guard compiles on the platform that has one and
+     * does not on the platform that does not -- which is the failure mode of every
+     * platform difference: the build that is wrong is the one nobody is looking at. */
+    if (fork_server_mode) return fork_server(shared);
+#endif
 
     FILE *input = fopen(argv[2], "rb");
     if (!input) return 4;

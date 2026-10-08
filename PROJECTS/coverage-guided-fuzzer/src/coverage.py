@@ -38,7 +38,13 @@ COMPARISON_SIZE = 20
 COUNTER_OFFSET = MAP_SIZE
 COMPARISON_COUNT_OFFSET = MAP_SIZE + 8
 COMPARISON_DATA_OFFSET = MAP_SIZE + 16
-REGION_SIZE = MAP_SIZE + 16 + MAX_COMPARISONS * COMPARISON_SIZE
+# Then the input, which the fork server reads from here rather than from a pipe: a child
+# cannot be handed a file descriptor it did not inherit, and the region is mapped before
+# the fork, so it is the one thing already shared.
+MAX_INPUT = 1 << 16
+INPUT_LENGTH_OFFSET = COMPARISON_DATA_OFFSET + MAX_COMPARISONS * COMPARISON_SIZE
+INPUT_DATA_OFFSET = INPUT_LENGTH_OFFSET + 4
+REGION_SIZE = INPUT_DATA_OFFSET + MAX_INPUT
 MAP_BITS = MAP_SIZE * 8
 
 
@@ -111,6 +117,15 @@ class CoverageMap:
             self.total_edges = self.virgin.bit_count()
             return fresh.bit_count()
         return 0
+
+    def put_input(self, data: bytes) -> int:
+        """Place an input where a forked child will find it. Returns its length."""
+        if len(data) > MAX_INPUT:
+            data = data[:MAX_INPUT]
+        self.buf[INPUT_LENGTH_OFFSET:INPUT_LENGTH_OFFSET + 4] = \
+            len(data).to_bytes(4, "little")
+        self.buf[INPUT_DATA_OFFSET:INPUT_DATA_OFFSET + len(data)] = data
+        return len(data)
 
     def reset(self) -> None:
         """Forget everything seen, so a search can start from nothing.

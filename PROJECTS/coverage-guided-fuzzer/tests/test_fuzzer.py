@@ -31,7 +31,7 @@ from src.mutate import INTERESTING_8, Mutator
 # waits for it is a test that has stopped reporting. Every run of the engine in this
 # file is bounded by one of these.
 SEARCH_SECONDS = 90
-from src.target import PersistentTarget, Target
+from src.target import ForkServerTarget, PersistentTarget, Target
 
 TAG = b"RECS"
 # A valid record with a name short enough to be stored properly.
@@ -254,6 +254,62 @@ def test_splicing_combines_two_inputs():
     joined = mutator.splice(bytearray(GOOD), other)
     assert bytes(joined) != GOOD
     assert b"Z" in bytes(joined) or len(joined) != len(GOOD)
+
+
+# --- the fork server --------------------------------------------------------------
+
+def test_the_fork_server_is_refused_where_there_is_no_fork(coverage_map, vulnerable):
+    """Refusing is the answer. A caller that asked for one and silently got something
+    else would be measuring the wrong thing and would not know."""
+    import os as _os
+    if _os.name != "nt":
+        pytest.skip("this platform has fork, so there is nothing to refuse")
+    with pytest.raises(ValueError) as raised:
+        ForkServerTarget(vulnerable, coverage_map)
+    assert "no fork" in str(raised.value)
+
+
+def test_the_fork_server_runs_inputs_and_survives_a_crash(coverage_map, vulnerable):
+    """The other thing it buys, and it is worth as much as the speed: a crash takes the
+    child and not the server, so the search is never interrupted by the thing it is
+    searching for and there is no restart to pay for."""
+    import os as _os
+    if _os.name == "nt":
+        pytest.skip("this platform has no fork")
+    with ForkServerTarget(vulnerable, coverage_map) as target:
+        good = target.run(GOOD)
+        crash = target.run(OVERFLOW)
+        after = target.run(GOOD)
+    assert not good.crashed
+    assert crash.crashed, "the overflow did not crash through the fork server"
+    assert not after.crashed, "the server did not survive the crash"
+    assert target.crashes == 1
+
+
+def test_the_fork_server_gives_the_search_what_it_needs(coverage_map):
+    import os as _os
+    if _os.name == "nt":
+        pytest.skip("this platform has no fork")
+    exe = build(vulnerable=True, force=True)
+    with ForkServerTarget(exe, coverage_map) as target:
+        engine = Engine(target, seed=4, dictionary=())
+        engine.add_seed(b"")
+        engine.run(budget=60000, time_limit=SEARCH_SECONDS, stop_after_crashes=1)
+    assert engine.findings, "the search did not reach the defect through the server"
+
+
+def test_the_fork_server_reports_a_signal_as_a_signal(coverage_map, vulnerable):
+    """A child killed by a signal is reported the way a shell reports it, and turned
+    back into a signal rather than left as a number over a hundred."""
+    import os as _os
+    if _os.name == "nt":
+        pytest.skip("this platform has no fork")
+    with ForkServerTarget(vulnerable, coverage_map) as target:
+        crash = target.run(OVERFLOW)
+    assert crash.crashed
+    assert crash.exit_code is not None and crash.exit_code < 0, \
+        "a signal was reported as an exit code: %r" % crash.exit_code
+    assert "killed by" in crash.status
 
 
 # --- what the comparisons teach it ----------------------------------------------

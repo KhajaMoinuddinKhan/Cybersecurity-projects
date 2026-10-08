@@ -363,3 +363,114 @@ class PersistentTarget:
 
     def __exit__(self, *exc):
         self.close()
+
+
+class ForkServerTarget:
+    """The target as a fork server, where the platform has `fork`.
+
+    A persistent process removes the cost of starting a program per input. This removes
+    the rest of it: the process is started once and stopped one step before reading, and
+    each execution is a fork of something that has already mapped its image, run its
+    loaders and initialised its runtime. The child begins where that work was already
+    finished, and the price of an execution becomes the price of a fork.
+
+    It buys something else as well, and it is worth as much. A crash takes the child and
+    not the server, so the search is never interrupted by the thing it is searching for
+    -- there is no restart to pay for and no state to rebuild.
+
+    The input travels through the shared region rather than a pipe, because a forked
+    child inherits the mapping and nothing else. The handshake is one byte each way: the
+    fuzzer says go, the server forks, the child runs, and the server writes back how it
+    ended.
+    """
+
+    def __init__(self, executable: Path, coverage, timeout: float = 5.0):
+        if os.name == "nt":
+            raise ValueError("there is no fork on this platform, so there is no fork "
+                             "server on it either")
+        self.executable = Path(executable)
+        self.coverage = coverage
+        self.timeout = timeout
+        self.executions = 0
+        self.crashes = 0
+        self._process = None
+        self._replies = None
+        self._reader = None
+        self._start()
+
+    def _start(self) -> None:
+        self._process = subprocess.Popen(
+            [str(self.executable), "--fork-server", self.coverage.name],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        )
+        self._replies = queue.Queue()
+        self._reader = threading.Thread(target=self._read_replies, daemon=True)
+        self._reader.start()
+
+    def _read_replies(self) -> None:
+        stream = self._process.stdout
+        while True:
+            try:
+                block = stream.read(4)
+            except (OSError, ValueError):
+                break
+            if len(block) < 4:
+                break
+            self._replies.put(int.from_bytes(block, "little"))
+        self._replies.put(None)
+
+    def _stop(self) -> None:
+        process, self._process = self._process, None
+        if process is None:
+            return
+        try:
+            process.kill()
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        if self._reader is not None:
+            self._reader.join(timeout=2)
+        for stream in (process.stdin, process.stdout):
+            try:
+                stream.close()
+            except (OSError, ValueError):
+                pass
+
+    def run(self, data: bytes) -> Outcome:
+        """Hand the server an input and read back what the child did."""
+        self.coverage.clear()
+        self.coverage.put_input(data)
+        try:
+            self._process.stdin.write(b"\x01")
+            self._process.stdin.flush()
+            reported = self._replies.get(timeout=self.timeout)
+        except (BrokenPipeError, OSError, ValueError, queue.Empty):
+            reported = None
+
+        self.executions += 1
+        coverage = self.coverage.read()
+        if reported is None:
+            return Outcome(crashed=True, exit_code=None, coverage=coverage,
+                           edges=self.coverage.count(coverage), timed_out=True)
+        # A signal is reported as 128 + the signal number, which is how a shell reports
+        # one; anything else is an exit code, and only zero is a clean run.
+        if reported > 128:
+            crashed, code = True, -(reported - 128)
+        else:
+            crashed, code = reported != 0, reported
+        if crashed:
+            self.crashes += 1
+        return Outcome(crashed=crashed, exit_code=code, coverage=coverage,
+                       edges=self.coverage.count(coverage))
+
+    def close(self) -> None:
+        self._stop()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
