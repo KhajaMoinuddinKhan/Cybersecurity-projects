@@ -32,6 +32,55 @@ from pathlib import Path
 # with the high bit set is the process dying rather than returning.
 _CRASH_FLOOR = 0x80000000
 
+# `personality(ADDR_NO_RANDOMIZE)`, which is how a process asks not to be randomised.
+# Linux only, and ignored everywhere else.
+_ADDR_NO_RANDOMIZE = 0x0040000
+
+
+def _resolve_personality():
+    """The `personality` call, resolved once at import so the child does almost nothing.
+
+    The function below runs in a forked child, and a forked child of a program with
+    threads is a place where very little is safe: it holds copies of every lock the other
+    threads were holding, and taking one that will never be released is a deadlock. An
+    import is exactly the kind of work that takes locks. Resolving the symbol here, while
+    the program is single-threaded and nothing is held, leaves the child with one call to
+    make and nothing to acquire.
+    """
+    if os.name == "nt":
+        return None
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        return libc.personality
+    except (OSError, AttributeError):
+        return None
+
+
+_PERSONALITY = _resolve_personality()
+
+
+def _unrandomised():
+    """Ask the platform not to randomise the address space of the process about to start.
+
+    This is not a convenience. A fuzzer decides whether two crashes are the same defect by
+    comparing the path each took, and a path that goes through a corrupted stack is a path
+    through whatever the corruption happened to point at. With the layout randomised, that
+    is a different place on every run: the same input, run twice, reaches different edges
+    on the way down and is reported as two defects. The signature stops meaning anything
+    exactly for the crashes it exists to group.
+
+    Turning the randomisation off for the target makes a crash reproducible, which is what
+    a crash has to be before anything can be said about it. It is the target's layout that
+    is fixed and not the fuzzer's, so nothing about the search is made easier by it.
+    """
+    if _PERSONALITY is None:
+        return
+    try:
+        _PERSONALITY(_ADDR_NO_RANDOMIZE)
+    except OSError:
+        pass
+
 
 @dataclass
 class Outcome:
@@ -153,6 +202,7 @@ class PersistentTarget:
             [str(self.executable), "--persistent", self.coverage.name],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             creationflags=0x08000000 if os.name == "nt" else 0,
+            preexec_fn=_unrandomised if _PERSONALITY is not None else None,
         )
         self._replies = queue.Queue()
         self._reader = threading.Thread(target=self._read_replies, daemon=True)
