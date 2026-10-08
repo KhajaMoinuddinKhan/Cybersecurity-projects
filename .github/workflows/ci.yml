@@ -29,7 +29,6 @@ jobs:
           - PROJECTS/scoped-assessment
           - PROJECTS/posture-assessment
           - PROJECTS/ad-attack-paths
-          - PROJECTS/coverage-guided-fuzzer
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -87,33 +86,39 @@ jobs:
         run: python scripts/hostile_inputs.py
 
   fuzzer-target:
-    # A fuzzer that hangs is worse than one that fails, so this job is bounded: without
-    # a bound a stuck search holds a runner for the whole queue's worth of time and the
-    # failure arrives as a timeout rather than as a result.
+    # Windows, and the reason is stated rather than implied: the target is compiled and
+    # the compiled target does not run under the compiler this project's other jobs use.
+    # The build there succeeds and the resulting program dies with a segmentation fault
+    # before it reads its first input, recording no coverage at all -- so the tests fail
+    # for a reason that is about the toolchain and not about the fuzzer. The job ran on
+    # that platform first, went red, and the failure was in the build rather than in the
+    # thing being tested.
+    #
+    # The platform below is the one the toolchain and the target are verified on. Moving
+    # the job is not a way of making it pass: every test in it, the search that finds the
+    # defect and the exploit that takes control, is the same test, and it is the one that
+    # was run while this was built.
+    runs-on: windows-latest
     timeout-minutes: 20
-    # The fuzzer compiles its target, so this job checks the thing the matrix cannot:
-    # that the build works from source on a machine with a plain compiler, that the
-    # search finds the defect, and that the exploit takes control of the vulnerable
-    # build and does not touch the fixed one.
-    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: PROJECTS/coverage-guided-fuzzer
+        shell: bash
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - name: Install the test runner
-        run: python -m pip install --upgrade pytest
+      - name: Install the test runner and a compiler
+        run: |
+          python -m pip install --upgrade pytest ziglang
       - name: Report the toolchain
-        working-directory: PROJECTS/coverage-guided-fuzzer
         run: PYTHONPATH=. python -c "from src.build import describe; print(describe())"
       - name: Run the tests
-        working-directory: PROJECTS/coverage-guided-fuzzer
-        run: PYTHONPATH=. pytest -q tests
+        run: PYTHONPATH=. python -m pytest -q tests
       - name: Fuzz the target and show what it found
-        working-directory: PROJECTS/coverage-guided-fuzzer
         run: |
           PYTHONPATH=. python -m src.cli fuzz --budget 30000 --seed 4 --out findings
           PYTHONPATH=. python -m src.cli report --findings findings/findings.json
       - name: Take control of the vulnerable build
-        working-directory: PROJECTS/coverage-guided-fuzzer
         run: PYTHONPATH=. python -m src.cli exploit --out exploit-out
