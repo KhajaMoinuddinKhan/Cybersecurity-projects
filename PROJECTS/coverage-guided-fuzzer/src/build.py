@@ -20,6 +20,7 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parent.parent
 TARGET_DIR = PROJECT / "target"
+TARGETS_DIR = PROJECT / "targets"
 BUILD_DIR = PROJECT / "build"
 
 
@@ -56,8 +57,35 @@ def _extension() -> str:
     return ".exe" if os.name == "nt" else ""
 
 
+def available_targets() -> list:
+    """Every target this fuzzer can be pointed at, by name.
+
+    A fuzzer that has only ever been pointed at one program has not been tested in the
+    way that matters, and a target written by the same person who wrote the fuzzer is
+    the weakest version of that test. So the target is a parameter rather than a
+    constant: anything that implements the entry point can be fuzzed, and more than one
+    is shipped so the claim can be checked rather than asserted.
+    """
+    found = ["parser"]
+    if TARGETS_DIR.is_dir():
+        for entry in sorted(TARGETS_DIR.iterdir()):
+            if entry.is_dir() and (entry / "parser.c").exists():
+                found.append(entry.name)
+    return found
+
+
+def target_directory(target: str) -> Path:
+    if target in (None, "parser", "target"):
+        return TARGET_DIR
+    candidate = TARGETS_DIR / target
+    if not (candidate / "parser.c").exists():
+        raise BuildError("no target named %r; there is %s"
+                         % (target, ", ".join(available_targets())))
+    return candidate
+
+
 def build(name: str = "target", vulnerable: bool = True, force: bool = False,
-          exploit: bool = False) -> Path:
+          exploit: bool = False, target: str = "parser") -> Path:
     """Compile the instrumented target and return the library.
 
     `vulnerable` selects the build. Both are compiled from the same source: the fixed
@@ -67,6 +95,8 @@ def build(name: str = "target", vulnerable: bool = True, force: bool = False,
     """
     BUILD_DIR.mkdir(exist_ok=True)
     suffix = "vulnerable" if vulnerable else "patched"
+    if target not in (None, "parser", "target"):
+        suffix = "%s-%s" % (target, suffix)
     if exploit:
         suffix += "-exploit"
     output = BUILD_DIR / ("%s-%s%s" % (name, suffix, _extension()))
@@ -88,7 +118,10 @@ def build(name: str = "target", vulnerable: bool = True, force: bool = False,
     # say so is honoured for `-finstrument-functions` and not for coverage.
     #
     # Compiling it separately without the flag cannot be misread by any compiler.
-    instrumented = [TARGET_DIR / "parser.c"]
+    source_dir = target_directory(target)
+    # The runtime and the drivers are the fuzzer's, not the target's, so they come from
+    # the project's own directory whatever is being fuzzed.
+    instrumented = [source_dir / "parser.c"]
     uninstrumented = [TARGET_DIR / "coverage_runtime.c"]
     driver = (TARGET_DIR / "exploit_harness.c" if exploit
               else TARGET_DIR / "runner.c")

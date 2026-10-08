@@ -18,7 +18,7 @@ where the attacker put it", and the fixed build must not.
 
 import pytest
 
-from src.build import describe
+from src.build import available_targets, build, describe
 from src.coverage import CoverageMap
 from src.corpus import Corpus, minimise
 from src.crash import group
@@ -488,6 +488,113 @@ def test_the_disclosure_names_the_function_the_parser_stores(exploit_builds, tmp
     assert found.reached, found.note
     assert found.disclosed > 0x1000, "nothing real was disclosed"
     assert found.target == found.disclosed + found.delta
+
+
+# --- a second target, and the search reaching it --------------------------------
+
+def test_more_than_one_target_is_shipped():
+    """A fuzzer that has only ever been pointed at the program it was written for has
+    not been tested in the way that matters, so the target is a parameter and more than
+    one is shipped."""
+    names = available_targets()
+    assert "parser" in names
+    assert len(names) > 1, "there is nothing to check the claim against"
+
+
+def test_the_second_target_builds(toolchain):
+    exe = build(vulnerable=True, force=True, target="interval")
+    assert exe.exists()
+    patched = build(vulnerable=False, force=True, target="interval")
+    assert patched.exists() and patched != exe
+
+
+def test_the_search_finds_a_defect_in_a_target_it_was_not_written_for(coverage_map):
+    """The point of the second target. The search is told nothing -- no dictionary, no
+    seed beyond the empty input -- and the target is a different format with a different
+    bug class from the one this was developed against."""
+    exe = build(vulnerable=True, force=True, target="interval")
+    with PersistentTarget(exe, coverage_map, timeout=2.0) as target:
+        engine = Engine(target, seed=4, dictionary=())
+        engine.add_seed(b"")
+        engine.run(budget=300000, time_limit=SEARCH_SECONDS, stop_after_crashes=1)
+    assert engine.findings, "the search did not reach the second target's defect"
+
+
+def test_the_fixed_second_target_is_not_broken(coverage_map):
+    exe = build(vulnerable=False, force=True, target="interval")
+    with PersistentTarget(exe, coverage_map, timeout=2.0) as target:
+        engine = Engine(target, seed=4, dictionary=())
+        engine.add_seed(b"")
+        engine.run(budget=60000, time_limit=SEARCH_SECONDS, stop_after_crashes=1)
+    assert not engine.findings, "the fixed build still crashes"
+
+
+def test_an_unknown_target_is_refused_clearly():
+    from src.build import BuildError, target_directory
+    try:
+        target_directory("no-such-target")
+    except BuildError as exc:
+        assert "no target named" in str(exc)
+    else:
+        raise AssertionError("an unknown target was accepted")
+
+
+# --- reaching defects that need a large input -----------------------------------
+
+def test_growth_compounds_to_a_large_input():
+    """Every other mutation changes an input by a few bytes, which is the wrong shape for
+    a defect that only exists in a long one.
+
+    One application roughly doubles, so the thing to check is that applying it repeatedly
+    compounds -- which is what makes a long input reachable in a handful of mutations
+    rather than hundreds that all have to survive.
+    """
+    mutator = Mutator(seed=5)
+    data = bytearray(b"ABCD")
+    sizes = [len(data)]
+    for _ in range(6):
+        data = mutator.grow(data)
+        sizes.append(len(data))
+    assert sizes == sorted(sizes), "growth shrank the input"
+    assert sizes[-1] >= 4 * 8, "six applications of a doubling did not compound: %s" % sizes
+
+
+def test_field_mutations_aim_at_the_start():
+    """A field that decides everything is usually at the front, and a position chosen
+    uniformly over a long input almost never lands on it."""
+    mutator = Mutator(seed=9)
+    big = bytearray(b"\x01\x00" + b"\x11" * 4000)
+    at_start = 0
+    for _ in range(400):
+        before = bytes(big[:64])
+        after = bytes(mutator.set_interesting(bytearray(big), 2)[:64])
+        if after != before:
+            at_start += 1
+    assert at_start > 100, "the start of the input is barely being touched"
+
+
+def test_a_size_record_is_kept_and_a_small_change_is_not():
+    corpus = Corpus()
+    corpus.add(b"x" * 100, new_edges=5)
+    assert not corpus.add_stepping_stone(b"y" * 110), "a small increase was kept"
+    assert corpus.add_stepping_stone(b"y" * 200), "a large increase was not kept"
+    assert any(e.found_by == "stepping stone" for e in corpus)
+
+
+def test_stepping_stones_do_not_crowd_out_the_real_discoveries():
+    """Left in the ordinary weighting they are chosen almost always, because a large
+    input is nearly always one that has never been tried. That happened, and the search
+    stopped finding anything."""
+    import random
+    corpus = Corpus()
+    for i in range(10):
+        corpus.add(bytes([i]) * 10, new_edges=5)
+    corpus.add_stepping_stone(b"z" * 1000)
+    rng = random.Random(0)
+    chosen = [corpus.choose(rng) for _ in range(2000)]
+    stones = sum(1 for e in chosen if e.found_by == "stepping stone")
+    assert stones < len(chosen) // 4, "the stepping stones took over the search"
+    assert stones > 0, "and they were never tried at all"
 
 
 # --- the toolchain ---------------------------------------------------------------------

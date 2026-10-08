@@ -69,6 +69,32 @@ class Corpus:
     def __len__(self) -> int:
         return len(self.entries)
 
+    def largest(self) -> int:
+        return max((e.size for e in self.entries), default=0)
+
+    def add_stepping_stone(self, data: bytes, edges: int = 0,
+                           comparisons: list = None, factor: float = 1.5) -> bool:
+        """Keep an input because it is much longer than anything else, not because it
+        found anything.
+
+        Some defects only exist in a long input -- a bound checked in arithmetic that
+        wraps needs a count in the thousands, and a count in the thousands needs an input
+        of thousands of bytes to go with it. A search that only keeps inputs which found
+        new edges cannot get there: an input that is merely longer reaches the same edges
+        as the short one it grew from, so it is discarded, and every mutation starts again
+        from something small.
+
+        So a new size record is worth keeping on its own. It is kept only when it is
+        substantially longer than the current longest, which makes the ladder logarithmic
+        rather than a new entry for every byte, and it is a stepping stone rather than a
+        discovery -- the weighting treats it as worth one edge, so the search climbs
+        through it instead of settling on it.
+        """
+        if not data or len(data) < self.largest() * factor:
+            return False
+        return self.add(data, edges=edges, new_edges=0, found_by="stepping stone",
+                        comparisons=comparisons)
+
     def __iter__(self):
         return iter(self.entries)
 
@@ -85,18 +111,30 @@ class Corpus:
         So the choice is by how much an entry found *per time it has been tried*. A
         productive entry still gets picked more often, and every entry gets picked:
         an input that has never been fuzzed has a ratio of zero and goes first.
+
+        The stepping stones are held back rather than mixed in. They found nothing, so
+        under the rule above they would be chosen last -- and they need to be chosen
+        sometimes or the search never reaches the sizes a size-dependent defect needs.
+        Giving them a share of the budget outright is the only way to have both, and it
+        has to be a small share: left in the ordinary weighting they are chosen almost
+        always, because a large input is nearly always one that has never been tried and
+        the ratio rewards that. That is what happened, and it took the search's attention
+        off the small inputs that find coverage and it stopped finding anything at all.
         """
         if not self.entries:
             raise ValueError("the corpus is empty")
+        stones = [e for e in self.entries if e.found_by == "stepping stone"]
+        ordinary = [e for e in self.entries if e.found_by != "stepping stone"]
+        if stones and (not ordinary or rng.random() < 0.1):
+            # A tenth of the budget climbs the size ladder, and no more.
+            return rng.choices(stones, weights=[1 for _ in stones], k=1)[0]
+        if not ordinary:
+            return rng.choices(self.entries, weights=[1 for _ in self.entries], k=1)[0]
         if rng.random() < 0.25:
-            # A quarter of the budget goes to the entries that found the most, so the
-            # deepest discoveries still get built on directly.
-            return rng.choices(self.entries,
-                               weights=[max(1, e.new_edges) for e in self.entries],
+            return rng.choices(ordinary,
+                               weights=[max(1, e.new_edges) for e in ordinary],
                                k=1)[0]
-        # The rest goes to whichever has been tried least for what it is worth.
-        return min(self.entries,
-                   key=lambda e: (e.executions + 1) / max(1, e.new_edges))
+        return min(ordinary, key=lambda e: (e.executions + 1) / max(1, e.new_edges))
 
     def total_bytes(self) -> int:
         return sum(e.size for e in self.entries)

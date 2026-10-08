@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from .build import BuildError, build, describe
+from .build import BuildError, available_targets, build, describe
 from .corpus import minimise
 from .crash import group
 from .coverage import CoverageMap
@@ -41,7 +41,7 @@ def _run_fuzz(args) -> int:
         print(toolchain["reason"], file=sys.stderr)
         return 2
     try:
-        executable = build(vulnerable=True, force=args.rebuild)
+        executable = build(vulnerable=True, force=args.rebuild, target=args.target)
     except BuildError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -80,6 +80,10 @@ def _run_fuzz(args) -> int:
           % (len(engine.corpus), engine.corpus.total_bytes()))
     print("  coverage: %d edges" % coverage.total_edges)
     print("  crashes: %d distinct" % len(engine.findings))
+    if engine.learned:
+        print("  the target named %d values it compares against" % len(engine.learned))
+    if engine.stats.stepping_stones:
+        print("  %d inputs kept only for their size" % engine.stats.stepping_stones)
 
     findings = group(engine.findings)
     for finding in findings:
@@ -160,6 +164,9 @@ def main(argv=None) -> int:
     fuzz.add_argument("--seed-file", action="append", metavar="FILE",
                       help="an input to start from; may be repeated")
     fuzz.add_argument("--region", default="cgf-coverage", help="shared-memory region name")
+    fuzz.add_argument("--target", default="parser",
+                      help="which target to fuzz; one of %s"
+                           % ", ".join(available_targets()))
     fuzz.add_argument("--out", help="directory to write the crashing inputs to")
     fuzz.add_argument("--rebuild", action="store_true", help="rebuild the target")
     fuzz.add_argument("--minimise", action="store_true",

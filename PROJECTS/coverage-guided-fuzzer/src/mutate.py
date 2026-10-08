@@ -46,6 +46,12 @@ ARITHMETIC_STEPS = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096,
                     0x7FFF, 0xFFFF)
 
 
+# How often a mutation aims at the start of the input rather than anywhere in it, and
+# how far into it that counts as the start.
+HEADER_BIAS = 0.5
+HEADER_SPAN = 64
+
+
 @dataclass
 class Mutator:
     """The mutation engine, seeded so that a run can be repeated exactly."""
@@ -59,6 +65,25 @@ class Mutator:
         self.rng = random.Random(self.seed)
 
     # -- the small changes -------------------------------------------------------
+    def _position(self, data: bytearray, width: int = 1) -> int:
+        """Where to write, biased towards the beginning.
+
+        Most formats put the fields that decide everything at the front: a count, a
+        length, a type, a magic number. A position chosen uniformly over an input of
+        sixty thousand bytes lands on the first two of them about once in thirty thousand
+        times, so the mutations that set a field value almost never set the one that
+        matters -- measured at three times in four thousand -- and the search cannot
+        reach a defect that needs a large input *and* a large count.
+
+        Half of them aim at the start instead, which is the same observation every fuzzer
+        makes: the deterministic stage of a fuzzer walks from the beginning of the input
+        rather than sampling it, and for this reason.
+        """
+        limit = max(1, len(data) - width + 1)
+        if len(data) > HEADER_SPAN and self.rng.random() < HEADER_BIAS:
+            return self.rng.randrange(min(HEADER_SPAN, limit))
+        return self.rng.randrange(limit)
+
     def flip_bits(self, data: bytearray) -> bytearray:
         if not data:
             return data
@@ -74,7 +99,7 @@ class Mutator:
     def set_byte(self, data: bytearray) -> bytearray:
         if not data:
             return data
-        data[self.rng.randrange(len(data))] = self.rng.choice(INTERESTING_8)
+        data[self._position(data)] = self.rng.choice(INTERESTING_8)
         return data
 
     def arithmetic(self, data: bytearray, width: int = 1) -> bytearray:
@@ -85,7 +110,7 @@ class Mutator:
         """
         if len(data) < width:
             return data
-        index = self.rng.randrange(len(data) - width + 1)
+        index = self._position(data, width)
         current = int.from_bytes(data[index:index + width], "little")
         step = self.rng.choice(ARITHMETIC_STEPS)
         if self.rng.random() < 0.5:
@@ -98,7 +123,7 @@ class Mutator:
         if len(data) < width:
             return data
         table = {1: INTERESTING_8, 2: INTERESTING_16, 4: INTERESTING_32}[width]
-        index = self.rng.randrange(len(data) - width + 1)
+        index = self._position(data, width)
         data[index:index + width] = self.rng.choice(table).to_bytes(width, "little")
         return data
 
@@ -135,6 +160,32 @@ class Mutator:
         addition = bytes(self.rng.randrange(256)
                          for _ in range(self.rng.randrange(1, 17)))
         return data[:index] + addition + data[index:]
+
+    def grow(self, data: bytearray) -> bytearray:
+        """Make the input substantially bigger, in one operation.
+
+        Every other mutation here changes an input by a few bytes at most, and that is
+        the wrong shape for reaching a defect that only appears in a long input. A target
+        whose bound is checked in sixteen-bit arithmetic has a defect that needs a count
+        in the thousands, and a count in the thousands needs an input of thousands of
+        bytes to go with it -- which a search that adds sixteen bytes at a time reaches
+        only after a hundred mutations have all survived, and they do not, because an
+        input that is merely longer has no new edges and is discarded.
+
+        So this one doubles, or copies a large run. It is the only mutation whose output
+        is usually much larger than its input, and it is what makes the size of an input
+        a dimension the search can move along rather than one it drifts down.
+        """
+        if not data:
+            return bytearray(b"\x00" * 64)
+        if self.rng.random() < 0.5:
+            return data + data                      # double
+        # or copy a long run into the middle, which grows without repeating the head
+        run = min(len(data), self.rng.randrange(64, 1024))
+        start = self.rng.randrange(len(data))
+        piece = data[start:start + run]
+        at = self.rng.randrange(len(data) + 1)
+        return data[:at] + piece + data[at:]
 
     def splice(self, data: bytearray, other: bytes) -> bytearray:
         """Take a prefix of one input and a suffix of another.
@@ -237,6 +288,7 @@ class Mutator:
             lambda d: self.overwrite_block(d),
             lambda d: self.insert_bytes(d),
             lambda d: self.insert_dictionary(d),
+            lambda d: self.grow(d),
             lambda d: self.splice(d, other) if other else d,
             # The two guided ones. They are in the same stack as everything else rather
             # than run separately, because a comparison is usually only solvable once the

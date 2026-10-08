@@ -52,6 +52,7 @@ class Stats:
     executions: int = 0
     crashes: int = 0
     corpus_additions: int = 0
+    stepping_stones: int = 0
     edges_found: int = 0
     started: float = 0.0
     elapsed: float = 0.0
@@ -160,15 +161,22 @@ class Engine:
             return {"kind": "crash", "finding": finding, "new_edges": 0}
 
         new = self.target.coverage.new_coverage(outcome.coverage)
+        # The comparisons are kept with the entry, so mutating it later is guided by what
+        # that specific input was told it was missing.
+        comparisons = self.target.coverage.comparisons()
         if new:
             self.stats.edges_found += new
-            # The comparisons are kept with the entry, so mutating it later is guided by
-            # what that specific input was told it was missing.
-            comparisons = self.target.coverage.comparisons()
             if self.corpus.add(candidate, edges=outcome.edges, new_edges=new,
                                comparisons=comparisons):
                 self.stats.corpus_additions += 1
                 return {"kind": "coverage", "new_edges": new, "data": candidate}
+        # Nothing new, but a much longer input is a stepping stone to the sizes a
+        # size-dependent defect needs, and it would never be kept otherwise.
+        if self.corpus.add_stepping_stone(candidate, edges=outcome.edges,
+                                          comparisons=comparisons):
+            self.stats.corpus_additions += 1
+            self.stats.stepping_stones += 1
+            return {"kind": "growth", "new_edges": 0, "data": candidate}
         return {"kind": "nothing", "new_edges": 0}
 
     def run(self, budget: int = 20000, stop_after_crashes: int = None,
