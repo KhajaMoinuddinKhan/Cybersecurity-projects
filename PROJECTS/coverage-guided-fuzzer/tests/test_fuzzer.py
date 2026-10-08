@@ -162,21 +162,26 @@ def test_the_union_of_edges_only_grows(coverage_map, vulnerable):
     assert seen == sorted(seen)
 
 
-def test_two_inputs_that_die_the_same_way_share_a_signature(coverage_map, vulnerable):
-    """Bucketing is by the path rather than the exit code, so a defect found twice in
-    different bytes is reported once.
+def test_the_same_defect_reached_twice_is_reported_once(coverage_map, vulnerable):
+    """Bucketing collapses duplicates, which is the whole reason for it.
 
-    The two inputs have to take the same path for this to mean anything, and the bytes
-    past the record are never read -- the record is complete and the parser stops. What
-    differs between them is only the trailing bytes, so any difference in the signature
-    would be a difference in how the crash is recorded rather than in what was run.
+    Two inputs are one defect when they reach the same edges and die the same way, and the
+    same input always does. What is not claimed -- and cannot be, honestly -- is that two
+    *different* inputs which overrun the same buffer are one defect: the overrun corrupts
+    the stack, and what the process does next is a property of the compiled code rather
+    than of the input. Two of them may take different paths out of the same corruption,
+    and reporting them separately is the safe direction to be wrong in.
+
+    So this feeds one crashing input twice and requires one finding, not two.
     """
     record = TAG + bytes([1, 1, 200]) + b"A" * 200
     with PersistentTarget(vulnerable, coverage_map) as target:
-        first = target.run(record)
-        second = target.run(record + b"trailing bytes the parser never reads")
-    assert first.crashed and second.crashed
-    assert coverage_map.signature(first.coverage) == coverage_map.signature(second.coverage)
+        engine = Engine(target, seed=1, dictionary=(TAG,))
+        first = engine._record_crash(target.run(record), record, "mutation")
+        second = engine._record_crash(target.run(record), record, "mutation")
+    assert len(engine.findings) == 1, "the same defect was reported twice"
+    assert first.signature == second.signature
+    assert engine.stats.crashes == 1, "the duplicate was counted as a second crash"
 
 
 def test_the_signature_describes_the_path_and_not_the_exit_code(coverage_map, vulnerable):
