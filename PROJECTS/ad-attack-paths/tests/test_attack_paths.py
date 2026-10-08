@@ -19,8 +19,9 @@ from pathlib import Path
 
 import pytest
 
-from src.adcs import (assess_certificate_binding, assess_template, authority_managers,
-                      certificate_chains, certificate_escalations)
+from src.adcs import (assess_certificate_binding, assess_template, assess_unassessable,
+                      authority_managers, certificate_chains,
+                      certificate_escalations)
 from src.chokepoints import attacker_map, chokepoints, minimum_node_cut, removal_impact
 from src.graph import build_graph, unfiltered_trusts
 from src import report as report_module
@@ -954,6 +955,32 @@ def test_a_trust_with_filtering_on_is_not_reported(forest):
         assert not [t for t in unfiltered_trusts(forest) if t["domain"] == victim.name]
     finally:
         victim.trusts = original
+
+
+def test_a_condition_that_cannot_be_decided_is_named_not_omitted(forest):
+    """ESC13 needs the issuance policy objects and ESC8 needs the enrollment URL. Neither
+    is collected, so neither can be assessed -- and a report that did not mention them
+    would read exactly like one where they were checked and came back clean."""
+    rows = assess_unassessable(forest)
+    assert rows, "this collection cannot decide several of the conditions"
+    conditions = {r["condition"] for r in rows}
+    for expected in ("ESC8", "ESC9", "ESC10", "ESC11", "ESC13", "ESC14"):
+        assert expected in conditions, "%s must be named, not omitted" % expected
+    for row in rows:
+        assert row["needs"], "it must say what is missing"
+        assert row["why"], "and why nothing is claimed"
+
+
+def test_the_report_carries_the_undecidable_conditions(forest, graph):
+    document = report_module.build(graph, crown_jewels(forest, graph),
+                                   {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "note": "not asked for"},
+                                   unassessable=assess_unassessable(forest))
+    markdown = report_module.to_markdown(document)
+    page = report_module.to_html(document)
+    assert "cannot decide" in markdown
+    assert "cannot decide" in page
+    assert "ESC13" in markdown
 
 
 def test_the_report_carries_the_trusts_and_the_binding(forest, graph):

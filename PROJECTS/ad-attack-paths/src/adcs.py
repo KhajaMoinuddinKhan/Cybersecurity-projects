@@ -222,6 +222,46 @@ def assess_authority(authority, privileged=frozenset()) -> list:
     return found
 
 
+# The conditions that cannot be assessed from a collection, and what is missing. A
+# condition nobody can evaluate is not a condition that is absent, and a report that
+# simply does not mention it reads exactly like one where it was checked and came back
+# clean. This is the same rule as an unknown right and an uncollected registry setting.
+UNASSESSABLE = {
+    "ESC8": ("the authority's HTTP enrollment endpoint",
+             "the relay technique needs the enrollment URL, which the collector does "
+             "not read; nothing is claimed about it either way"),
+    "ESC9": ("the strong certificate binding setting",
+             "the registry setting decides whether a certificate for one identity is "
+             "accepted as another; it is per machine and was refused on every machine "
+             "in this collection"),
+    "ESC10": ("the certificate mapping methods setting",
+             "as ESC9: the setting is per machine and was refused"),
+    "ESC11": ("the authority's interface flags",
+             "whether the authority requires encryption on its certificate requests is "
+             "carried in a flag the collector does not read"),
+    "ESC13": ("the issuance policy objects",
+             "a policy identifier linked to a group is what turns a certificate into "
+             "membership; the links are separate objects and none were collected"),
+    "ESC14": ("the subject alternative name attributes",
+             "the alternative-name mappings are not among the attributes the collector "
+             "reads"),
+}
+
+
+def assess_unassessable(data) -> list:
+    """Which certificate conditions this collection cannot decide, and why.
+
+    Each is named with the object or setting that would be needed. An empty list means
+    everything the tool knows about could be evaluated, not that everything is safe.
+    """
+    if not list(data.by_kind("certtemplate")):
+        return []          # a collection with no templates has nothing to say here
+    found = []
+    for condition, (needs, why) in sorted(UNASSESSABLE.items()):
+        found.append({"condition": condition, "needs": needs, "why": why})
+    return found
+
+
 def assess_certificate_binding(data) -> dict:
     """Whether a certificate for one identity can be accepted as another.
 

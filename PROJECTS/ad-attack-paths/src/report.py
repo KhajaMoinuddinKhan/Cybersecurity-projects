@@ -19,7 +19,7 @@ __all__ = ["build", "to_markdown", "to_html"]
 
 
 def build(graph, jewels, choke, cut, escalations=(), chains=(), managers=(),
-          binding=None, trusts=(), generated_at=None) -> dict:
+          binding=None, trusts=(), unassessable=(), generated_at=None) -> dict:
     seeded = [jewel for jewel in jewels if not jewel.derived]
     derived = [jewel for jewel in jewels if jewel.derived]
     return {
@@ -42,6 +42,7 @@ def build(graph, jewels, choke, cut, escalations=(), chains=(), managers=(),
         "authority_managers": list(managers),
         "certificate_binding": dict(binding or {}),
         "unfiltered_trusts": list(trusts),
+        "unassessable_conditions": list(unassessable),
         "context": _context(graph),
     }
 
@@ -89,6 +90,23 @@ def _clip(text: str, width: int) -> str:
     if len(text) <= width:
         return text
     return text[:width - 1].rstrip() + "\u2026"
+
+
+def _unassessable_markdown(document: dict) -> list:
+    """The conditions this collection cannot decide, named rather than omitted."""
+    rows = document.get("unassessable_conditions") or []
+    if not rows:
+        return []
+    lines = ["### Conditions this collection cannot decide", "",
+             "A condition nobody can evaluate is not a condition that is absent. Each of "
+             "these needs an object or a setting the collector did not read, and a report "
+             "that simply did not mention them would read exactly like one where they "
+             "were checked and came back clean.", "",
+             "| Condition | Needs | Why nothing is claimed |", "| --- | --- | --- |"]
+    for row in rows:
+        lines.append("| %s | %s | %s |" % (row["condition"], row["needs"], row["why"]))
+    lines.append("")
+    return lines
 
 
 def _trusts_markdown(document: dict) -> list:
@@ -257,6 +275,7 @@ def to_markdown(document: dict) -> str:
         lines.append("### Whether a certificate can be accepted as another identity")
         lines.append("")
     lines.extend(_escalations_markdown(document))
+    lines.extend(_unassessable_markdown(document))
     lines.extend(_trusts_markdown(document))
     lines.extend(_binding_markdown(document))
 
@@ -506,6 +525,20 @@ def to_html(document: dict) -> str:
         parts.append("<p>Showing the %d shortest of %d. The remainder are in the crown "
                      "jewel table above, which is not truncated.</p>"
                      % (ROUTES_SHOWN, crown["derived"]))
+    unassessable = document.get("unassessable_conditions") or []
+    if unassessable:
+        parts.append("<h3>Conditions this collection cannot decide</h3>"
+                     "<p>A condition nobody can evaluate is not a condition that is "
+                     "absent. Each of these needs an object or a setting the collector "
+                     "did not read.</p>"
+                     "<table><tr><th>Condition</th><th>Needs</th>"
+                     "<th>Why nothing is claimed</th></tr>")
+        for row in unassessable:
+            parts.append("<tr><td>%s</td><td>%s</td><td>%s</td></tr>"
+                         % (escape(row["condition"]), escape(row["needs"]),
+                            escape(row["why"])))
+        parts.append("</table>")
+
     trusts = document.get("unfiltered_trusts") or []
     if trusts:
         parts.append("<h2>Trusts that accept an identifier from the other side</h2>"

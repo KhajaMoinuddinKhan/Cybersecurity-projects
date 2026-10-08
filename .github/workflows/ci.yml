@@ -63,3 +63,24 @@ jobs:
         run: python -m compileall -q src
       - name: Test SIEM controls and native Windows Event Logs
         run: python -m pytest -q tests
+
+  hostile-inputs:
+    # Every project is exercised against input shaped the way its code expects, because
+    # that is what its own samples are. This runs the other half: each project's own
+    # sample, mutated so that one assumption at a time is broken. A project may refuse
+    # any of them -- refusing is the answer -- but a traceback means the refusal
+    # happened by luck rather than by design.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install every project's dependencies
+        run: |
+          python -m pip install --upgrade pytest
+          for requirements in PROJECTS/*/requirements.txt; do
+            python -m pip install -r "$requirements"
+          done
+      - name: Feed every project malformed input
+        run: python scripts/hostile_inputs.py
