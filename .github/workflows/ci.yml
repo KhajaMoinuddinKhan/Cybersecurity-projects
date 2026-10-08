@@ -87,6 +87,10 @@ jobs:
         run: python scripts/hostile_inputs.py
 
   fuzzer-target:
+    # A fuzzer that hangs is worse than one that fails, so this job is bounded: without
+    # a bound a stuck search holds a runner for the whole queue's worth of time and the
+    # failure arrives as a timeout rather than as a result.
+    timeout-minutes: 20
     # The fuzzer compiles its target, so this job checks the thing the matrix cannot:
     # that the build works from source on a machine with a plain compiler, that the
     # search finds the defect, and that the exploit takes control of the vulnerable

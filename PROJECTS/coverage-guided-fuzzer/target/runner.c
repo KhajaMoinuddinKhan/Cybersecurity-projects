@@ -60,7 +60,18 @@ static uint8_t *attach(const char *name) {
 static int region = -1;
 
 static uint8_t *attach(const char *name) {
-    region = shm_open(name, O_RDWR, 0600);
+    /* A shared-memory name needs a leading slash on this platform, and the fuzzer's
+     * library supplies one -- `SharedMemory(name="cgf-coverage")` opens `/cgf-coverage`.
+     * Passing the bare name opens something else entirely, the open fails, and every run
+     * looks like the target dying on startup. The name is normalised here so that one
+     * spelling works on both platforms. */
+    char path[256];
+    if (name[0] == '/') {
+        snprintf(path, sizeof path, "%s", name);
+    } else {
+        snprintf(path, sizeof path, "/%s", name);
+    }
+    region = shm_open(path, O_RDWR, 0600);
     if (region < 0) return NULL;
     void *view = mmap(NULL, COVERAGE_MAP_SIZE + 8, PROT_READ | PROT_WRITE, MAP_SHARED,
                       region, 0);
