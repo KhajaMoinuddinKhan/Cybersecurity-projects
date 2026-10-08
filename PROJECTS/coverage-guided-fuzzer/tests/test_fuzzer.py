@@ -164,11 +164,31 @@ def test_the_union_of_edges_only_grows(coverage_map, vulnerable):
 
 def test_two_inputs_that_die_the_same_way_share_a_signature(coverage_map, vulnerable):
     """Bucketing is by the path rather than the exit code, so a defect found twice in
-    different bytes is reported once."""
+    different bytes is reported once.
+
+    The two inputs have to take the same path for this to mean anything, and the bytes
+    past the record are never read -- the record is complete and the parser stops. What
+    differs between them is only the trailing bytes, so any difference in the signature
+    would be a difference in how the crash is recorded rather than in what was run.
+    """
+    record = TAG + bytes([1, 1, 200]) + b"A" * 200
     with PersistentTarget(vulnerable, coverage_map) as target:
-        first = target.run(TAG + bytes([1, 1, 200]) + b"A" * 200)
-        second = target.run(TAG + bytes([1, 1, 199]) + b"A" * 199)
+        first = target.run(record)
+        second = target.run(record + b"trailing bytes the parser never reads")
+    assert first.crashed and second.crashed
     assert coverage_map.signature(first.coverage) == coverage_map.signature(second.coverage)
+
+
+def test_the_signature_describes_the_path_and_not_the_exit_code(coverage_map, vulnerable):
+    """A signature derived from how the process ended would collapse every crash of a
+    kind into one, which is the opposite of what it is for."""
+    record = TAG + bytes([1, 1, 200]) + b"A" * 200
+    with PersistentTarget(vulnerable, coverage_map) as target:
+        crashed = target.run(record)
+        clean = target.run(GOOD)
+    assert crashed.crashed and not clean.crashed
+    assert (coverage_map.signature(crashed.coverage)
+            != coverage_map.signature(clean.coverage))
 
 
 # --- the mutation engine -------------------------------------------------------------
@@ -271,11 +291,17 @@ def test_minimisation_refuses_an_input_that_does_not_have_the_property():
 # --- the search ----------------------------------------------------------------------
 
 def test_the_fuzzer_finds_the_defect_from_an_empty_seed(coverage_map, vulnerable):
-    """The load-bearing test. Nothing is handed to the search except the tag."""
+    """The load-bearing test. Nothing is handed to the search except the tag.
+
+    How many executions it takes is a property of the compiled target rather than of the
+    search -- the same source built two ways has different code and so a different
+    landscape to cross -- so the budget is generous and the bound that matters is the one
+    in time. What is asserted is that the defect is reached, not how quickly.
+    """
     with PersistentTarget(vulnerable, coverage_map) as target:
         engine = Engine(target, seed=4, dictionary=(TAG,))
         engine.add_seed(b"")
-        engine.run(budget=6000, time_limit=90)
+        engine.run(budget=120000, time_limit=SEARCH_SECONDS, stop_after_crashes=1)
     assert engine.findings, "the search did not reach the defect"
     assert engine.stats.edges_found > 20, "coverage guidance found almost nothing"
 
@@ -295,7 +321,7 @@ def test_a_crash_is_recorded_with_the_path_that_reached_it(coverage_map, vulnera
     with PersistentTarget(vulnerable, coverage_map) as target:
         engine = Engine(target, seed=5, dictionary=(TAG,))
         engine.add_seed(b"")
-        engine.run(budget=4000, time_limit=60)
+        engine.run(budget=4000, time_limit=60, stop_after_crashes=1)
     assert engine.findings
     for finding in engine.findings.values():
         assert finding.edges > 0, "a crash without a path cannot be compared to another"
