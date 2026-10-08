@@ -715,6 +715,29 @@ def test_the_certificate_table_rows_stay_with_their_header(forest, graph):
         "the table must carry every finding: %d rows for %d findings" % (rows, len(escalations))
 
 
+def test_no_section_appears_twice(forest, graph):
+    """A section that moved but left a heading behind appears twice, and the reader
+    cannot tell which one is authoritative. This is the check that catches a move that
+    was only half made."""
+    privileged = {j.sid for j in crown_jewels(forest, graph)}
+    escalations = certificate_escalations(forest, graph, privileged)
+    document = report_module.build(graph, crown_jewels(forest, graph),
+                                   {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "note": "not asked for"},
+                                   escalations, certificate_chains(escalations),
+                                   authority_managers(forest, graph, privileged),
+                                   assess_certificate_binding(forest),
+                                   unfiltered_trusts(forest),
+                                   assess_unassessable(forest))
+    for name, rendered in (("markdown", report_module.to_markdown(document)),
+                           ("html", report_module.to_html(document))):
+        headings = re.findall(r"^#{2,3} (.+)$", rendered, re.MULTILINE) if name == "markdown" \
+            else re.findall(r"<h[23]>(.*?)</h[23]>", rendered)
+        headings = [h.split("<")[0].strip() for h in headings]
+        seen = [h for h in headings if headings.count(h) > 1]
+        assert not seen, "%s repeats these headings: %s" % (name, sorted(set(seen)))
+
+
 def test_the_two_formats_carry_the_same_sections(forest, graph):
     """The html report kept carrying less than the markdown one, one section at a time,
     because every new section was added to one format and not the other. Comparing them

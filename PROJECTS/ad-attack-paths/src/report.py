@@ -270,10 +270,6 @@ def to_markdown(document: dict) -> str:
                                                          jewel["hops"], jewel["reaches"]))
         lines.append("")
 
-    binding = document.get("certificate_binding") or {}
-    if binding:
-        lines.append("### Whether a certificate can be accepted as another identity")
-        lines.append("")
     lines.extend(_escalations_markdown(document))
     lines.extend(_unassessable_markdown(document))
     lines.extend(_trusts_markdown(document))
