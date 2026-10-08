@@ -77,10 +77,22 @@ def build(name: str = "target", vulnerable: bool = True, force: bool = False,
     # two, a file that is cached or not. Measured together, the same input produces
     # different coverage on different runs, and a fuzzer whose feedback is not a function
     # of its input is not guiding anything.
-    instrumented = [TARGET_DIR / "parser.c", TARGET_DIR / "coverage_runtime.c"]
+    # What is instrumented is decided here rather than by an attribute, because the
+    # attribute is a request and this is a fact.
+    #
+    # The runtime implements the callback that the instrumentation calls on every edge.
+    # If it is compiled with the same flag, every call to the callback is a call to
+    # itself: infinite recursion, a stack overflow, and a program that dies before it
+    # reads its first input and records no coverage at all. One compiler excludes the
+    # callback on its own and another does not, and the attribute that was supposed to
+    # say so is honoured for `-finstrument-functions` and not for coverage.
+    #
+    # Compiling it separately without the flag cannot be misread by any compiler.
+    instrumented = [TARGET_DIR / "parser.c"]
+    uninstrumented = [TARGET_DIR / "coverage_runtime.c"]
     driver = (TARGET_DIR / "exploit_harness.c" if exploit
               else TARGET_DIR / "runner.c")
-    for source in instrumented + [driver]:
+    for source in instrumented + uninstrumented + [driver]:
         if not source.exists():
             raise BuildError("the target source is missing: %s" % source)
 
@@ -96,25 +108,22 @@ def build(name: str = "target", vulnerable: bool = True, force: bool = False,
     if not vulnerable:
         common.append("-DBOUNDED")
 
-    # Two steps, because the instrumentation flag cannot be turned off per file on one
-    # command line: the target is compiled with it, the driver without.
+    # Separate compilation, because the instrumentation flag cannot be turned off per
+    # file on one command line and three groups of files need three answers.
     objects = []
-    for index, source in enumerate(instrumented):
-        obj = BUILD_DIR / ("%s-%s-%d.obj" % (name, suffix, index))
-        step = compiler() + common + ["-fsanitize-coverage=trace-pc", "-c",
-                                      str(source), "-o", str(obj)]
-        done = subprocess.run(step, capture_output=True, text=True, timeout=900)
-        if done.returncode or not obj.exists():
-            raise BuildError("the compiler refused %s:\n%s"
-                             % (source.name, done.stderr.strip() or done.stdout.strip()))
-        objects.append(obj)
-
-    driver_obj = BUILD_DIR / ("%s-%s-driver.obj" % (name, suffix))
-    step = compiler() + common + ["-c", str(driver), "-o", str(driver_obj)]
-    done = subprocess.run(step, capture_output=True, text=True, timeout=900)
-    if done.returncode or not driver_obj.exists():
-        raise BuildError("the compiler refused %s:\n%s"
-                         % (driver.name, done.stderr.strip() or done.stdout.strip()))
+    groups = [(instrumented, True), (uninstrumented, False), ([driver], False)]
+    for index, (sources, with_coverage) in enumerate(groups):
+        for source in sources:
+            obj = BUILD_DIR / ("%s-%s-%d.obj" % (name, suffix, index))
+            step = compiler() + common + (["-fsanitize-coverage=trace-pc"]
+                                          if with_coverage else [])
+            step += ["-c", str(source), "-o", str(obj)]
+            done = subprocess.run(step, capture_output=True, text=True, timeout=900)
+            if done.returncode or not obj.exists():
+                raise BuildError("the compiler refused %s:\n%s"
+                                 % (source.name,
+                                    done.stderr.strip() or done.stdout.strip()))
+            objects.append(obj)
 
     link = compiler() + common + [str(o) for o in objects + [driver_obj]]
     link += ["-o", str(output)]

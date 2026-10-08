@@ -29,6 +29,7 @@ jobs:
           - PROJECTS/scoped-assessment
           - PROJECTS/posture-assessment
           - PROJECTS/ad-attack-paths
+          - PROJECTS/coverage-guided-fuzzer
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -86,34 +87,29 @@ jobs:
         run: python scripts/hostile_inputs.py
 
   fuzzer-target:
-    # Windows, and the reason is stated rather than implied: the target is compiled and
-    # the compiled target does not run under the compiler this project's other jobs use.
-    # The build there succeeds and the resulting program dies with a segmentation fault
-    # before it reads its first input, recording no coverage at all -- so the tests fail
-    # for a reason that is about the toolchain and not about the fuzzer. The job ran on
-    # that platform first, went red, and the failure was in the build rather than in the
-    # thing being tested.
+    # Back on this platform, which is where it belongs: the target is compiled here and
+    # the compiled target has to run here. It did not, and the reason was in the build
+    # rather than in the fuzzer -- see the note on the runtime in src/build.py.
     #
-    # The platform below is the one the toolchain and the target are verified on. Moving
-    # the job is not a way of making it pass: every test in it, the search that finds the
-    # defect and the exploit that takes control, is the same test, and it is the one that
-    # was run while this was built.
-    runs-on: windows-latest
+    # The project is also in the matrix above, which imports and compiles it. This job is
+    # the one that builds the target and runs it: the tests, the search that finds the
+    # defect, and the exploit that takes control of the vulnerable build.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
       run:
         working-directory: PROJECTS/coverage-guided-fuzzer
-        shell: bash
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - name: Install the test runner and a compiler
+      - name: Install the test runner
+        run: python -m pip install --upgrade pytest
+      - name: Report the toolchain and the compiler
         run: |
-          python -m pip install --upgrade pytest ziglang
-      - name: Report the toolchain
-        run: PYTHONPATH=. python -c "from src.build import describe; print(describe())"
+          PYTHONPATH=. python -c "from src.build import describe; print(describe())"
+          cc --version | head -1
       - name: Run the tests
         run: PYTHONPATH=. python -m pytest -q tests
       - name: Fuzz the target and show what it found

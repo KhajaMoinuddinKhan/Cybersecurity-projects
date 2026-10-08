@@ -50,7 +50,18 @@ void coverage_attach(uint8_t *region) {
  * Clang excludes the callback automatically, which is why this went unnoticed: the
  * build on one platform worked and the build on the other could not start. GCC does
  * not, and the attribute is what both accept. */
-__attribute__((no_instrument_function))
+#if defined(__clang__)
+/* Clang reads this one and excludes the callback on its own besides. */
+#define NOT_INSTRUMENTED __attribute__((no_instrument_function))
+#elif defined(__GNUC__) && __GNUC__ >= 12
+/* GCC does not treat the callback specially, and the attribute that governs
+ * `-finstrument-functions` is not the one that governs coverage. This is. */
+#define NOT_INSTRUMENTED __attribute__((no_instrument_function, no_sanitize_coverage))
+#else
+#define NOT_INSTRUMENTED __attribute__((no_instrument_function))
+#endif
+
+NOT_INSTRUMENTED
 void __sanitizer_cov_trace_pc(void) {
     /* The return address is the edge. Shifting drops the instruction-alignment bits,
      * which carry nothing about which edge this is. */
