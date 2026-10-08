@@ -1,0 +1,5 @@
+build/
+.pytest-tmp/
+__pycache__/
+*.obj
+findings/
