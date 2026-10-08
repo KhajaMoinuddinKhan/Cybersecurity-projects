@@ -282,7 +282,7 @@ def assess_unassessable(data) -> list:
     return found
 
 
-def coverage() -> dict:
+def coverage(supplied_binding=False) -> dict:
     """What this tool assesses, and what it does not, in one place.
 
     A section that lists findings says what was found and nothing about what was
@@ -294,48 +294,88 @@ def coverage() -> dict:
         digits = "".join(ch for ch in condition if ch.isdigit())
         return (int(digits) if digits else 0, condition)
 
-    return {"assessed": {c: ASSESSED[c] for c in sorted(ASSESSED, key=order)},
-            "not_assessed": {c: UNASSESSABLE[c][0]
-                             for c in sorted(UNASSESSABLE, key=order)},
-            "assessed_count": len(ASSESSED), "not_assessed_count": len(UNASSESSABLE)}
+    assessed = dict(ASSESSED)
+    not_assessed = dict(UNASSESSABLE)
+    if supplied_binding:
+        # The two that depend on the registry settings are answerable once somebody
+        # supplies them, which is the whole point of accepting them.
+        for condition in ("ESC9", "ESC10"):
+            assessed[condition] = not_assessed.pop(condition)[0]
+    return {"assessed": {c: assessed[c] for c in sorted(assessed, key=order)},
+            "not_assessed": {c: not_assessed[c][0] for c in sorted(not_assessed, key=order)},
+            "assessed_count": len(assessed), "not_assessed_count": len(not_assessed)}
 
 
-def assess_certificate_binding(data) -> dict:
+# The registry settings that decide whether a certificate for one identity is accepted
+# as another. The collector reads them and is refused on a machine where the account it
+# runs as is not a local administrator. They can be supplied instead, which is the
+# difference between a report that says "unknown" forever and one that answers the
+# question when somebody can get the value.
+BINDING_SETTINGS = ("CertificateMappingMethods", "StrongCertificateBindingEnforcement")
+
+def assess_certificate_binding(data, supplied=None) -> dict:
     """Whether a certificate for one identity can be accepted as another.
 
-    Two registry settings decide it, and they are the difference between a stolen
-    certificate being useless and being a logon. Neither is populated in this data, and
-    that is reported as unknown rather than as safe -- an uncollected setting is not a
-    setting that is off, which is the same mistake as treating an unread rule as clear.
+    `supplied` is a mapping of machine name to the two settings, for a collection where
+    the read was refused. Supplying it turns the question from unanswerable into
+    answered, and the answer is reported with its source so a reader knows it did not
+    come from the collection.
     """
-    def reading(entry):
-        """The value, or None when the collector did not read it.
-
-        The registry entries are objects carrying a value, a Collected flag and a
-        failure reason. The first version of this checked only whether a value was
-        present, and every entry has one -- so three machines that were refused access
-        were reported as read, with a value of zero, which is the most dangerous
-        possible answer: it says weak binding is switched off when nobody knows.
-        """
-        if not isinstance(entry, dict):
-            return entry
-        if entry.get("Collected") is False:
-            return None
-        return entry.get("Value")
-
-    seen = {"collected": [], "missing": []}
+    supplied = {str(k).upper(): v for k, v in (supplied or {}).items()}
+    readings = {}
     for node in data.by_kind("computer"):
         registry = node.dc_registry or {}
-        if not registry:
+        values = {}
+        for setting in BINDING_SETTINGS:
+            values[setting] = _reading(registry.get(setting))
+        readings[node.name] = values
+
+    for name, values in supplied.items():
+        target = next((n for n in readings if n.upper() == name), None)
+        if target is None:
             continue
-        mapping = reading(registry.get("CertificateMappingMethods"))
-        binding = reading(registry.get("StrongCertificateBindingEnforcement"))
-        if mapping is None and binding is None:
-            seen["missing"].append(node.name)
-        else:
-            seen["collected"].append({"computer": node.name, "mapping": mapping,
-                                      "binding": binding})
-    return seen
+        for setting in BINDING_SETTINGS:
+            if setting in values:
+                readings[target][setting] = values[setting]
+
+    collected, missing, weak = [], [], []
+    for computer, values in sorted(readings.items()):
+        unread = [s for s in BINDING_SETTINGS if values[s] is None]
+        if len(unread) == len(BINDING_SETTINGS):
+            missing.append(computer)
+            continue
+        source = "supplied" if computer.upper() in supplied else "collected"
+        collected.append({"computer": computer, "source": source,
+                          "mapping": values["CertificateMappingMethods"],
+                          "binding": values["StrongCertificateBindingEnforcement"]})
+        for setting in BINDING_SETTINGS:
+            value = values[setting]
+            if value in (None, 0):
+                continue
+            weak.append({"computer": computer, "setting": setting, "value": value,
+                         "source": source,
+                         "note": "a non-zero value here permits a certificate to be "
+                                 "matched on a weaker basis than a strong binding "
+                                 "requires, which is a certificate for one identity "
+                                 "being accepted as another"})
+    return {"collected": collected, "missing": missing, "weak": weak,
+            "supplied": sorted(supplied)}
+
+
+def _reading(entry):
+    """The value, or None when the collector did not read it.
+
+    The registry entries are objects carrying a value, a Collected flag and a failure
+    reason. The first version of this checked only whether a value was present, and
+    every entry has one -- so three machines that were refused access were reported as
+    read, with a value of zero, which is the most dangerous possible answer: it says
+    weak binding is switched off when nobody knows.
+    """
+    if not isinstance(entry, dict):
+        return entry
+    if entry.get("Collected") is False:
+        return None
+    return entry.get("Value")
 
 
 def assess_template(template, authorities=(), privileged=frozenset()) -> list:

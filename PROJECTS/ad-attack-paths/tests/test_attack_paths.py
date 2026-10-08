@@ -980,6 +980,57 @@ def test_a_trust_with_filtering_on_is_not_reported(forest):
         victim.trusts = original
 
 
+def test_supplying_a_refused_setting_answers_the_question(forest):
+    """ESC9 and ESC10 were refused, not uncollectable. A caller who can get the values
+    should be able to supply them and get an answer, rather than a report that says
+    unknown forever because of how the collection was run."""
+    refused = assess_certificate_binding(forest)
+    assert not refused["collected"], "this collection read nothing"
+    assert refused["missing"], "and was refused everywhere"
+
+    machine = refused["missing"][0]
+    supplied = assess_certificate_binding(forest, supplied={machine: {
+        "CertificateMappingMethods": 0, "StrongCertificateBindingEnforcement": 0}})
+    read = {c["computer"]: c for c in supplied["collected"]}
+    assert machine in read, "a supplied machine must be reported as read"
+    assert read[machine]["source"] == "supplied", "and marked as supplied, not collected"
+    assert machine not in supplied["missing"], "it is no longer refused"
+
+
+def test_a_weak_binding_value_is_reported_as_a_finding(forest):
+    """The settings decide whether a certificate for one identity is accepted as
+    another. A non-zero value permits the weaker match, and that is the finding."""
+    machine = assess_certificate_binding(forest)["missing"][0]
+    supplied = assess_certificate_binding(forest, supplied={machine: {
+        "CertificateMappingMethods": 4, "StrongCertificateBindingEnforcement": 1}})
+    assert supplied["weak"], "a non-zero value must be reported"
+    for weak in supplied["weak"]:
+        assert weak["computer"] == machine
+        assert weak["source"] == "supplied"
+        assert weak["value"] not in (None, 0)
+        assert weak["note"]
+
+
+def test_supplying_the_settings_moves_those_conditions_into_the_assessed_list():
+    """The coverage is the point: a condition that can now be answered must not still be
+    listed as one that cannot."""
+    before = coverage()
+    after = coverage(supplied_binding=True)
+    assert after["assessed_count"] == before["assessed_count"] + 2
+    assert "ESC9" in after["assessed"] and "ESC10" in after["assessed"]
+    assert "ESC9" not in after["not_assessed"]
+    assert after["not_assessed_count"] == before["not_assessed_count"] - 2
+
+
+def test_a_supplied_machine_that_is_not_in_the_collection_is_ignored(forest):
+    """A name that matches nothing must not invent a machine."""
+    before = assess_certificate_binding(forest)
+    after = assess_certificate_binding(forest, supplied={
+        "NOT-A-MACHINE.INVALID": {"CertificateMappingMethods": 0,
+                                  "StrongCertificateBindingEnforcement": 0}})
+    assert after["missing"] == before["missing"]
+
+
 def test_the_report_says_what_was_checked_before_it_says_what_it_found(forest, graph):
     """A table of findings says what was found and nothing about what was looked for, so
     a condition that was checked and came back clean reads the same as one that was

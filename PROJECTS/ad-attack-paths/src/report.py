@@ -152,8 +152,14 @@ def _binding_markdown(document: dict) -> list:
              "is accepted when presented for another. They are the difference between a "
              "stolen certificate being useless and being a logon.", ""]
     for entry in binding.get("collected") or []:
-        lines.append("- `%s`: mapping methods `%s`, strong binding `%s`."
-                     % (entry["computer"], entry["mapping"], entry["binding"]))
+        source = " (supplied, not collected)" if entry.get("source") == "supplied" else ""
+        lines.append("- `%s`: mapping methods `%s`, strong binding `%s`%s."
+                     % (entry["computer"], entry["mapping"], entry["binding"], source))
+    for weak in binding.get("weak") or []:
+        lines.append("- **`%s` has `%s` set to `%s`%s.** %s"
+                     % (weak["computer"], weak["setting"], weak["value"],
+                        " (supplied, not collected)" if weak.get("source") == "supplied" else "",
+                        weak["note"]))
     missing = binding.get("missing") or []
     if missing:
         lines.append("- **Not read on %d machine(s): %s.** An uncollected setting is not "

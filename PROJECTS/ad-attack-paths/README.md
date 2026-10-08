@@ -172,9 +172,22 @@ reported as its own section rather than left implicit in a decision not to walk 
 
 Two registry settings decide whether a certificate issued for one identity is accepted
 when presented for another, which is the difference between a stolen certificate being
-useless and being a logon. They are read, and where the collection was refused them the
-report says so rather than reporting a value: an uncollected setting is not a setting
-that is off, and saying otherwise is the most dangerous answer available.
+useless and being a logon. The collector reads them and is refused on any machine where
+the account it runs as is not a local administrator, and the report says so rather than
+reporting a value: an uncollected setting is not a setting that is off, and saying
+otherwise is the most dangerous answer available.
+
+They can be supplied instead, which turns the question from unanswerable into answered:
+
+```
+python -m src.cli --data ... --out attack-paths --certificate-binding binding.json
+```
+
+The file maps a machine name to the two values. Whatever arrives that way is reported
+with its source, so a reader knows it did not come from the collection, and a non-zero
+value is a finding rather than a footnote. This is deliberate about what the tool is:
+it does not read the registry, it analyses what it is given, so a value it could not
+collect has to arrive from somewhere.
 
 ## Limits
 

@@ -31,8 +31,28 @@ from .tier0 import Tier0Error, crown_jewels
 __all__ = ["main", "run_analysis"]
 
 
+def _supplied_binding(path):
+    """The certificate settings a caller supplies for machines the collector was
+    refused on. The tool does not read the registry -- it analyses what it is given --
+    so a value it could not collect has to arrive from somewhere, and this is where.
+    """
+    if not path:
+        return {}
+    try:
+        loaded = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SystemExit("the certificate binding file could not be read: %s" % exc)
+    if not isinstance(loaded, dict):
+        raise SystemExit("the certificate binding file must map a machine name to its "
+                         "two settings")
+    for name, values in loaded.items():
+        if not isinstance(values, dict):
+            raise SystemExit("%s must map to an object carrying the two settings" % name)
+    return loaded
+
+
 def run_analysis(paths, out_dir="attack-paths", include_derived=True,
-                 deep_only_cut=False) -> dict:
+                 deep_only_cut=False, supplied_binding=None) -> dict:
     """Read the collections, build the graph, and write the report."""
     paths = [Path(p) for p in paths]
     data = load_forest(paths) if len(paths) > 1 else load_collector(paths[0])
@@ -65,10 +85,10 @@ def run_analysis(paths, out_dir="attack-paths", include_derived=True,
     escalations = certificate_escalations(data, graph, privileged)
     chains = certificate_chains(escalations)
     managers = authority_managers(data, graph, privileged)
-    binding = assess_certificate_binding(data)
+    binding = assess_certificate_binding(data, supplied_binding)
     trusts = unfiltered_trusts(data)
     unassessable = assess_unassessable(data)
-    cert_coverage = certificate_coverage()
+    cert_coverage = certificate_coverage(bool(supplied_binding))
 
     document = report_module.build(graph, jewels, choke, cut, escalations, chains, managers,
                                    binding, trusts, unassessable, cert_coverage,
@@ -92,6 +112,10 @@ def main(argv=None) -> int:
     parser.add_argument("--seeds-only", action="store_true",
                         help="report only the objects privileged on their own evidence, "
                              "without closing the set over what reaches them")
+    parser.add_argument("--certificate-binding", metavar="FILE",
+                        help="the certificate mapping and strong binding settings, as "
+                             "JSON mapping a machine name to the two values, for a "
+                             "collection where the registry read was refused")
     parser.add_argument("--cut-deep-only", action="store_true",
                         help="compute the smallest set of objects to fix using only the "
                              "routes that need an intermediate object")
@@ -100,7 +124,8 @@ def main(argv=None) -> int:
     try:
         document = run_analysis(args.data, out_dir=args.out,
                                 include_derived=not args.seeds_only,
-                                deep_only_cut=args.cut_deep_only)
+                                deep_only_cut=args.cut_deep_only,
+                                supplied_binding=_supplied_binding(args.certificate_binding))
     except (CollectorError, Tier0Error) as exc:
         print("the collection could not be analysed, so nothing was reported: %s" % exc,
               file=sys.stderr)
