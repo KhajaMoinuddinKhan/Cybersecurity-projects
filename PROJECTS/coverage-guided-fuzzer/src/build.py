@@ -125,8 +125,7 @@ def build(name: str = "target", vulnerable: bool = True, force: bool = False,
                                     done.stderr.strip() or done.stdout.strip()))
             objects.append(obj)
 
-    link = compiler() + common + [str(o) for o in objects + [driver_obj]]
-    link += ["-o", str(output)]
+    link = compiler() + common + [str(o) for o in objects] + ["-o", str(output)]
     done = subprocess.run(link, capture_output=True, text=True, timeout=900)
     if done.returncode or not output.exists():
         raise BuildError("the linker refused the target:\n%s"
