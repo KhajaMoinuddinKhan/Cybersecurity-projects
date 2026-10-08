@@ -1,5 +1,9 @@
+# Generated
 build/
 .pytest-tmp/
 __pycache__/
 *.obj
 findings/
+
+# Scratch: anything a working session leaves behind, which is not source.
+_*
