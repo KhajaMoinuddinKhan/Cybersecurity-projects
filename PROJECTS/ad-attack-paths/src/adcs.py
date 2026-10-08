@@ -226,25 +226,41 @@ def assess_authority(authority, privileged=frozenset()) -> list:
 # condition nobody can evaluate is not a condition that is absent, and a report that
 # simply does not mention it reads exactly like one where it was checked and came back
 # clean. This is the same rule as an unknown right and an uncollected registry setting.
+# `refused` distinguishes the two reasons a condition cannot be decided, because they
+# have different answers. A setting the collector was denied is one a collector with
+# more rights would read; a setting no collector gathers needs a different collector.
+# Flattening them told a reader that nothing could be done when something could.
 UNASSESSABLE = {
     "ESC8": ("the authority's HTTP enrollment endpoint",
-             "the relay technique needs the enrollment URL, which the collector does "
-             "not read; nothing is claimed about it either way"),
+             "the collector does not read the enrollment URL", False),
     "ESC9": ("the strong certificate binding setting",
-             "the registry setting decides whether a certificate for one identity is "
-             "accepted as another; it is per machine and was refused on every machine "
-             "in this collection"),
+             "the registry read was refused on every machine in this collection, so a "
+             "collector run with local administrator rights would read it", True),
     "ESC10": ("the certificate mapping methods setting",
-             "as ESC9: the setting is per machine and was refused"),
+             "as ESC9: per machine, and the read was refused", True),
     "ESC11": ("the authority's interface flags",
-             "whether the authority requires encryption on its certificate requests is "
-             "carried in a flag the collector does not read"),
+             "the collector does not read whether the authority requires encryption on "
+             "its certificate requests", False),
     "ESC13": ("the issuance policy objects",
              "a policy identifier linked to a group is what turns a certificate into "
-             "membership; the links are separate objects and none were collected"),
+             "membership; the links are separate objects this collector does not gather",
+             False),
     "ESC14": ("the subject alternative name attributes",
-             "the alternative-name mappings are not among the attributes the collector "
-             "reads"),
+             "the collector does not read the alternative-name mappings", False),
+}
+
+# The conditions this tool does assess. Stated so that a reader can tell what was
+# checked from what was not, instead of inferring it from a table of findings that
+# looks complete either way.
+ASSESSED = {
+    "ESC1": "the requester supplies the subject and the certificate authenticates",
+    "ESC2": "the certificate carries the any-purpose purpose",
+    "ESC3": "the certificate carries the certificate request agent purpose",
+    "ESC4": "a principal without administrative rights can write to the template",
+    "ESC5": "a principal without administrative rights can write to a public key object",
+    "ESC6": "the authority is flagged to accept a name from the request",
+    "ESC7": "a principal without administrative rights can manage the authority",
+    "ESC15": "a version-one template takes the subject from the request",
 }
 
 
@@ -257,9 +273,31 @@ def assess_unassessable(data) -> list:
     if not list(data.by_kind("certtemplate")):
         return []          # a collection with no templates has nothing to say here
     found = []
-    for condition, (needs, why) in sorted(UNASSESSABLE.items()):
-        found.append({"condition": condition, "needs": needs, "why": why})
+    for condition, (needs, why, refused) in sorted(UNASSESSABLE.items()):
+        found.append({"condition": condition, "needs": needs, "why": why,
+                      "fixable_by_collecting": refused,
+                      "action": ("run the collector with local administrator rights"
+                                 if refused else
+                                 "needs a collector that reads this")})
     return found
+
+
+def coverage() -> dict:
+    """What this tool assesses, and what it does not, in one place.
+
+    A section that lists findings says what was found and nothing about what was
+    looked for, so a reader cannot tell a condition that was checked and came back
+    clean from one that was never checked at all.
+    """
+    def order(condition: str) -> tuple:
+        """By number, so ESC2 comes before ESC15 rather than after it."""
+        digits = "".join(ch for ch in condition if ch.isdigit())
+        return (int(digits) if digits else 0, condition)
+
+    return {"assessed": {c: ASSESSED[c] for c in sorted(ASSESSED, key=order)},
+            "not_assessed": {c: UNASSESSABLE[c][0]
+                             for c in sorted(UNASSESSABLE, key=order)},
+            "assessed_count": len(ASSESSED), "not_assessed_count": len(UNASSESSABLE)}
 
 
 def assess_certificate_binding(data) -> dict:

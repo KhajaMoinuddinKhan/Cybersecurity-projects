@@ -21,7 +21,7 @@ import pytest
 
 from src.adcs import (assess_certificate_binding, assess_template, assess_unassessable,
                       authority_managers, certificate_chains,
-                      certificate_escalations)
+                      certificate_escalations, coverage)
 from src.chokepoints import attacker_map, chokepoints, minimum_node_cut, removal_impact
 from src.graph import build_graph, unfiltered_trusts
 from src import report as report_module
@@ -978,6 +978,60 @@ def test_a_trust_with_filtering_on_is_not_reported(forest):
         assert not [t for t in unfiltered_trusts(forest) if t["domain"] == victim.name]
     finally:
         victim.trusts = original
+
+
+def test_the_report_says_what_was_checked_before_it_says_what_it_found(forest, graph):
+    """A table of findings says what was found and nothing about what was looked for, so
+    a condition that was checked and came back clean reads the same as one that was
+    never checked. The coverage is stated before the findings, not after them."""
+    cov = coverage()
+    assert cov["assessed_count"] and cov["not_assessed_count"]
+    assert set(cov["assessed"]) & set(cov["not_assessed"]) == set(), \
+        "a condition cannot be both assessed and not"
+
+    privileged = {j.sid for j in crown_jewels(forest, graph)}
+    escalations = certificate_escalations(forest, graph, privileged)
+    assert escalations, "the data has findings, so both statements can be compared"
+    document = report_module.build(graph, crown_jewels(forest, graph),
+                                   {"points": [], "total": 0},
+                                   {"cut": [], "size": 0, "note": "not asked for"},
+                                   escalations, coverage=cov)
+    markdown = report_module.to_markdown(document)
+    statement = markdown.index("assessed %d of the %d" % (cov["assessed_count"],
+                                                          cov["assessed_count"] + cov["not_assessed_count"]))
+    first_finding = markdown.index("| Template |")
+    assert statement < first_finding, "coverage must come before the findings"
+
+    # and a collection with no findings at all still states its coverage
+    bare = report_module.build(graph, crown_jewels(forest, graph),
+                               {"points": [], "total": 0},
+                               {"cut": [], "size": 0, "note": "not asked for"},
+                               coverage=cov)
+    assert "assessed %d of the %d" % (cov["assessed_count"],
+                                      cov["assessed_count"] + cov["not_assessed_count"]) \
+        in report_module.to_markdown(bare), \
+        "coverage must not depend on there being findings to report"
+
+
+def test_a_condition_a_better_collection_would_fix_says_so(forest):
+    """ESC9 and ESC10 were refused, not uncollected: a collector with local
+    administrator rights would read them. Saying only that they cannot be decided told a
+    reader nothing could be done, when something could."""
+    rows = {r["condition"]: r for r in assess_unassessable(forest)}
+    refused = [c for c, r in rows.items() if r["fixable_by_collecting"]]
+    assert refused, "this collection refused a read that more rights would get"
+    for condition in refused:
+        assert rows[condition]["action"] == "run the collector with local administrator rights"
+    for condition, row in rows.items():
+        if not row["fixable_by_collecting"]:
+            assert row["action"] == "needs a collector that reads this"
+
+
+def test_the_conditions_read_in_number_order(forest):
+    """ESC15 is not before ESC2."""
+    order = list(coverage()["assessed"])
+    numbers = [int("".join(ch for ch in c if ch.isdigit())) for c in order]
+    assert numbers == sorted(numbers), "the conditions must read in number order: %s" % order
 
 
 def test_a_condition_that_cannot_be_decided_is_named_not_omitted(forest):

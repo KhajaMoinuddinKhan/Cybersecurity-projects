@@ -25,7 +25,7 @@ from .graph import build_graph, unfiltered_trusts
 from .schema import CollectorError, load_collector, load_forest
 from .adcs import (assess_certificate_binding, assess_unassessable,
                    authority_managers, certificate_chains,
-                   certificate_escalations)
+                   certificate_escalations, coverage as certificate_coverage)
 from .tier0 import Tier0Error, crown_jewels
 
 __all__ = ["main", "run_analysis"]
@@ -68,9 +68,10 @@ def run_analysis(paths, out_dir="attack-paths", include_derived=True,
     binding = assess_certificate_binding(data)
     trusts = unfiltered_trusts(data)
     unassessable = assess_unassessable(data)
+    cert_coverage = certificate_coverage()
 
     document = report_module.build(graph, jewels, choke, cut, escalations, chains, managers,
-                                   binding, trusts, unassessable,
+                                   binding, trusts, unassessable, cert_coverage,
                                    generated_at=datetime.now(timezone.utc))
     document["cut_sources"] = len(sources)
     (out / "report.md").write_text(report_module.to_markdown(document), encoding="utf-8")

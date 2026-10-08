@@ -19,7 +19,8 @@ __all__ = ["build", "to_markdown", "to_html"]
 
 
 def build(graph, jewels, choke, cut, escalations=(), chains=(), managers=(),
-          binding=None, trusts=(), unassessable=(), generated_at=None) -> dict:
+          binding=None, trusts=(), unassessable=(), coverage=None,
+          generated_at=None) -> dict:
     seeded = [jewel for jewel in jewels if not jewel.derived]
     derived = [jewel for jewel in jewels if jewel.derived]
     return {
@@ -43,6 +44,7 @@ def build(graph, jewels, choke, cut, escalations=(), chains=(), managers=(),
         "certificate_binding": dict(binding or {}),
         "unfiltered_trusts": list(trusts),
         "unassessable_conditions": list(unassessable),
+        "certificate_coverage": dict(coverage or {}),
         "context": _context(graph),
     }
 
@@ -92,6 +94,26 @@ def _clip(text: str, width: int) -> str:
     return text[:width - 1].rstrip() + "\u2026"
 
 
+def _coverage_markdown(document: dict) -> list:
+    """What was assessed, said before the findings rather than after them.
+
+    A table of findings says what was found and nothing about what was looked for, so a
+    condition that was checked and came back clean reads exactly like one that was never
+    checked. It is its own section for the same reason the binding section is: nested
+    inside the certificate one, it returned nothing whenever there were no escalations,
+    so a collection with nothing to report said nothing about its coverage either.
+    """
+    cov = document.get("certificate_coverage") or {}
+    if not cov:
+        return []
+    total = cov["assessed_count"] + cov["not_assessed_count"]
+    return ["**Certificate services: assessed %d of the %d published conditions** -- %s. "
+            "The other %d cannot be decided from this collection and are listed below "
+            "with what each one needs."
+            % (cov["assessed_count"], total, ", ".join(cov["assessed"]),
+               cov["not_assessed_count"]), ""]
+
+
 def _unassessable_markdown(document: dict) -> list:
     """The conditions this collection cannot decide, named rather than omitted."""
     rows = document.get("unassessable_conditions") or []
@@ -102,9 +124,14 @@ def _unassessable_markdown(document: dict) -> list:
              "these needs an object or a setting the collector did not read, and a report "
              "that simply did not mention them would read exactly like one where they "
              "were checked and came back clean.", "",
-             "| Condition | Needs | Why nothing is claimed |", "| --- | --- | --- |"]
-    for row in rows:
-        lines.append("| %s | %s | %s |" % (row["condition"], row["needs"], row["why"]))
+             "| Condition | Needs | Why nothing is claimed | What would fix it |",
+             "| --- | --- | --- | --- |"]
+    def by_number(row):
+        digits = "".join(ch for ch in row["condition"] if ch.isdigit())
+        return int(digits) if digits else 0
+    for row in sorted(rows, key=by_number):
+        lines.append("| %s | %s | %s | %s |" % (row["condition"], row["needs"], row["why"],
+                                                row.get("action", "")))
     lines.append("")
     return lines
 
@@ -166,7 +193,8 @@ def _escalations_markdown(document: dict) -> list:
              "template that lets the requester choose the subject, or that carries an "
              "authentication purpose, is a route to any principal's identity. The "
              "conditions below are read from the template's own attributes, not from "
-             "its name.", "",
+             "its name.", ""]
+    lines += [
              "| Template | Condition | Severity | Who can enroll | Why |",
              "| --- | --- | --- | --- | --- |"]
     for row in rows:
@@ -270,6 +298,7 @@ def to_markdown(document: dict) -> str:
                                                          jewel["hops"], jewel["reaches"]))
         lines.append("")
 
+    lines.extend(_coverage_markdown(document))
     lines.extend(_escalations_markdown(document))
     lines.extend(_unassessable_markdown(document))
     lines.extend(_trusts_markdown(document))
@@ -466,6 +495,14 @@ def to_html(document: dict) -> str:
                             escape(jewel["reaches"])))
         parts.append("</table>")
 
+    cov = document.get("certificate_coverage") or {}
+    if cov:
+        parts.append("<p><strong>Certificate services: assessed %d of the %d published "
+                     "conditions</strong> -- %s. The other %d cannot be decided from this "
+                     "collection and are listed below with what each one needs.</p>"
+                     % (cov["assessed_count"],
+                        cov["assessed_count"] + cov["not_assessed_count"],
+                        escape(", ".join(cov["assessed"])), cov["not_assessed_count"]))
     rows = document.get("certificate_escalations") or []
     if rows:
         parts.append("<h2>Certificate services</h2><p>An authority issues a certificate "
