@@ -37,6 +37,20 @@ void coverage_attach(uint8_t *region) {
     coverage_edges = (uint64_t *)(region + COVERAGE_MAP_SIZE);
 }
 
+/* The callback must not itself be instrumented, and this attribute is the only thing
+ * that says so.
+ *
+ * It is a call inserted on every edge, and it is a function like any other, so a
+ * compiler that instruments everything it compiles will instrument it -- and then every
+ * call to it is a call to itself. That is infinite recursion, and it ends in a stack
+ * overflow: the target died with a segmentation fault before running a single input,
+ * on every execution, and reported no coverage at all because it never got far enough
+ * to record any.
+ *
+ * Clang excludes the callback automatically, which is why this went unnoticed: the
+ * build on one platform worked and the build on the other could not start. GCC does
+ * not, and the attribute is what both accept. */
+__attribute__((no_instrument_function))
 void __sanitizer_cov_trace_pc(void) {
     /* The return address is the edge. Shifting drops the instruction-alignment bits,
      * which carry nothing about which edge this is. */

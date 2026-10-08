@@ -53,6 +53,15 @@ class Outcome:
             # It stopped answering and the platform would not say how it ended. Naming a
             # cause here would be a guess, and a guess is what a crash report must not be.
             return "died without a code"
+        if self.exit_code < 0:
+            # On a platform that reports a signal as a negative number, that number is
+            # the signal. Printing it as a status code gives 0xFFFFFFF5, which reads as a
+            # Windows exception and is not one.
+            import signal as _signal
+            try:
+                return "killed by %s" % _signal.Signals(-self.exit_code).name
+            except ValueError:
+                return "killed by signal %d" % -self.exit_code
         known = {
             0xC0000005: "access violation",
             0xC000001D: "illegal instruction",
