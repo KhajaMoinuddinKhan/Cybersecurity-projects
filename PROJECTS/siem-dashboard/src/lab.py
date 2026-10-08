@@ -276,7 +276,7 @@ def _powershell(script: str, timeout: int = 120) -> tuple[str, int]:
     except subprocess.TimeoutExpired:
         process.kill()
         stdout, stderr = process.communicate()
-        raise CaptureError("PowerShell did not return within %d seconds" % timeout)
+        raise CaptureError("PowerShell did not return within %d seconds" % timeout) from None
     stdout = stdout if isinstance(stdout, str) else ""
     if process.returncode and not stdout.strip():
         raise CaptureError(((stderr or "").strip() or "PowerShell failed")[:400])
@@ -520,6 +520,10 @@ def run_technique(technique: Technique) -> Window:
             "these channels could not be read, so this window is incomplete: %s. "
             "The capture needs an elevated shell for Sysmon and Security."
             % ", ".join(unreadable))
+
+    # noqa: RET504 -- named so the value reads as what it is before it is
+
+    # returned; the assignment is documentation, not a step.
 
     window = Window(label=technique.attack_id,
                     technique="%s (%s)" % (technique.name, technique.atomic),

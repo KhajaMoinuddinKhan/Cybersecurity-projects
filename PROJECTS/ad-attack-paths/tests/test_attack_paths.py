@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from src.adcs import (assess_authority, assess_certificate_binding, assess_template,
-                      authority_managers, certificate_chains, certificate_escalations)
+from src.adcs import (assess_certificate_binding, assess_template, authority_managers,
+                      certificate_chains, certificate_escalations)
 from src.chokepoints import attacker_map, chokepoints, minimum_node_cut, removal_impact
 from src.graph import build_graph, unfiltered_trusts
 from src import report as report_module

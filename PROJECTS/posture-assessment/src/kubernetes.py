@@ -73,7 +73,7 @@ def assess_kubernetes(policy, text: str, target: str = "manifest.yaml") -> list:
     except Exception:
         return findings
 
-    for index, manifest in enumerate(documents):
+    for manifest in documents:
         kind = manifest.get("kind") or "?"
         name = (manifest.get("metadata") or {}).get("name") or "unnamed"
         where = "%s: %s/%s" % (target, kind, name)

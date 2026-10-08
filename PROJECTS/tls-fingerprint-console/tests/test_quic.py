@@ -223,7 +223,7 @@ def _build_initial(dcid, packet_number, crypto_offset, crypto_data, pad_to=None)
     pn_offset = len(header)
     pn = packet_number.to_bytes(pn_len, "big")
     aad = header + pn
-    nonce = bytes(a ^ b for a, b in zip(keys["iv"], packet_number.to_bytes(12, "big")))
+    nonce = bytes(a ^ b for a, b in zip(keys["iv"], packet_number.to_bytes(12, "big"), strict=True))
     ct = AESGCM(keys["key"]).encrypt(nonce, payload, aad)
     packet = bytearray(aad + ct)
 

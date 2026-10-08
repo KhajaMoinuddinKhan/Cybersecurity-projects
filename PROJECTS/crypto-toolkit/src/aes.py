@@ -146,7 +146,7 @@ def _expand_key(key: bytes):
             temp[0] ^= R_CON[i // nk - 1]
         elif nk > 6 and i % nk == 4:
             temp = [S_BOX[b] for b in temp]            # SubWord, AES-256 only
-        words.append([a ^ b for a, b in zip(words[i - nk], temp)])
+        words.append([a ^ b for a, b in zip(words[i - nk], temp, strict=False)])
 
     round_keys = []
     for r in range(rounds + 1):
@@ -390,7 +390,7 @@ class CTR:
             )
             self._buffer += block
             self._counter = (self._counter + 1) % (1 << 128)
-        out = bytes(a ^ b for a, b in zip(data, self._buffer))
+        out = bytes(a ^ b for a, b in zip(data, self._buffer, strict=False))
         self._buffer = self._buffer[len(data):]
         return out
 
@@ -409,4 +409,4 @@ def xor_bytes(left: bytes, right: bytes) -> bytes:
         raise ValueError(
             f"xor_bytes needs buffers of equal length, got {len(left)} and {len(right)}"
         )
-    return bytes(a ^ b for a, b in zip(left, right))
+    return bytes(a ^ b for a, b in zip(left, right, strict=False))

@@ -76,7 +76,7 @@ def fingerprint_streams(packets):
             syns.setdefault((p["src_ip"], p["src_port"]), p)
 
     results = []
-    for key, flow in flows.items():
+    for _key, flow in flows.items():
         rec = {
             "client": None, "server": None,
             "fingerprints": {}, "sni": None, "alpn": None, "user_agent": None,

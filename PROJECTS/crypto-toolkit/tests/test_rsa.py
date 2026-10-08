@@ -217,8 +217,8 @@ def test_oaep_encode_refuses_a_message_that_is_too_long():
 def _mask_db(db: bytes, k: int, seed: bytes = b"\x00" * OAEP_HASH_LENGTH) -> bytes:
     """Wrap a chosen DB in the two OAEP masks, to build blocks by hand."""
 
-    masked_db = bytes(a ^ b for a, b in zip(db, mgf1(seed, k - OAEP_HASH_LENGTH - 1)))
-    masked_seed = bytes(a ^ b for a, b in zip(seed, mgf1(masked_db, OAEP_HASH_LENGTH)))
+    masked_db = bytes(a ^ b for a, b in zip(db, mgf1(seed, k - OAEP_HASH_LENGTH - 1), strict=True))
+    masked_seed = bytes(a ^ b for a, b in zip(seed, mgf1(masked_db, OAEP_HASH_LENGTH), strict=True))
     return b"\x00" + masked_seed + masked_db
 
 

@@ -111,9 +111,16 @@ def benchmark_rsa(bits=(2048, 3072), keygen_iterations: int = 1,
         message = b"a shared secret of this length"
         ciphertext = rsa_encrypt(public, message)
 
-        keygen_ms = _time(lambda: rsa_keygen(size), keygen_iterations)
-        encrypt_ms = _time(lambda: rsa_encrypt(public, message), operation_iterations)
-        decrypt_ms = _time(lambda: rsa_decrypt(private, ciphertext), operation_iterations)
+        # The loop values are bound as defaults rather than closed over. `_time` calls
+        # its argument immediately, so closing over them happened to be correct -- but a
+        # closure reads the variable when it runs, not when it is written, so any change
+        # to when the call happens would silently measure the last iteration's key size
+        # for every row. A benchmark that measures the wrong thing is worse than none.
+        keygen_ms = _time(lambda size=size: rsa_keygen(size), keygen_iterations)
+        encrypt_ms = _time(lambda public=public, message=message:
+                           rsa_encrypt(public, message), operation_iterations)
+        decrypt_ms = _time(lambda private=private, ciphertext=ciphertext:
+                           rsa_decrypt(private, ciphertext), operation_iterations)
 
         strength, source = security_strength_for(f"RSA-{size}")
         rows.append(BenchmarkRow(
@@ -137,9 +144,13 @@ def benchmark_mlkem(parameter_sets=MLKEM_PARAMETER_SETS, keygen_iterations: int 
         public, private = mlkem_keygen(parameters)
         shared_secret, ciphertext = mlkem_encapsulate(public, parameters)
 
-        keygen_ms = _time(lambda: mlkem_keygen(parameters), keygen_iterations)
-        encapsulate_ms = _time(lambda: mlkem_encapsulate(public, parameters), operation_iterations)
-        decapsulate_ms = _time(lambda: mlkem_decapsulate(private, ciphertext, parameters),
+        keygen_ms = _time(lambda parameters=parameters: mlkem_keygen(parameters),
+                          keygen_iterations)
+        encapsulate_ms = _time(lambda public=public, parameters=parameters:
+                               mlkem_encapsulate(public, parameters), operation_iterations)
+        decapsulate_ms = _time(lambda private=private, ciphertext=ciphertext,
+                               parameters=parameters:
+                               mlkem_decapsulate(private, ciphertext, parameters),
                                operation_iterations)
 
         strength, source = security_strength_for(parameters.name)

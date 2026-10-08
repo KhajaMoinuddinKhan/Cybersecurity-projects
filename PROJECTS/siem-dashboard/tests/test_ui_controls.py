@@ -31,7 +31,7 @@ def test_dashboard_controls(tmp_path):
     try:
         environment = {**os.environ, "SIEM_TEST_URL": f"http://127.0.0.1:{server.server_port}"}
         result = None
-        for attempt in range(UI_ATTEMPTS):
+        for _attempt in range(UI_ATTEMPTS):
             result = subprocess.run(
                 [node, str(Path(__file__).with_name("dashboard_ui.cjs"))],
                 env=environment, capture_output=True, text=True,

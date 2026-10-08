@@ -428,6 +428,11 @@ def sign_deterministic(private_key: PrivateKey, digest: bytes) -> tuple[int, int
             return sign(private_key, digest, nonce)
         except ValueError:
             continue
+    # Falling out of the loop returned None where a signature is promised, and a caller
+    # unpacking it would fail somewhere else entirely with a message about a NoneType.
+    # The branch is unreachable for any realistic input, which is exactly why it has to
+    # say what happened rather than return nothing.
+    raise ValueError("no valid nonce was found for this digest")
 
 
 def verify(public_key: PublicKey, digest: bytes, signature: tuple[int, int]) -> bool:

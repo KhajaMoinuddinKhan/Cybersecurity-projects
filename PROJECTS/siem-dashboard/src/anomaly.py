@@ -268,7 +268,7 @@ class CommandLanguageModel:
             for token in tokens:
                 self.unigrams[token] = self.unigrams.get(token, 0) + 1
                 self.vocabulary.add(token)
-            for left, right in zip(tokens, tokens[1:]):
+            for left, right in zip(tokens, tokens[1:], strict=False):
                 key = (left, right)
                 self.bigrams[key] = self.bigrams.get(key, 0) + 1
         return self
@@ -551,7 +551,7 @@ def evaluate(corpus: dict, threshold: float | None = None,
 
     def summarise(name: str, windows: dict) -> dict:
         benign_scores, attack_scores = [], []
-        for label, fraction, count in windows.values():
+        for label, fraction, _count in windows.values():
             (benign_scores if label == "benign" else attack_scores).append(fraction)
         mean = lambda xs: (sum(xs) / len(xs)) if xs else 0.0
         return {

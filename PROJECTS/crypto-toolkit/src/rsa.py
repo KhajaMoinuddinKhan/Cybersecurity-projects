@@ -323,7 +323,7 @@ def _xor(left: bytes, right: bytes) -> bytes:
 
     if len(left) != len(right):
         raise ValueError("the operands must be the same length")
-    return bytes(a ^ b for a, b in zip(left, right))
+    return bytes(a ^ b for a, b in zip(left, right, strict=True))
 
 
 def oaep_encode(message: bytes, k: int, label: bytes = b"") -> bytes:
@@ -395,7 +395,7 @@ def oaep_decode(encoded: bytes, k: int, label: bytes = b"") -> bytes:
     # the recovered label hash must match, and PS must end in a 0x01 separator.
     bad = encoded[0]
     difference = 0
-    for left, right in zip(db[:hlen], lhash):
+    for left, right in zip(db[:hlen], lhash, strict=True):
         difference |= left ^ right
     bad |= difference
 

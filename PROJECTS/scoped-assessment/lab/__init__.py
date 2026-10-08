@@ -203,7 +203,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Location", destination)
             self.send_header("Content-Length", "0")
             self.end_headers()
-            return
+            return None
 
         if route == "/boom":
             # Flaw: the error names a path on the server's disk.

@@ -101,7 +101,7 @@ def constant_time_compare(left: bytes, right: bytes) -> bool:
         return False
 
     difference = 0
-    for a, b in zip(left, right):
+    for a, b in zip(left, right, strict=True):
         difference |= a ^ b
 
     return difference == 0

@@ -426,6 +426,8 @@ _GROUP_FIELDS = {"host": "host", "username": "username"}
 
 def _stimulus_event(rule_id: str, timestamp: str, host: str, username: str) -> dict:
     template = _CORRELATION_STIMULUS[rule_id]
+    # noqa: RET504 -- named so the value reads as what it is before it is
+    # returned; the assignment is documentation, not a step.
     event = {
         "rule_id": rule_id,
         "timestamp": timestamp,
@@ -473,9 +475,13 @@ def measure_correlation(engine: RuleEngine | None = None) -> dict:
                       or not rule_matches(event_fields(_stimulus_event(step, _iso(0), "H", "U")),
                                           detection[step])]
 
-        def scenario(offsets, hosts):
+        # The loop values are bound as defaults. These closures run inside the same
+        # iteration, so closing over them is correct today -- but a closure reads the
+        # variable when it runs, not when it is written, and any change to when it runs
+        # would silently pair this rule's steps with the next rule's offsets.
+        def scenario(offsets, hosts, steps=steps):
             return [_stimulus_event(step, _iso(offset), hosts[index], hosts[index])
-                    for index, (step, offset) in enumerate(zip(steps, offsets))]
+                    for index, (step, offset) in enumerate(zip(steps, offsets, strict=True))]
 
         in_order = [index * 10 for index in range(len(steps))]
         positives = scenario(in_order, ["HOST-A"] * len(steps))
@@ -486,7 +492,7 @@ def measure_correlation(engine: RuleEngine | None = None) -> dict:
             "different groups": scenario(in_order, ["HOST-%d" % index for index in range(len(steps))]),
         }
 
-        def fires(events):
+        def fires(events, rule=rule):
             return any(payload.get("event_id") == rule.id
                        for payload in build_correlation_payloads(events, [rule]))
 

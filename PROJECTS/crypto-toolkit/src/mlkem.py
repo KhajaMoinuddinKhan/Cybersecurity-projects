@@ -324,16 +324,16 @@ def _matrix_vector_product(matrix: list[list[list[int]]], vector: list[list[int]
         for j in range(k):
             entry = matrix[j][i] if transpose else matrix[i][j]
             product = _multiply_ntts(entry, vector[j])
-            accumulator = [(a + b) % MLKEM_Q for a, b in zip(accumulator, product)]
+            accumulator = [(a + b) % MLKEM_Q for a, b in zip(accumulator, product, strict=True)]
         result.append(accumulator)
     return result
 
 
 def _vector_inner_product(a: list[list[int]], b: list[list[int]]) -> list[int]:
     accumulator = [0] * MLKEM_N
-    for left, right in zip(a, b):
+    for left, right in zip(a, b, strict=True):
         product = _multiply_ntts(left, right)
-        accumulator = [(x + y) % MLKEM_Q for x, y in zip(accumulator, product)]
+        accumulator = [(x + y) % MLKEM_Q for x, y in zip(accumulator, product, strict=True)]
     return accumulator
 
 
@@ -361,8 +361,8 @@ def _kpke_keygen(d: bytes, parameters: MLKEMParameters) -> tuple[bytes, bytes]:
         accumulator = [0] * MLKEM_N
         for j in range(k):
             product = _multiply_ntts(matrix[i][j], s_hat[j])
-            accumulator = [(a + b) % MLKEM_Q for a, b in zip(accumulator, product)]
-        t_hat.append([(a + b) % MLKEM_Q for a, b in zip(accumulator, e_hat[i])])
+            accumulator = [(a + b) % MLKEM_Q for a, b in zip(accumulator, product, strict=True)]
+        t_hat.append([(a + b) % MLKEM_Q for a, b in zip(accumulator, e_hat[i], strict=True)])
 
     encryption_key = b"".join(_byte_encode(poly, 12) for poly in t_hat) + rho
     decryption_key = b"".join(_byte_encode(poly, 12) for poly in s_hat)
@@ -393,11 +393,11 @@ def _kpke_encrypt(encryption_key: bytes, message: bytes, randomness: bytes,
 
     u = []
     for poly in _matrix_vector_product(matrix, y_hat, transpose=True):
-        u.append([(a + b) % MLKEM_Q for a, b in zip(_ntt_inverse(poly), e1[len(u)])])
+        u.append([(a + b) % MLKEM_Q for a, b in zip(_ntt_inverse(poly), e1[len(u)], strict=True)])
 
     mu = [_decompress(value, 1) for value in _byte_decode(message, 1)]
     v = _ntt_inverse(_vector_inner_product(t_hat, y_hat))
-    v = [(a + b + c) % MLKEM_Q for a, b, c in zip(v, e2, mu)]
+    v = [(a + b + c) % MLKEM_Q for a, b, c in zip(v, e2, mu, strict=True)]
 
     c1 = b"".join(_byte_encode([_compress(value, parameters.du) for value in poly], parameters.du)
                   for poly in u)
@@ -423,7 +423,7 @@ def _kpke_decrypt(decryption_key: bytes, ciphertext: bytes,
 
     u_hat = [_ntt(poly) for poly in u]
     w = _ntt_inverse(_vector_inner_product(s_hat, u_hat))
-    w = [(a - b) % MLKEM_Q for a, b in zip(v, w)]
+    w = [(a - b) % MLKEM_Q for a, b in zip(v, w, strict=True)]
     return _byte_encode([_compress(value, 1) for value in w], 1)
 
 

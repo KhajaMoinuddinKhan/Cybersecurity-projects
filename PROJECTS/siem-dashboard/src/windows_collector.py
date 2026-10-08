@@ -395,7 +395,7 @@ class WindowsEventCollector:
             process.communicate()
             raise RuntimeError(
                 "PowerShell command timed out after %d seconds" % POWERSHELL_TIMEOUT_SECONDS
-            )
+            ) from None
 
         if process.returncode != 0:
             error = (stderr or "").strip() or (stdout or "").strip() or "PowerShell command failed"

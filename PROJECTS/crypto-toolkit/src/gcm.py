@@ -172,6 +172,6 @@ def _constant_time_equal(left: bytes, right: bytes) -> bool:
     if len(left) != len(right):
         return False
     difference = 0
-    for a, b in zip(left, right):
+    for a, b in zip(left, right, strict=True):
         difference |= a ^ b
     return difference == 0

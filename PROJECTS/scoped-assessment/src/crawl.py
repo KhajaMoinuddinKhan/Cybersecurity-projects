@@ -228,7 +228,7 @@ def crawl(scope, host: str, port: int, start: str = "/", max_pages: int = 25,
         else:
             responses = [read_page(url) for url, _ in batch]
 
-        for (url, depth), response in zip(batch, responses):
+        for (url, depth), response in zip(batch, responses, strict=False):
             read += 1
             page = Page(url=url, status=response.get("status", 0),
                         content_type=(response.get("headers", {}) or {}).get("content-type", ""),

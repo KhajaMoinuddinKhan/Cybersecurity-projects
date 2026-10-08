@@ -259,7 +259,7 @@ def _aes_ecb_encrypt(key, data):
 
 def _nonce(iv, packet_number):
     pad = packet_number.to_bytes(12, "big")
-    return bytes(a ^ b for a, b in zip(iv, pad))
+    return bytes(a ^ b for a, b in zip(iv, pad, strict=False))
 
 
 def decrypt_initial(packet, keys):
