@@ -997,20 +997,24 @@ def test_the_report_says_what_was_checked_before_it_says_what_it_found(forest, g
                                    {"cut": [], "size": 0, "note": "not asked for"},
                                    escalations, coverage=cov)
     markdown = report_module.to_markdown(document)
-    statement = markdown.index("assessed %d of the %d" % (cov["assessed_count"],
-                                                          cov["assessed_count"] + cov["not_assessed_count"]))
+    phrase = "assessed %d of the %d published conditions" % (
+        cov["assessed_count"], cov["assessed_count"] + cov["not_assessed_count"])
+    lower = markdown.lower()
+    statement = lower.index(phrase)
     first_finding = markdown.index("| Template |")
-    assert statement < first_finding, "coverage must come before the findings"
+    heading = markdown.index("## Certificate services")
+    assert heading < statement < first_finding, \
+        "the coverage belongs under the heading and before the findings"
 
     # and a collection with no findings at all still states its coverage
     bare = report_module.build(graph, crown_jewels(forest, graph),
                                {"points": [], "total": 0},
                                {"cut": [], "size": 0, "note": "not asked for"},
                                coverage=cov)
-    assert "assessed %d of the %d" % (cov["assessed_count"],
-                                      cov["assessed_count"] + cov["not_assessed_count"]) \
-        in report_module.to_markdown(bare), \
+    assert phrase in report_module.to_markdown(bare).lower(), \
         "coverage must not depend on there being findings to report"
+    assert phrase in report_module.to_html(bare).lower(), \
+        "and the page must carry it too"
 
 
 def test_a_condition_a_better_collection_would_fix_says_so(forest):

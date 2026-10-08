@@ -94,26 +94,6 @@ def _clip(text: str, width: int) -> str:
     return text[:width - 1].rstrip() + "\u2026"
 
 
-def _coverage_markdown(document: dict) -> list:
-    """What was assessed, said before the findings rather than after them.
-
-    A table of findings says what was found and nothing about what was looked for, so a
-    condition that was checked and came back clean reads exactly like one that was never
-    checked. It is its own section for the same reason the binding section is: nested
-    inside the certificate one, it returned nothing whenever there were no escalations,
-    so a collection with nothing to report said nothing about its coverage either.
-    """
-    cov = document.get("certificate_coverage") or {}
-    if not cov:
-        return []
-    total = cov["assessed_count"] + cov["not_assessed_count"]
-    return ["**Certificate services: assessed %d of the %d published conditions** -- %s. "
-            "The other %d cannot be decided from this collection and are listed below "
-            "with what each one needs."
-            % (cov["assessed_count"], total, ", ".join(cov["assessed"]),
-               cov["not_assessed_count"]), ""]
-
-
 def _unassessable_markdown(document: dict) -> list:
     """The conditions this collection cannot decide, named rather than omitted."""
     rows = document.get("unassessable_conditions") or []
@@ -184,9 +164,16 @@ def _binding_markdown(document: dict) -> list:
 
 
 def _escalations_markdown(document: dict) -> list:
-    """The certificate section, or nothing at all when there is nothing to say."""
+    """The certificate section.
+
+    The heading and the statement of coverage are always emitted; only the findings
+    table depends on there being findings. Gating the whole section on a finding meant a
+    collection with none said nothing about what it had checked -- and the coverage
+    statement then floated above the heading it belongs to.
+    """
     rows = document.get("certificate_escalations") or []
-    if not rows:
+    cov = document.get("certificate_coverage") or {}
+    if not rows and not cov:
         return []
     lines = ["## Certificate services", "",
              "An authority issues a certificate for whatever its templates permit, and a "
@@ -194,6 +181,15 @@ def _escalations_markdown(document: dict) -> list:
              "authentication purpose, is a route to any principal's identity. The "
              "conditions below are read from the template's own attributes, not from "
              "its name.", ""]
+    if cov:
+        total = cov["assessed_count"] + cov["not_assessed_count"]
+        lines += ["**Assessed %d of the %d published conditions** -- %s. The other %d "
+                  "cannot be decided from this collection and are listed below with what "
+                  "each one needs."
+                  % (cov["assessed_count"], total, ", ".join(cov["assessed"]),
+                     cov["not_assessed_count"]), ""]
+    if not rows:
+        return lines + [""]
     lines += [
              "| Template | Condition | Severity | Who can enroll | Why |",
              "| --- | --- | --- | --- | --- |"]
@@ -298,7 +294,6 @@ def to_markdown(document: dict) -> str:
                                                          jewel["hops"], jewel["reaches"]))
         lines.append("")
 
-    lines.extend(_coverage_markdown(document))
     lines.extend(_escalations_markdown(document))
     lines.extend(_unassessable_markdown(document))
     lines.extend(_trusts_markdown(document))
