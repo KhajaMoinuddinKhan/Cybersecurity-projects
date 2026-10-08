@@ -334,7 +334,16 @@ def test_a_crash_is_recorded_with_the_path_that_reached_it(coverage_map, vulnera
 
 
 def test_the_same_seed_reproduces_the_same_search(coverage_map, vulnerable):
+    """A search is reproducible from its seed, and its state is more than the seed.
+
+    What a search has discovered lives in the coverage map, so running two searches
+    against one map runs the second with the first's knowledge and the two are not
+    comparable. The map is reset between them, which is what makes this a comparison of
+    two searches rather than a comparison of a search against a search with a head start.
+    """
+
     def search():
+        coverage_map.reset()
         with PersistentTarget(vulnerable, coverage_map) as target:
             engine = Engine(target, seed=42, dictionary=(TAG,))
             engine.add_seed(b"")

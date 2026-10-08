@@ -105,6 +105,19 @@ class CoverageMap:
             return fresh.bit_count()
         return 0
 
+    def reset(self) -> None:
+        """Forget everything seen, so a search can start from nothing.
+
+        What a search discovers is held here rather than in the search, and a caller who
+        runs two searches against one map is running the second one with the first one's
+        knowledge. That is not a defect in either -- it is what a shared map means -- but
+        it does mean that comparing two searches requires resetting this first, and a
+        comparison made without it is comparing a search against a search that had a head
+        start.
+        """
+        self.virgin = 0
+        self.total_edges = 0
+
     def signature(self, map_bytes: bytes) -> str:
         """A short identifier for the shape of a run, used to bucket crashes.
 
