@@ -55,6 +55,7 @@ class Stats:
     edges_found: int = 0
     started: float = 0.0
     elapsed: float = 0.0
+    timed_out: bool = False
 
     @property
     def per_second(self) -> float:
@@ -133,15 +134,28 @@ class Engine:
         return {"kind": "nothing", "new_edges": 0}
 
     def run(self, budget: int = 20000, stop_after_crashes: int = None,
-            on_event=None) -> Stats:
-        """Run until the budget is spent or enough crashes are found."""
+            on_event=None, time_limit: float = None) -> Stats:
+        """Run until the budget is spent, enough crashes are found, or time runs out.
+
+        The execution budget is the ordinary way to bound a search and it is not
+        sufficient on its own. An execution is supposed to be cheap and a target that
+        has stopped answering makes it expensive -- so a budget of twenty thousand is a
+        second of work or an hour of waiting, depending on the target, and nothing about
+        the number says which. The time limit is the bound that cannot be defeated by
+        the thing being measured, and a caller that leaves it out is trusting the target
+        to behave.
+        """
         self.stats.started = time.time()
+        self.stats.timed_out = False
         while self.stats.executions < budget:
             result = self.step()
             self.stats.elapsed = time.time() - self.stats.started
             if on_event:
                 on_event(result, self.stats)
             if stop_after_crashes and len(self.findings) >= stop_after_crashes:
+                break
+            if time_limit is not None and self.stats.elapsed > time_limit:
+                self.stats.timed_out = True
                 break
         self.stats.elapsed = time.time() - self.stats.started
         return self.stats

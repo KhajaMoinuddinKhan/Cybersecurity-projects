@@ -25,6 +25,11 @@ from src.crash import group
 from src.engine import Engine
 from src.exploit import demonstrate, find_offset
 from src.mutate import INTERESTING_8, Mutator
+
+# A search that cannot finish in this is a search that is not working, and a test that
+# waits for it is a test that has stopped reporting. Every run of the engine in this
+# file is bounded by one of these.
+SEARCH_SECONDS = 90
 from src.target import PersistentTarget, Target
 
 TAG = b"RECS"
@@ -270,7 +275,7 @@ def test_the_fuzzer_finds_the_defect_from_an_empty_seed(coverage_map, vulnerable
     with PersistentTarget(vulnerable, coverage_map) as target:
         engine = Engine(target, seed=4, dictionary=(TAG,))
         engine.add_seed(b"")
-        engine.run(budget=6000)
+        engine.run(budget=6000, time_limit=90)
     assert engine.findings, "the search did not reach the defect"
     assert engine.stats.edges_found > 20, "coverage guidance found almost nothing"
 
@@ -280,7 +285,7 @@ def test_the_search_builds_a_corpus_rather_than_keeping_everything(coverage_map,
     with PersistentTarget(vulnerable, coverage_map) as target:
         engine = Engine(target, seed=6, dictionary=(TAG,))
         engine.add_seed(b"")
-        engine.run(budget=3000)
+        engine.run(budget=3000, time_limit=60)
     assert len(engine.corpus) > 1, "nothing was learned"
     assert len(engine.corpus) < engine.stats.executions / 10, \
         "the corpus is keeping almost everything, so the rule is not filtering"
@@ -290,7 +295,7 @@ def test_a_crash_is_recorded_with_the_path_that_reached_it(coverage_map, vulnera
     with PersistentTarget(vulnerable, coverage_map) as target:
         engine = Engine(target, seed=5, dictionary=(TAG,))
         engine.add_seed(b"")
-        engine.run(budget=4000)
+        engine.run(budget=4000, time_limit=60)
     assert engine.findings
     for finding in engine.findings.values():
         assert finding.edges > 0, "a crash without a path cannot be compared to another"
@@ -302,7 +307,7 @@ def test_the_same_seed_reproduces_the_same_search(coverage_map, vulnerable):
         with PersistentTarget(vulnerable, coverage_map) as target:
             engine = Engine(target, seed=42, dictionary=(TAG,))
             engine.add_seed(b"")
-            engine.run(budget=800)
+            engine.run(budget=800, time_limit=60)
         return sorted(f.data for f in engine.findings.values())
 
     assert search() == search()
