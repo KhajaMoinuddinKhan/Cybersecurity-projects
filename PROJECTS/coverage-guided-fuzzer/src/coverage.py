@@ -28,6 +28,9 @@ between a tool that finishes and one that does not.
 from __future__ import annotations
 
 import hashlib
+import os
+import random
+import time
 from multiprocessing import shared_memory
 
 MAP_SIZE = 65536
@@ -45,24 +48,28 @@ MAX_INPUT = 1 << 16
 INPUT_LENGTH_OFFSET = COMPARISON_DATA_OFFSET + MAX_COMPARISONS * COMPARISON_SIZE
 INPUT_DATA_OFFSET = INPUT_LENGTH_OFFSET + 4
 REGION_SIZE = INPUT_DATA_OFFSET + MAX_INPUT
+
+# How many times to try for a region name before deciding it belongs to somebody else.
+# The retry is for the case two fuzzers start at once and each sees the other's region
+# appear between its attempt and its recovery; the give-up is for a name genuinely in use.
+REGION_ATTEMPTS = 8
 MAP_BITS = MAP_SIZE * 8
 
 
 class CoverageMap:
     """The shared region, and the bookkeeping that turns it into guidance."""
 
-    def __init__(self, name: str = "cgf-coverage"):
+    def __init__(self, name: str = None):
+        # A name of its own by default. The region is a rendezvous point between one
+        # fuzzer and the target processes it starts, so a name has exactly one owner and
+        # a fixed default makes every second run a collision -- one that used to end in a
+        # traceback, and could end worse: the recovery path unlinked whatever held the
+        # name, which for a running fuzzer is its own coverage map being taken away
+        # mid-search.
+        if name is None:
+            name = "cgf-%d-%d" % (os.getpid(), random.randrange(1 << 30))
         self.name = name
-        try:
-            self._shm = shared_memory.SharedMemory(name=name, create=True,
-                                                   size=REGION_SIZE)
-        except FileExistsError:
-            # A previous run left it behind; its contents are worthless anyway.
-            stale = shared_memory.SharedMemory(name=name)
-            stale.close()
-            stale.unlink()
-            self._shm = shared_memory.SharedMemory(name=name, create=True,
-                                                   size=REGION_SIZE)
+        self._shm = self._create(name)
         self.buf = self._shm.buf
         # `virgin` is the union of every edge ever seen, as a bit set. An input is
         # interesting when it sets a bit here that is not yet set, which is the whole of
@@ -70,6 +77,36 @@ class CoverageMap:
         self.virgin = 0
         self.total_edges = 0
         self._blank = b"\x00" * MAP_SIZE
+
+    @staticmethod
+    def _create(name: str):
+        """Create the region, and never take one that is already there.
+
+        The region is a rendezvous point between one fuzzer and the target processes it
+        starts, so a name has exactly one owner and a second claim on it is a mistake
+        rather than an opportunity. The recovery path used to unlink whatever held the
+        name, which for a running fuzzer is its own coverage map being taken away
+        mid-search -- the fuzzer keeps running, its target keeps writing into a region
+        that is no longer the one being read, and the guidance quietly becomes noise.
+
+        The platform decides whether that is visible, which is the trap: deleting a
+        mapped region is refused on Windows and permitted on Linux, so the same code
+        fails loudly on one and silently corrupts on the other. It is not taken anywhere
+        now, and a name that is genuinely in use is a sentence the caller can act on.
+        """
+        for attempt in range(REGION_ATTEMPTS):
+            try:
+                return shared_memory.SharedMemory(name=name, create=True,
+                                                  size=REGION_SIZE)
+            except FileExistsError:
+                # Retried, because two fuzzers starting at the same moment can each see
+                # the other's region appear between their attempt and their recovery.
+                time.sleep(0.02 * (attempt + 1))
+        raise RuntimeError(
+            "the shared-memory region %r already exists -- it belongs to a fuzzer that "
+            "is running, or to one that was interrupted and did not clean up. Give this "
+            "run a name of its own with --region, or leave the name out and one will be "
+            "chosen" % name)
 
     def clear(self) -> None:
         """Reset before an execution, so what is read afterwards is that run's alone.

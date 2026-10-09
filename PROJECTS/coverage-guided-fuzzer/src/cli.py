@@ -27,6 +27,10 @@ from .target import PersistentTarget
 # Bounded by the clock for that reason: the number of attempts is not what varies.
 MINIMISE_SECONDS = 20.0
 
+class SeedError(Exception):
+    """A starting corpus that could not be read."""
+
+
 # The tokens the fuzzer is told about. Four bytes of tag are four bytes a random search
 # will not find; everything past the tag is discovered from coverage.
 DEFAULT_DICTIONARY = (b"RECS",)
@@ -34,10 +38,20 @@ DEFAULT_DICTIONARY = (b"RECS",)
 
 def _load_seeds(paths) -> list:
     """Read the starting corpus. An empty corpus is allowed and is the interesting case:
-    the search has to find the format from nothing."""
+    the search has to find the format from nothing.
+
+    A file that cannot be read is an error rather than an empty corpus. The two are easy
+    to confuse from the inside -- an unreadable seed and no seed both leave nothing to
+    start from -- and they are not the same thing at all: one is the search being asked
+    the interesting question, and the other is the search being handed a typo and left to
+    discover the format from nothing while the caller believes it supplied a corpus.
+    """
     seeds = []
     for path in paths or []:
-        seeds.append(Path(path).read_bytes())
+        try:
+            seeds.append(Path(path).read_bytes())
+        except OSError as exc:
+            raise SeedError("cannot read the seed %s: %s" % (path, exc.strerror)) from None
     return seeds
 
 
@@ -47,16 +61,29 @@ def _run_fuzz(args) -> int:
         print(toolchain["reason"], file=sys.stderr)
         return 2
     try:
+        seeds = _load_seeds(args.seed_file)
+    except SeedError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    try:
         executable = build(vulnerable=True, force=args.rebuild, target=args.target,
                            sanitize=args.sanitize)
     except BuildError as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
-    coverage = CoverageMap(args.region)
+    try:
+        coverage = CoverageMap(args.region)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     target = PersistentTarget(executable, coverage, timeout=args.timeout)
     engine = Engine(target, seed=args.seed, dictionary=DEFAULT_DICTIONARY)
-    for seed in _load_seeds(args.seed_file) or [b""]:
+    # The corpus read above, rather than a second read of the same files: the first
+    # read was checked and this one would not have been, and reading a file twice to
+    # decide the same thing twice is how a check ends up not covering the path that is
+    # actually used.
+    for seed in seeds or [b""]:
         engine.add_seed(seed)
 
     started = time.time()
@@ -122,7 +149,17 @@ def _run_report(args) -> int:
     if not path.exists():
         print("no findings at %s" % args.findings, file=sys.stderr)
         return 2
-    findings = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        findings = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        # A findings file that cannot be read is a message and not a traceback. The
+        # traceback names the line of the fuzzer's own source that failed, which is the
+        # one place the problem is not.
+        print("cannot read the findings at %s: %s" % (path, exc), file=sys.stderr)
+        return 2
+    if not isinstance(findings, list):
+        print("the findings at %s are not a list of crashes" % path, file=sys.stderr)
+        return 2
     if not findings:
         print("no crashes were found")
         return 0
@@ -177,7 +214,9 @@ def main(argv=None) -> int:
                       help="stop after this many distinct crashes")
     fuzz.add_argument("--seed-file", action="append", metavar="FILE",
                       help="an input to start from; may be repeated")
-    fuzz.add_argument("--region", default="cgf-coverage", help="shared-memory region name")
+    fuzz.add_argument("--region", default=None,
+                      help="shared-memory region name; one fuzzer per name, and a "
+                           "name of its own is chosen when this is not given")
     fuzz.add_argument("--target", default="parser",
                       help="which target to fuzz; one of %s"
                            % ", ".join(available_targets()))

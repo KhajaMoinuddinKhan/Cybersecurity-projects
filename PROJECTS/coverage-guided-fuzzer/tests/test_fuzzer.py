@@ -16,6 +16,7 @@ every input look interesting and the guidance would be a fiction.
 where the attacker put it", and the fixed build must not.
 """
 
+from multiprocessing import shared_memory
 import json
 from pathlib import Path
 
@@ -338,6 +339,61 @@ def test_the_deliberate_pass_tries_the_wanted_values_where_they_are_wanted(cover
     candidates = engine.deterministic(engine.corpus.entries[-1])
     assert any(c[:3] == b"REC" for c in candidates), \
         "the pass never put the wanted byte where the parser reads it"
+
+
+# --- saying so, instead of a traceback ----------------------------------------------
+
+def test_a_seed_that_cannot_be_read_is_a_sentence(tmp_path):
+    """A file that cannot be read is an error and not an empty corpus. The two are easy
+    to confuse from the inside -- an unreadable seed and no seed both leave nothing to
+    start from -- and they are not the same thing: one is the search being asked the
+    interesting question, the other is the search being handed a typo and left to
+    discover the format from nothing while the caller believes it supplied a corpus."""
+    from src.cli import main
+    missing = tmp_path / "nope.bin"
+    assert main(["fuzz", "--seed-file", str(missing), "--budget", "100"]) == 2
+    (tmp_path / "adir").mkdir()
+    assert main(["fuzz", "--seed-file", str(tmp_path / "adir"), "--budget", "100"]) == 2
+
+
+def test_findings_that_cannot_be_read_are_a_sentence(tmp_path):
+    """The traceback names the line of the fuzzer's own source that failed, which is the
+    one place the problem is not."""
+    from src.cli import main
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    assert main(["report", "--findings", str(bad)]) == 2
+    wrong = tmp_path / "wrong.json"
+    wrong.write_text('{"a": 1}', encoding="utf-8")
+    assert main(["report", "--findings", str(wrong)]) == 2
+
+
+def test_a_region_that_is_in_use_is_not_taken(coverage_map):
+    """A name has exactly one owner, and the recovery path used to unlink whatever held
+    it -- which for a running fuzzer is its own coverage map being taken away
+    mid-search. A contended name is now a sentence, and the default is a name of its own
+    so that the ordinary case cannot contend at all."""
+    from src.coverage import CoverageMap
+    held = CoverageMap("cgf-contended-by-test")
+    try:
+        with pytest.raises(RuntimeError) as raised:
+            CoverageMap("cgf-contended-by-test")
+        # The message has to say what to do about it, because a name that is taken is
+        # something the caller can act on.
+        assert "already exists" in str(raised.value)
+        assert "--region" in str(raised.value)
+        # And the region that was there is still there, rather than having been taken.
+        still = shared_memory.SharedMemory(name="cgf-contended-by-test")
+        still.close()
+    finally:
+        held.close()
+    # and the default is unique, so two maps never collide
+    a, b = CoverageMap(), CoverageMap()
+    try:
+        assert a.name != b.name
+    finally:
+        a.close()
+        b.close()
 
 
 # --- the build, and what it rebuilds -------------------------------------------------
