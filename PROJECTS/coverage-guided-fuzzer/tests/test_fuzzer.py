@@ -256,6 +256,45 @@ def test_splicing_combines_two_inputs():
     assert b"Z" in bytes(joined) or len(joined) != len(GOOD)
 
 
+# --- what the comparisons teach it ------------------------------------------------
+
+def test_the_tag_is_recovered_from_the_comparisons(coverage_map, vulnerable):
+    """A parser walks a magic number one byte at a time, so the comparisons name four
+    values and never name the word they make. Joining consecutive matched constants
+    recovers it.
+
+    Three things had to be right and each was wrong in turn. The width is not one --
+    `d[0] != 'R'` is compiled as a four-byte comparison, so a filter for single-byte
+    comparisons matched none of the tag. The run has to be a run of *matches*, which is
+    what separates a byte of the magic number from a null check, both of which are small
+    constants. And the comparisons that are not data have to be ignored rather than
+    treated as a break: the four bytes of a tag are never adjacent in the list, so
+    resetting on anything else meant the run never reached two and the four bytes it had
+    correctly identified were never joined.
+    """
+    engine = Engine(None, seed=4, dictionary=())
+    good = b"RECS" + bytes([1, 1, 4]) + b"ABcd"
+    with PersistentTarget(vulnerable, coverage_map) as target:
+        target.run(good)
+        engine.harvest(target.coverage.comparisons())
+    assert b"RECS" in engine.sequences, \
+        "the tag was not recovered; it learned %r" % sorted(engine.sequences)[:8]
+    for learned in (b"RE", b"REC"):
+        assert learned in engine.sequences
+
+
+def test_the_sequences_reach_the_search(coverage_map, vulnerable):
+    """And they are not merely collected: a sequence is offered to the mutator as a
+    token, so the word is tried whole rather than a byte at a time."""
+    engine = Engine(None, seed=4, dictionary=())
+    with PersistentTarget(vulnerable, coverage_map) as target:
+        target.run(b"RECS" + bytes([1, 1, 4]) + b"ABcd")
+        engine.harvest(target.coverage.comparisons())
+    tokens = tuple(sorted(engine.learned)) + tuple(sorted(engine.sequences))
+    assert any(isinstance(x, bytes) and x == b"RECS" for x in tokens), \
+        "the tag is not among the tokens the mutator is given"
+
+
 # --- the fork server --------------------------------------------------------------
 
 def test_the_fork_server_is_refused_where_there_is_no_fork(coverage_map, vulnerable):

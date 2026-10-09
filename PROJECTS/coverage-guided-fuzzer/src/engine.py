@@ -77,6 +77,14 @@ class Engine:
         # rather than ones it was given. They are the format's magic numbers and field
         # values, learned one comparison at a time.
         self.learned: set = set()
+        # Runs of single-byte constants, joined. A tag is four bytes and the parser
+        # compares them one at a time, so the comparisons name four values and never
+        # name the word they make. Joining consecutive ones recovers the word: the
+        # parser compared 82, then 69, then 67, then 83, and what it was reading was
+        # "RECS". Without this the search learns all four bytes and never assembles
+        # them -- which is what it did, reaching fifteen edges out of a parser whose
+        # whole first check is four bytes it already knew.
+        self.sequences: set = set()
         self.stats = Stats()
         self.verbose = verbose
         self.seed = seed
@@ -129,14 +137,47 @@ class Engine:
         A value that fits in four bytes is data whatever width it was compared at; one
         that does not is a pointer or a hash and is left alone.
         """
-        before = len(self.learned)
+        before = len(self.learned) + len(self.sequences)
         for a, b, width, is_constant in comparisons:
             if not is_constant:
                 continue
             for value in (a, b):
                 if value and value < (1 << 32):
                     self.learned.add(value)
-        return len(self.learned) - before
+
+        # Then the same values read as a sequence, which is what recovers a magic number
+        # from a parser that walks it one byte at a time.
+        #
+        # Two things had to be right for this to work, and neither was.
+        #
+        # The width is not one. `if (d[0] != 'R')` is compiled as a four-byte comparison
+        # of the loaded byte against the constant, because that is the natural width of
+        # the operation, so a filter for single-byte comparisons matched none of them.
+        #
+        # And a run has to be a run of *matches*. A parser comparing a byte it is reading
+        # against a constant produces equal operands when the byte is right and unequal
+        # ones when it is wrong; requiring them equal is what separates the bytes of a
+        # magic number from the checks that merely happen to be narrow, like `size < 5`
+        # and `pointer != NULL`, which are also small constants and are not data.
+        # And the third thing that had to be right, which was the one that mattered: the
+        # comparisons that are not data must be *ignored* rather than treated as a break.
+        # A parser comparing a magic number produces its byte comparisons interleaved with
+        # everything else it is doing -- null checks, size checks, pointer arithmetic --
+        # and the four bytes of a tag are never adjacent in the list. Resetting on
+        # anything else meant the run never reached two, and the four bytes it had
+        # correctly identified were never joined into the word they spell.
+        run = bytearray()
+        for a, b, width, is_constant in comparisons:
+            if not (is_constant and 0 < a < 256):
+                continue                    # not a data comparison: neither joins nor breaks
+            if a == b:
+                run.append(a)
+                if len(run) >= 2:
+                    for take in range(2, min(len(run), 8) + 1):
+                        self.sequences.add(bytes(run[-take:]))
+            else:
+                run = bytearray()           # a data comparison that failed ends the run
+        return len(self.learned) + len(self.sequences) - before
 
     def step(self) -> dict:
         """One execution. Returns what happened, for a caller that wants to watch."""
@@ -149,7 +190,7 @@ class Engine:
         # they say what that input was missing.
         candidate = bytes(self.mutator.generate(
             parent.data, other, comparisons=parent.comparisons,
-            tokens=tuple(sorted(self.learned))))
+            tokens=tuple(sorted(self.learned)) + tuple(sorted(self.sequences))))
 
         outcome = self.target.run(candidate)
         self.stats.executions += 1

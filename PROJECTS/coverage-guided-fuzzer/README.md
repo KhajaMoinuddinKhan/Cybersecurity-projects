@@ -110,6 +110,16 @@ and a run like that takes hundreds of milliseconds to fail where every other inp
 microseconds. The fuzzer kills those and records them as hangs, which is a finding in its
 own right, but it is a real cost.
 
+**How reliably it finds the defect depends on the target, and the difference is worth
+stating.** The interval target is reached from an empty seed in twelve runs out of twelve,
+between the second and sixty-second execution. The parser target is reached in roughly a
+third of runs within a hundred and fifty thousand executions, and missed in the rest. The
+reason is what each one needs: the interval target needs one field past a boundary, while
+the parser needs a magic number, a count, a type and a length all right at the same time,
+and the last of those is never compared against a constant, so there is nothing to learn it
+from. A fuzzer is a search and a search can fail; this one fails on the harder of its two
+targets more often than it should.
+
 **The fork server is slower than the persistent process here, not faster.** That is the
 opposite of the usual result and it is what was measured: a fork and a wait per execution
 costs more than a pipe round trip when the process on the other end of the pipe is already
