@@ -17,6 +17,8 @@ where the attacker put it", and the fixed build must not.
 """
 
 import json
+from pathlib import Path
+
 import pytest
 
 from src.build import (BuildError, available_targets, build, describe,
@@ -355,7 +357,7 @@ def test_the_build_rebuilds_when_the_source_moves(tmp_path):
         "it rebuilt when nothing had changed"
 
     _time.sleep(1.1)
-    source = PROJECT / "target" / "parser.c"
+    source = Path(__file__).resolve().parent.parent / "target" / "parser.c"
     _os.utime(source, None)
     assert build(vulnerable=True, target="parser").stat().st_mtime > built_at, \
         "it did not rebuild after the source moved"
