@@ -27,6 +27,14 @@ from pathlib import Path
 
 from .corpus import Corpus, minimise
 from .mutate import Mutator
+
+# Bounds on a pass whose cost is positions times values. The span is how far into an
+# input it walks -- fields live near the front and a sixty-thousand-byte input would
+# spend the whole budget setting bytes that are not fields -- and the value cap keeps a
+# large harvest from making the pass unaffordable.
+DETERMINISTIC_SPAN = 64
+DETERMINISTIC_VALUES = 64
+DETERMINISTIC_MAX = 8192
 from .target import Target
 
 
@@ -53,6 +61,7 @@ class Stats:
     crashes: int = 0
     corpus_additions: int = 0
     stepping_stones: int = 0
+    deterministic: int = 0
     edges_found: int = 0
     started: float = 0.0
     elapsed: float = 0.0
@@ -85,6 +94,11 @@ class Engine:
         # them -- which is what it did, reaching fifteen edges out of a parser whose
         # whole first check is four bytes it already knew.
         self.sequences: set = set()
+        # The deliberate pass for each newly kept entry, and how far through the corpus
+        # that has been done. Tracked by index: a drained queue is an empty list and not
+        # nothing, so a check for nothing would fire once and never again.
+        self._pending: list = []
+        self._walked = 0
         self.stats = Stats()
         self.verbose = verbose
         self.seed = seed
@@ -179,8 +193,86 @@ class Engine:
                 run = bytearray()           # a data comparison that failed ends the run
         return len(self.learned) + len(self.sequences) - before
 
+    def deterministic(self, entry) -> list:
+        """Every input that puts one wanted value at one position of an entry.
+
+        This is the answer to the thing that made the search unreliable, and the thing is
+        this: a comparison says what value the program wanted and never says where it
+        wanted it. The parser here compares `input[2]` against 'C', and all the search
+        learns is that 67 is wanted somewhere. Placing it somewhere at random is a
+        shotgun, and a magic number is four bytes that have to be in four particular
+        places in a particular order -- so the search knew all four bytes of the tag and
+        reached twelve edges of a parser whose first check is four bytes it already knew.
+
+        Trying each wanted value at each position in turn is what closes that. The
+        position comes from the loop rather than from the comparison, which is enough:
+        the values are few and the positions are bounded, and one of the combinations is
+        the one the program wanted.
+
+        It chains, and that is what makes it work rather than merely run. Setting a
+        position to a value that earns new coverage keeps the result, and the result is
+        walked in its turn, so a tag is built a byte at a time and each byte is a
+        starting point for the next. The first version of this tried only boundary
+        values, which builds a length field and does not build a word; it was measured,
+        found to change nothing, and removed. The values are the point.
+        """
+        wanted = [v for v in sorted(self.learned) if 0 < v < 256][:DETERMINISTIC_VALUES]
+        if not wanted:
+            return []
+        out = []
+        data = bytearray(entry.data)
+        limit = min(len(data), DETERMINISTIC_SPAN)
+        for position in range(limit):
+            for value in wanted:
+                candidate = bytes(data[:position]) + bytes([value]) + bytes(data[position + 1:])
+                if candidate != entry.data:
+                    out.append(candidate)
+        # The learned words go in whole, at each position, which is what puts a tag
+        # somewhere it can be read rather than a byte at a time.
+        for position in range(min(limit, DETERMINISTIC_SPAN)):
+            for word in sorted(self.sequences)[:DETERMINISTIC_VALUES]:
+                if position + len(word) > len(data):
+                    continue
+                candidate = bytes(data[:position]) + word + bytes(data[position + len(word):])
+                if candidate != entry.data:
+                    out.append(candidate)
+        return out
+
     def step(self) -> dict:
         """One execution. Returns what happened, for a caller that wants to watch."""
+        # Anything newly kept is walked before havoc touches it again, so a field is set
+        # deliberately while the rest of the input is still right.
+        if not self._pending and self._walked < len(self.corpus.entries):
+            while self._walked < len(self.corpus.entries):
+                entry = self.corpus.entries[self._walked]
+                self._walked += 1
+                if entry.found_by != "stepping stone" and entry.size <= DETERMINISTIC_MAX:
+                    self._pending = self.deterministic(entry)
+                    if self._pending:
+                        break
+        if self._pending:
+            candidate = self._pending.pop(0)
+            outcome = self.target.run(candidate)
+            self.stats.executions += 1
+            self.stats.deterministic += 1
+            self.stats.elapsed = time.time() - self.stats.started
+            self.harvest(self.target.coverage.comparisons())
+            if outcome.crashed:
+                return {"kind": "crash",
+                        "finding": self._record_crash(outcome, candidate, "deterministic"),
+                        "new_edges": 0}
+            new = self.target.coverage.new_coverage(outcome.coverage)
+            if new:
+                self.stats.edges_found += new
+                self.corpus.add(candidate, edges=outcome.edges, new_edges=new,
+                                comparisons=self.target.coverage.comparisons(),
+                                found_by="deterministic")
+                return {"kind": "coverage", "new_edges": new, "data": candidate}
+            return {"kind": "nothing", "new_edges": 0}
+        return self._havoc_step()
+
+    def _havoc_step(self) -> dict:
+        """One execution of the random stage, after the deliberate one has finished."""
         parent = self.corpus.choose(self.rng)
         parent.executions += 1
         other = None

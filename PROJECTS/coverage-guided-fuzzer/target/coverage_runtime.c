@@ -114,7 +114,19 @@ NOT_INSTRUMENTED void __sanitizer_cov_trace_const_cmp1(uint8_t a, uint8_t b) { r
 NOT_INSTRUMENTED void __sanitizer_cov_trace_const_cmp2(uint16_t a, uint16_t b) { record(a, b, 2, 1); }
 NOT_INSTRUMENTED void __sanitizer_cov_trace_const_cmp4(uint32_t a, uint32_t b) { record(a, b, 4, 1); }
 NOT_INSTRUMENTED void __sanitizer_cov_trace_const_cmp8(uint64_t a, uint64_t b) { record(a, b, 8, 1); }
-NOT_INSTRUMENTED void __sanitizer_cov_trace_switch(uint64_t value, void *cases) {
-    (void)cases;
-    record(value, 0, 8, 1);
+NOT_INSTRUMENTED void __sanitizer_cov_trace_switch(uint64_t value, void *cases_ptr) {
+    /* A switch is a comparison against several constants at once and the constants are
+     * the interesting half. Throwing them away left the parser's type field unlearnable:
+     * `switch (type)` says that a type is one of three values and says which, and all the
+     * fuzzer was told was that the value it had was not zero.
+     *
+     * The layout is the compiler's: the count, the width, then the values. */
+    uint64_t *cases = (uint64_t *)cases_ptr;
+    uint64_t count = cases[0];
+    uint64_t width = cases[1] / 8;
+    if (width == 0) width = 1;
+    record(value, 0, width > 8 ? 8 : width, 1);
+    for (uint64_t i = 0; i < count && i < MAX_COMPARISONS; i++) {
+        record(cases[2 + i], 0, width > 8 ? 8 : width, 1);
+    }
 }

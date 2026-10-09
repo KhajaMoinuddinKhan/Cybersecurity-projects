@@ -295,6 +295,48 @@ def test_the_sequences_reach_the_search(coverage_map, vulnerable):
         "the tag is not among the tokens the mutator is given"
 
 
+def test_the_search_reaches_the_parser_from_every_seed():
+    """The parser needs a magic number, a count, a type and a length right at once, and
+    the search used to reach it in about a third of runs.
+
+    The reason was that a comparison says what value the program wanted and never says
+    where it wanted it, so the wanted bytes were placed at random offsets and a magic
+    number is four bytes in four particular places in a particular order. The deliberate
+    pass tries each wanted value at each position, which is where the position comes
+    from. Four seeds here rather than one, because the whole point is that one seed was
+    what hid this.
+    """
+    exe = build(vulnerable=True, force=True, target="parser")
+    for seed in (1, 3, 7, 99):
+        # A map of its own per seed. A shared one carries the edges an earlier seed
+        # already found, so "new coverage" stops being new and the search stalls for a
+        # reason that has nothing to do with the seed.
+        coverage = CoverageMap("cgf-reliability-%d" % seed)
+        with PersistentTarget(exe, coverage) as target:
+            engine = Engine(target, seed=seed, dictionary=())
+            engine.add_seed(b"")
+            engine.run(budget=150000, time_limit=SEARCH_SECONDS, stop_after_crashes=1)
+        coverage.close()
+        assert engine.findings, \
+            "seed %d did not reach the parser within the budget" % seed
+
+
+def test_the_deliberate_pass_tries_the_wanted_values_where_they_are_wanted(coverage_map,
+                                                                          vulnerable):
+    """It is not enough to try boundary values at each position -- that builds a length
+    field and does not build a word. The values that came from the comparisons are the
+    ones that matter, and they are what the pass walks each position with."""
+    engine = Engine(None, seed=4, dictionary=())
+    with PersistentTarget(vulnerable, coverage_map) as target:
+        target.run(b"RECS" + bytes([1, 1, 4]) + b"ABcd")
+        engine.harvest(target.coverage.comparisons())
+    partial = b"RE\x9cO\x01\x00\x00ABCD"
+    engine.corpus.add(partial, edges=0, new_edges=1)
+    candidates = engine.deterministic(engine.corpus.entries[-1])
+    assert any(c[:3] == b"REC" for c in candidates), \
+        "the pass never put the wanted byte where the parser reads it"
+
+
 # --- the fork server --------------------------------------------------------------
 
 def test_the_fork_server_is_refused_where_there_is_no_fork(coverage_map, vulnerable):

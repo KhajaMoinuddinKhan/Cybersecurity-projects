@@ -110,15 +110,22 @@ and a run like that takes hundreds of milliseconds to fail where every other inp
 microseconds. The fuzzer kills those and records them as hangs, which is a finding in its
 own right, but it is a real cost.
 
-**How reliably it finds the defect depends on the target, and the difference is worth
-stating.** The interval target is reached from an empty seed in twelve runs out of twelve,
-between the second and sixty-second execution. The parser target is reached in roughly a
-third of runs within a hundred and fifty thousand executions, and missed in the rest. The
-reason is what each one needs: the interval target needs one field past a boundary, while
-the parser needs a magic number, a count, a type and a length all right at the same time,
-and the last of those is never compared against a constant, so there is nothing to learn it
-from. A fuzzer is a search and a search can fail; this one fails on the harder of its two
-targets more often than it should.
+**Both targets are reached from an empty seed, in every run.** The interval target between
+the second and two-hundredth execution; the parser between the eighteen-hundredth and the
+eighteen-thousandth, across sixteen seeds each. Getting there took finding the thing that
+made the parser unreliable, and it is worth naming because it is the kind of mistake that
+looks like bad luck.
+
+A comparison says what value a program wanted and never says where it wanted it. The
+parser compares its third byte against `C`, and all the search learned was that 67 was
+wanted somewhere -- so it placed the wanted bytes at random offsets, and a magic number is
+four bytes in four particular places in a particular order. The search knew all four bytes
+of the tag and reached twelve edges of a parser whose first check is four bytes it already
+knew. Trying each wanted value at each position is what closes the gap: the position comes
+from the loop rather than from the comparison, which is enough, because the values are few
+and the positions are bounded. Setting a position to a value that earns new coverage keeps
+the result and walks it in turn, so the tag is built a byte at a time and each byte is a
+starting point for the next.
 
 **The fork server is slower than the persistent process here, not faster.** That is the
 opposite of the usual result and it is what was measured: a fork and a wait per execution
