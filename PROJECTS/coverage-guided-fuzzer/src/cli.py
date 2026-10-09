@@ -22,6 +22,11 @@ from .engine import Engine
 from .exploit import demonstrate
 from .target import PersistentTarget
 
+# Tidying up a reproducer costs a crashing run per attempt, and a crashing run costs a
+# hundred times what an ordinary one does because the process dies and is started again.
+# Bounded by the clock for that reason: the number of attempts is not what varies.
+MINIMISE_SECONDS = 20.0
+
 # The tokens the fuzzer is told about. Four bytes of tag are four bytes a random search
 # will not find; everything past the tag is discovered from coverage.
 DEFAULT_DICTIONARY = (b"RECS",)
@@ -70,7 +75,7 @@ def _run_fuzz(args) -> int:
         stats = engine.run(budget=args.budget, stop_after_crashes=args.max_crashes,
                            on_event=on_event)
         if args.minimise:
-            engine.minimise_findings()
+            engine.minimise_findings(seconds=MINIMISE_SECONDS)
     finally:
         target.close()
 
@@ -108,9 +113,14 @@ def _run_fuzz(args) -> int:
 
 
 def _run_report(args) -> int:
+    # `fuzz --out` writes a directory -- a JSON summary and the crashing inputs beside it
+    # -- and `report` read a file, so the output of one was not the input of the other and
+    # the pair failed on the first thing anybody would try. Both are accepted now.
     path = Path(args.findings)
+    if path.is_dir():
+        path = path / "findings.json"
     if not path.exists():
-        print("no findings file at %s" % path, file=sys.stderr)
+        print("no findings at %s" % args.findings, file=sys.stderr)
         return 2
     findings = json.loads(path.read_text(encoding="utf-8"))
     if not findings:

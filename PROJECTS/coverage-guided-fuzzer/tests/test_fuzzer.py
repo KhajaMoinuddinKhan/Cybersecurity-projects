@@ -16,6 +16,7 @@ every input look interesting and the guidance would be a fiction.
 where the attacker put it", and the fixed build must not.
 """
 
+import json
 import pytest
 
 from src.build import (BuildError, available_targets, build, describe,
@@ -335,6 +336,53 @@ def test_the_deliberate_pass_tries_the_wanted_values_where_they_are_wanted(cover
     candidates = engine.deterministic(engine.corpus.entries[-1])
     assert any(c[:3] == b"REC" for c in candidates), \
         "the pass never put the wanted byte where the parser reads it"
+
+
+# --- tidying up, and reading back --------------------------------------------------
+
+def test_minimising_stops_when_the_clock_does():
+    """A crashing run costs about a hundred milliseconds, because the process dies and is
+    started again, while a run that does not crash costs a tenth of a millisecond. So the
+    cost of tidying a reproducer is set by the clock and not by the number of attempts,
+    and an attempt budget of two thousand was two hundred seconds for one crash.
+
+    Here every trial is slow on purpose, which is what a crashing run is.
+    """
+    import time as _time
+    data = b"A" * 4000 + b"TRIGGER"
+    calls = []
+
+    def slow(candidate):
+        calls.append(1)
+        _time.sleep(0.01)               # what a crashing run costs, exaggerated
+        return b"TRIGGER" in candidate
+
+    start = _time.monotonic()
+    minimise(data, slow, deadline=_time.monotonic() + 0.5)
+    took = _time.monotonic() - start
+    assert took < 3.0, "minimising ran for %.1fs against a half-second deadline" % took
+    assert len(calls) < 400, "it made %d trials against a half-second deadline" % len(calls)
+
+
+def test_minimising_still_shrinks_when_it_has_the_time():
+    """The bound must not be an excuse not to work: given the time, it still shrinks."""
+    data = b"X" * 4096 + b"KEEP" + b"Y" * 4096
+    out = minimise(data, lambda c: b"KEEP" in c)
+    assert b"KEEP" in out
+    assert len(out) < len(data) // 2, "it did not shrink: %d of %d" % (len(out), len(data))
+
+
+def test_the_report_reads_what_the_fuzz_wrote(tmp_path):
+    """`fuzz --out` writes a directory and `report` read a file, so the output of one was
+    not the input of the other. Both shapes are accepted."""
+    out = tmp_path / "findings"
+    out.mkdir()
+    (out / "findings.json").write_text(json.dumps([
+        {"signature": "abcd1234", "status": "access violation", "size": 40,
+         "hex": "41" * 40, "found_at_execution": 7, "edges": 12}]), encoding="utf-8")
+    from src.cli import main
+    for target in (str(out), str(out / "findings.json")):
+        assert main(["report", "--findings", target]) == 0, "report failed on %s" % target
 
 
 # --- the fork server --------------------------------------------------------------

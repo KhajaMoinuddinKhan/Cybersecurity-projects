@@ -339,7 +339,7 @@ class Engine:
         self.stats.elapsed = time.time() - self.stats.started
         return self.stats
 
-    def minimise_findings(self, rounds: int = 3) -> None:
+    def minimise_findings(self, rounds: int = 3, seconds: float = None) -> None:
         """Shrink every crash to the smallest input that still crashes the same way.
 
         A reproducer that is four hundred bytes of noise around a one-byte trigger is
@@ -347,7 +347,13 @@ class Engine:
         "does it still crash the same way", because a smaller input that fails
         differently is a different defect and would be a lie.
         """
+        # A deadline across all of them rather than one each, so the cost of tidying up
+        # does not scale with the number of defects found. The first crash is the one
+        # worth reading; the rest can stay as they are.
+        deadline = None if seconds is None else time.monotonic() + seconds
         for finding in self.findings.values():
+            if deadline is not None and time.monotonic() > deadline:
+                break
             original = finding.signature
 
             def still_same(candidate: bytes) -> bool:
@@ -355,4 +361,5 @@ class Engine:
                 return (outcome.crashed
                         and self.target.coverage.signature(outcome.coverage) == original)
 
-            finding.data = minimise(finding.data, still_same, rounds=rounds)
+            finding.data = minimise(finding.data, still_same, rounds=rounds,
+                                    deadline=deadline)

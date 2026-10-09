@@ -21,6 +21,8 @@ one cannot -- so the rest are kept rather than discarded.
 
 from __future__ import annotations
 
+import time
+
 import random
 from dataclasses import dataclass, field
 
@@ -140,7 +142,21 @@ class Corpus:
         return sum(e.size for e in self.entries)
 
 
-def minimise(data: bytes, reaches, rounds: int = 4) -> bytes:
+# How many single-byte deletions the fine pass may try, and how long the whole thing may
+# take. The coarse pass needs neither bound because it is logarithmic in the length.
+#
+# The attempt count is not sufficient on its own and that was learned the hard way: a
+# crashing run costs about a hundred milliseconds, because the process dies and is started
+# again, while a run that does not crash costs a tenth of a millisecond. Two thousand
+# attempts is therefore two hundred seconds for one crash, and minimising three of them
+# took longer than the search that found them. The bound has to be on the clock, because
+# the thing that varies is the cost of a run and not the number of them.
+MINIMISE_BYTE_BUDGET = 2048
+MINIMISE_SECONDS = 20.0
+
+
+def minimise(data: bytes, reaches, rounds: int = 4,
+             byte_budget: int = MINIMISE_BYTE_BUDGET, deadline: float = None) -> bytes:
     """Shrink an input while it still reaches what it reached.
 
     `reaches` is a callable returning whether a candidate still covers the edges the
@@ -153,8 +169,13 @@ def minimise(data: bytes, reaches, rounds: int = 4) -> bytes:
     if not reaches(best):
         return best
 
+    def out_of_time() -> bool:
+        return deadline is not None and time.monotonic() > deadline
+
     # Halves: try dropping each half, keep any drop that still reaches.
     for _ in range(rounds):
+        if out_of_time():
+            break
         improved = False
         for cut in (2, 3, 4, 8):
             size = max(1, len(best) // cut)
@@ -170,9 +191,20 @@ def minimise(data: bytes, reaches, rounds: int = 4) -> bytes:
             break
 
     # Then single bytes, which catches the one-byte field that was padding.
+    #
+    # Bounded, and it has to be: the cost of this pass is the length of the input, and an
+    # input that is fifty thousand bytes of noise around a one-byte trigger made it fifty
+    # thousand executions -- each one a process that crashes and is started again. The
+    # pass that was supposed to tidy up a reproducer took longer than the search that
+    # found it, by orders of magnitude, and looked exactly like a hang.
+    #
+    # The halves above have already taken the bulk off, so what is left here is tidying.
+    # Tidying stops when the budget does.
     index = 0
-    while index < len(best):
+    spent = 0
+    while index < len(best) and spent < byte_budget and not out_of_time():
         candidate = best[:index] + best[index + 1:]
+        spent += 1
         if candidate and reaches(candidate):
             best = candidate
         else:
