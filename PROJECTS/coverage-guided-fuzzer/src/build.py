@@ -155,8 +155,16 @@ def build(name: str = "target", vulnerable: bool = True, force: bool = False,
         if not source.exists():
             raise BuildError("the target source is missing: %s" % source)
 
+    # Reuse the last build only if it is newer than everything it was built from. A
+    # cache that only asks whether the output exists answers a different question from
+    # the one that matters -- edit the target, run the fuzzer, and the fuzzer quietly
+    # reports on the previous binary. It is the worst shape a stale cache can take,
+    # because everything downstream looks like it is working.
+    sources = instrumented + uninstrumented + [driver]
     if output.exists() and not force:
-        return output
+        built_at = output.stat().st_mtime
+        if all(source.stat().st_mtime <= built_at for source in sources):
+            return output
 
     # No optimisation, and that is a choice rather than a limitation. At -O0 nothing is
     # inlined, so every statement is its own edge and the feedback the fuzzer gets is

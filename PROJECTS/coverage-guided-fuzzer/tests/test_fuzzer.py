@@ -338,6 +338,29 @@ def test_the_deliberate_pass_tries_the_wanted_values_where_they_are_wanted(cover
         "the pass never put the wanted byte where the parser reads it"
 
 
+# --- the build, and what it rebuilds -------------------------------------------------
+
+def test_the_build_rebuilds_when_the_source_moves(tmp_path):
+    """A cache that only asks whether the output exists answers a different question from
+    the one that matters. Edit the target, run the fuzzer, and the fuzzer quietly reports
+    on the previous binary -- and everything downstream looks like it is working, which is
+    the worst shape a stale cache can take.
+    """
+    import os as _os
+    import time as _time
+    exe = build(vulnerable=True, force=True, target="parser")
+    built_at = exe.stat().st_mtime
+
+    assert build(vulnerable=True, target="parser").stat().st_mtime == built_at, \
+        "it rebuilt when nothing had changed"
+
+    _time.sleep(1.1)
+    source = PROJECT / "target" / "parser.c"
+    _os.utime(source, None)
+    assert build(vulnerable=True, target="parser").stat().st_mtime > built_at, \
+        "it did not rebuild after the source moved"
+
+
 # --- tidying up, and reading back --------------------------------------------------
 
 def test_minimising_stops_when_the_clock_does():
