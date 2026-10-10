@@ -83,9 +83,14 @@ jobs:
         run: python -m compileall -q src
       - name: Test Windows WLAN ABI and analyzer behavior
         run: python -m pytest -q tests
-      - name: Enumerate native Windows WLAN interfaces
+      - name: Enumerate native Windows WLAN interfaces when available
         shell: pwsh
         run: |
+          $service = Get-Service -Name WlanSvc -ErrorAction SilentlyContinue
+          if (-not $service -or $service.Status -ne 'Running') {
+            Write-Output "::notice::Skipping live WLAN enumeration because WlanSvc is unavailable on this hosted runner."
+            exit 0
+          }
           $report = python -m src.cli interfaces --json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $report | ConvertFrom-Json | Out-Null
