@@ -16,6 +16,7 @@ jobs:
           - PROJECTS/file-integrity-monitor
           - PROJECTS/keylogger
           - PROJECTS/network-traffic-analyzer
+          - PROJECTS/wifi-security-analyzer
           - PROJECTS/hash-cracker
           - PROJECTS/siem-dashboard
           - PROJECTS/threat-intelligence-aggregator
@@ -64,6 +65,31 @@ jobs:
         run: python -m compileall -q src
       - name: Test SIEM controls and native Windows Event Logs
         run: python -m pytest -q tests
+
+  windows-wlan:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: PROJECTS/wifi-security-analyzer
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install test runner
+        run: python -m pip install --upgrade pytest
+      - name: Compile analyzer source
+        run: python -m compileall -q src
+      - name: Test Windows WLAN ABI and analyzer behavior
+        run: python -m pytest -q tests
+      - name: Enumerate native Windows WLAN interfaces
+        shell: pwsh
+        run: |
+          $report = python -m src.cli interfaces --json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $report | ConvertFrom-Json | Out-Null
+          Write-Output $report
 
   hostile-inputs:
     # Every project is exercised against input shaped the way its code expects, because

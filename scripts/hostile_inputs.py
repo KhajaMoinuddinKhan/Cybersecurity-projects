@@ -49,6 +49,7 @@ ARGUMENT_INPUT = {
     "web-vulnerability-scanner": ("src.scanner", ["", "not a url", "http://" + "a" * 3000]),
     "tls-fingerprint-console": ("src.cli", ["", "not-an-interface", "-1"]),
     "file-integrity-monitor": ("src.fim", ["", "does-not-exist", " " * 100]),
+    "wifi-security-analyzer": ("src.cli", ["", "not-a-command", "--help"]),
 }
 # projects whose entry point needs a server or a database and cannot be driven this way
 NOT_DRIVABLE = {
